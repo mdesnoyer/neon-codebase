@@ -37,7 +37,7 @@ from utils.http import ResponseCode, HTTPVerbs
 import utils.sync
 from utils.options import define, options
 import uuid
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url, ALLOW_EXTRA
 
 _log = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class APIV2Sender(object):
         self.finish()
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
-    def initialize(self):
+    def initialize(self, **kwargs):
         # stripe stuff
         stripe.api_key = options.stripe_api_key
         self.set_header('Content-Type', 'application/json')
@@ -158,29 +158,29 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     pass
 
     def parse_args(self, keep_token=False):
-        args = {}
+        self.args = {}
         if len(self.request.query_arguments) > 0:
             for key, value in self.request.query_arguments.iteritems():
                 if key != 'token' or keep_token:
-                    args[key] = value[0]
+                    self.args[key] = value[0]
         if len(self.request.body) > 0:
             content_type = self.request.headers.get('Content-Type', None)
             # Allow either multipart/form-data or application/json.
             if content_type:
                 if 'multipart/form-data' in content_type:
                     # Update on tornado's body arguments previously parsed.
-                    args.update({k: v[0] for k, v
+                    self.args.update({k: v[0] for k, v
                                  in self.request.body_arguments.items()})
                 elif 'application/json' in content_type:
                     bjson = json.loads(self.request.body)
                     for key, value in bjson.items():
                         if key != 'token' or keep_token:
-                            args[key] = value
+                            self.args[key] = value
             else:
                 raise BadRequestError(
                     'Content-Type must be JSON or multipart/form-data')
 
-        return args
+        return self.args
 
     def set_account_id(request):
         parsed_url = urlparse(request.uri)
@@ -215,7 +215,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
            Raises:
              NotAuthorizedErrors if not allowed
         """
-        request.set_access_token_information()
         if access_level_required is neondata.AccessLevels.NONE:
             raise tornado.gen.Return(True)
 
@@ -555,6 +554,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             internal_only = False
 
         try:
+            self.set_access_token_information()
             yield self.is_authorized(access_level_dict[self.request.method],
                                      self.request.method in account_required_list,
                                      internal_only)
@@ -575,6 +575,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 yield self.check_valid_subscription()
         except KeyError:
             pass
+
+        self.parse_args()
+        self.args['account_id'] = str(self.account_id)
 
     @tornado.gen.coroutine
     def on_finish(self):
@@ -964,4 +967,13 @@ class CustomVoluptuousTypes():
             except sre_constants.error as e:
                 raise Invalid(e.message)
             return query
+        return f
+
+    @staticmethod
+    def TagType():
+        '''Check value is valid TagType'''
+        def f(tag_type):
+            if tag_type in [neondata.TagType.VIDEO, neondata.TagType.GALLERY]:
+                return tag_type
+            raise Invalid('Invalid TagType %s' % tag_type)
         return f

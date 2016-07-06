@@ -26,7 +26,7 @@ import base64
 import binascii
 import cmsdb.cdnhosting
 import code
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import concurrent.futures
 import copy
 import cv.imhash_index
@@ -76,17 +76,24 @@ define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
-define("db_address", default="localhost", type=str, help="postgresql database address")
-define("db_user", default="postgres", type=str, help="postgresql database user")
+define("db_address", default="localhost", type=str, 
+       help="postgresql database address")
+define("db_user", default="postgres", type=str, 
+       help="postgresql database user")
 define("db_password", default="", type=str, help="postgresql database user")
 define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
-define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
+define("max_connection_retries", default=5, type=int, 
+       help="maximum times we should try to connect to db")
 # this basically means how many open pubsubs we can have at once, most other pools will be relatively 
 # small, and not get to this size. see momoko pool for more info. 
-define("max_pool_size", default=250, type=int, help="maximum size the connection pools can be")
-define("max_io_loop_dict_size", default=500, type=int, help="how many io_loop ids we want to store before cleaning")
+define("max_pool_size", default=250, type=int, 
+       help="maximum size the connection pools can be")
+define("max_io_loop_dict_size", default=500, type=int, 
+       help="how many io_loop ids we want to store before cleaning")
+define("connection_wait_time", default=2.5, type=float, 
+       help="how long in seconds to wait for a connection from momoko")
 
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
@@ -113,6 +120,7 @@ statemon.define('postgres_connection_failed', int)
 statemon.define('postgres_listeners', int) 
 statemon.define('postgres_successful_pubsub_callbacks', int) 
 statemon.define('postgres_pools', int) 
+statemon.define('postgres_pool_full', int)
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -305,7 +313,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 try: 
                     pool_connection = yield pool.connect()
                     break 
-                except Exception as e: 
+                except Exception as e:
                     current_db_info = _get_db_information() 
                     if current_db_info != self.db_info: 
                         self.db_info = current_db_info 
@@ -322,10 +330,11 @@ class PostgresDB(tornado.web.RequestHandler):
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a pool of connections')
  
-        @tornado.gen.coroutine 
+        @tornado.gen.coroutine
         def _get_momoko_connection(self, db, is_pool=False, dict_item=None):
             conn = None 
-            num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            num_of_tries = options.max_connection_retries
+
             for i in range(int(num_of_tries)):
                 try:
                     if is_pool:
@@ -334,10 +343,20 @@ class PostgresDB(tornado.web.RequestHandler):
                         # if we don't wait long enough 
                         if len(db.conns.dead) > 0:
                             yield tornado.gen.sleep(
-                                self.reconnect_dead / 1000.0) 
-                        conn = yield db.getconn()
+                                self.reconnect_dead / 1000.0)
+
+                        if db.size >= options.max_pool_size:
+                            statemon.state.increment('postgres_pool_full')
+ 
+                        conn = yield tornado.gen.with_timeout(
+                            datetime.timedelta(
+                                seconds=options.connection_wait_time), 
+                            db.getconn()) 
                     else: 
-                        conn = yield db.connect()
+                        conn = yield tornado.gen.with_timeout(
+                            datetime.timedelta( 
+                                seconds=options.connection_wait_time), 
+                            db.connect()) 
                     break
                 except Exception as e: 
                     current_db_info = _get_db_information()  
@@ -600,6 +619,11 @@ class ThumbnailType(object):
     DEFAULT     = "default" #sent via api request
     CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
 
+class TagType(object):
+    '''All valid Tag types'''
+    VIDEO = 'video'
+    GALLERY = 'gallery'
+
 class ExperimentState:
     '''A class that acts like an enum for the state of the experiment.'''
     UNKNOWN = 'unknown'
@@ -823,8 +847,6 @@ class StoredObject(object):
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
             except ValueError:
                 return None
-        
-
             return obj
 
     @classmethod
@@ -1037,7 +1059,6 @@ class StoredObject(object):
                                   x is not None]
         raise tornado.gen.Return(rv) 
 
-
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1066,7 +1087,6 @@ class StoredObject(object):
                  FROM %s \
                  WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                 ",".join("'{0}'".format(k) for k in keys))
-        
         yield conn.execute(query)
         for key in keys: 
             obj_map[key] = None 
@@ -1239,6 +1259,7 @@ class StoredObject(object):
                     update_objs)
                 yield conn.execute(update_query[0], 
                                    update_query[1]) 
+
             except Exception as e: 
                 _log.error('unknown error when running \
                             update_query %s : %s' % 
@@ -1448,7 +1469,6 @@ class StoredObject(object):
 
         return query
 
-
     @classmethod
     @tornado.gen.coroutine
     def explain_query(cls, query, wc_params, cursor_factory):
@@ -1480,6 +1500,195 @@ class StoredObject(object):
         rv = cursor.fetchall()
         db.return_connection(conn)
         raise tornado.gen.Return(rv)
+
+
+class Searchable(object):
+
+    @staticmethod
+    def _get_search_arguments():
+        raise NotImplementedError('Add list of valid args in subclass')
+
+    @staticmethod
+    def _get_join_part():
+        '''Add join clause if needed
+
+        Example: "JOIN request AS r ON t._data->>'job_id' = r._data->>'job_id'"'''
+        return ''
+
+
+    @staticmethod
+    def _get_where_part(key, args):
+        '''Support custom "query" searches
+
+        This funcion should return a string that implements a custom query in the where
+        for whichever data fields make sense for your subclass.
+
+        For example, Tag having _name uses:
+
+            return "_data->>'name' ~* %s"
+        '''
+        raise NotImplementedError('If using query search, define a query handler')
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def keys(cls, **kwargs):
+        '''Get list of keys that match search parameters in the database.
+
+        Examples:
+            given search parameters {'account_id': 'a'}
+            and a database state [
+              {'_data': {"key": 1, "account_id": 'a', ...}
+              {'_data': {"key": 2, "account_id": 'b', ...}
+              {'_data': {"key": 3, "account_id": 'a', ...}]
+            yields [1, 3]'''
+        kwargs['async'] = True
+        keys_and_times = yield cls.keys_and_times(**kwargs)
+        raise tornado.gen.Return(keys_and_times[0])
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def keys_and_times(cls, **kwargs):
+        '''Like keys but returns min and max time of set, in 3-tuple.'''
+        rows = yield cls._search(**kwargs)
+        keys = [row['_data']['key'] for row in rows]
+        min_time = cls._get_min_time(rows)
+        max_time = cls._get_max_time(rows)
+        raise tornado.gen.Return((
+            keys,
+            min_time,
+            max_time))
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def objects(cls, **kwargs):
+        '''Get list of objects that match search parameters in the database.
+
+        Examples:
+            given search parameters {'account_id': 'a'}
+            and a database state [
+              {'_data': {"key": 1, "account_id": 'a', ...}
+              {'_data': {"key": 2, "account_id": 'b', ...}
+              {'_data': {"key": 3, "account_id": 'a', ...}]
+            yields [
+                <Searchable instance with key 1>,
+                <Searchable instance with key 3>]'''
+        kwargs['async'] = True
+        objects_and_times = yield cls.objects_and_times(**kwargs)
+        raise tornado.gen.Return(objects_and_times[0])
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def objects_and_times(cls, **kwargs):
+        '''Like objects but returns the min / max times of the set, as 3-tuple.'''
+
+        rows = yield cls._search(**kwargs)
+        objects = [cls._create(row['_data']['key'], row) for row in rows]
+        min_time = cls._get_min_time(rows)
+        max_time = cls._get_max_time(rows)
+        raise tornado.gen.Return((
+            objects,
+            min_time,
+            max_time))
+
+    @classmethod
+    def _get_min_time(cls, results):
+        if not results:
+            return None
+        return min([cls._get_time(r) for r in results])
+
+    @classmethod
+    def _get_max_time(cls, results):
+        if not results:
+            return None
+        return max([cls._get_time(r) for r in results])
+
+    @staticmethod
+    def _get_time(result):
+        # need micros here
+        created_time = result['created_time_pg']
+        cc_tt = time.mktime(created_time.timetuple())
+        _time = (cc_tt + created_time.microsecond / 1000000.0)
+        return _time
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _search(cls, **kwargs):
+        '''Builds and executes query to search on arugments.'''
+
+        args = OrderedDict(sorted(kwargs.items()))
+        reverse = args.get('since') == True
+
+        def _validate():
+            args.pop('async', None)
+            allowed = cls._get_search_arguments()
+            if filter(lambda k: k in allowed, args) != args.keys():
+                raise KeyError('Bad argument to search %s' % args)
+        def _query():
+            return 'SELECT {c} FROM {table} AS t {join}{where}{order}{limit}{offset}'.format(
+                c=_columns(),
+                table=cls._baseclass_name().lower(),
+                join=cls._get_join_part(),
+                where=_where(),
+                limit=_limit(),
+                offset=_offset(),
+                order=_order())
+        def _columns():
+            return 't._data, t._type, t.created_time as created_time_pg, t.updated_time as updated_time_pg'
+        def _where():
+            parts = []
+            for key, value in args.items():
+                if key in ['limit', 'offset']:
+                    pass
+                elif key == 'show_hidden':
+                    if value:
+                        pass
+                    else:
+                        parts.append("(t._data->>'hidden')::BOOLEAN IS NOT TRUE")
+                elif key == 'query' and value:
+                    # Check if we need to escape regex specials.
+                    try:
+                        re.compile(args[key])
+                    except sre_constants.error:
+                        args[key] = re.escape(args[key])
+                    parts.append(cls._get_where_part(key, args))
+                elif cls._get_where_part(key) and value:
+                    parts.append(cls._get_where_part(key, args))
+                elif key == 'since' and value:
+                    parts.append('t.created_time > TO_TIMESTAMP(%s)::TIMESTAMP')
+                elif key == 'until' and value:
+                    parts.append('t.created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
+                # Generally just match whole value.
+                elif value:
+                    parts.append("t._data->>'{}' = %s".format(key))
+            return ' WHERE %s' % ' AND '.join(parts) if parts else ''
+        def _limit():
+            return ' LIMIT %d' % kwargs.get('limit') \
+                    if kwargs.get('limit') else ''
+        def _offset():
+            return ' OFFSET %d' % kwargs.get('offset') \
+                    if kwargs.get('offset') else ''
+        def _order():
+            if reverse:
+                return ' ORDER BY t.created_time ASC'
+            else:
+                return ' ORDER BY t.created_time DESC'
+        def _bind():
+            return [v for k, v in args.items() \
+                    if k not in ['limit', 'offset', 'show_hidden'] and v]
+
+        _validate()
+        result = yield cls.execute_select_query(
+            _query(),
+            _bind(),
+            cursor_factory=psycopg2.extras.RealDictCursor)
+        if reverse:
+            result.reverse()
+        raise tornado.gen.Return(result)
+
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -1534,7 +1743,7 @@ class StoredObjectIterator():
                 e = StopIteration()
                 e.value = StopIteration()
                 raise e
-            
+
             # Get more objects
             self.cur_objs = yield tornado.gen.Task(
                 self.obj_class.get_many,
@@ -1545,7 +1754,7 @@ class StoredObjectIterator():
 
         self.items_returned += 1
         raise tornado.gen.Return(self.cur_objs.pop())
-        
+
 
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
@@ -1658,6 +1867,7 @@ class NamespacedStoredObject(StoredObject):
                                [cls.format_key(k) for k in keys], async=True)
         raise tornado.gen.Return(rv) 
 
+
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
 
@@ -1704,8 +1914,409 @@ class DefaultedStoredObject(NamespacedStoredObject):
                     async=True)
         raise tornado.gen.Return(rv) 
 
+
+class MappingObject(object):
+    '''Abstract class that backs an abstract 2-way, many-to-many relation.
+
+    Arguments should match the implementing class's table column names.
+    Ids are enforced by foreign key index to be valid references.
+    Uniqueness is likewise enforced by a unique index on the id pair.
+
+    Assumes the database contains a table with name in cls._table,
+    and that table columns are the values in _keys:
+        e.g., _table = tag_thumbnail and _keys = ['tag_id', 'thumbnail_id']'''
+
+    @staticmethod
+    def _get_table():
+        '''Name of table that sits behind this mappingobject.'''
+        raise NotImplementedError('Override in subclass')
+
+    @staticmethod
+    def _get_keys():
+        '''Names of keys, or columns, that back this mappingobject.'''
+        #  Must match name and order of schema
+        raise NotImplementedError('Override in subclass')
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get(cls, **kwargs):
+        '''Get list of matching values for one key.
+
+        Given exactly one key and value, get list of the keys
+        that exist in the database that are associated to it.
+
+        Yields the empty list if no match found.
+
+        Example: for TagThumbnail, kwargs={'tag_id': 'a'}, yields
+        list of thumbnail ids that are associated with 'a' in the db.'''
+        _, value = cls._get_key_and_value(**kwargs)
+        if not value:
+            raise tornado.gen.Return([])
+        kwargs['async'] = True
+        fetched = yield cls.get_many(**kwargs)
+        raise tornado.gen.Return(fetched[value])
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many(cls, **kwargs):
+        '''Get map of keys to lists of associated keys.
+
+        Given exactly one of the column names and a list of ids
+        return the map of ids to lists of their associated values.
+
+        Example: for TagThumbnail, kwargs={'thumbnail_id': ['a', 'b', 'c'],
+        yields {
+            'a': [thumbnail_id_a1, thumbnail_id_a2, ...]
+            'b': [thumbnail_id_b1, thumbnail_id_b2, ...]
+            'c': [thumbnail_id_c1, thumbnail_id_c2, ...]
+        } provided the thumbnails match on id.
+
+        The map includes the empty list if no match found for a
+        particular key. '''
+        kwargs['async'] = True
+        key, values = cls._get_key_and_values(**kwargs)
+        if not values:
+            raise tornado.gen.Return({})
+        keys = cls._get_keys()
+        other_key = keys[0] if keys[1] == key else keys[1]
+        fetch = []
+        sql, bind = cls._get_select_single_col_tuple(key, values)
+        yield cls._execute(sql, bind, fetch)
+        result = {str(v): [item[other_key] for item in fetch
+                  if item[key] == str(v)] for v in values}
+        raise tornado.gen.Return(result)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def has(cls, **kwargs):
+        '''Given a key-pair, returns True if the pair is associated in the db.
+
+        Example: kwargs={'tag_id': 'tag0', 'thumbnail_id': 'thmb0'} => True
+        if (tag0, thumb0 is in the database.'''
+        cls._validate_scalar_values(**kwargs)
+        kwargs['async'] = True
+        fetched = yield cls.has_many(**kwargs)
+        raise tornado.gen.Return(len(fetched) == 1)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def has_many(cls, **kwargs):
+        '''Given lists of keys, return dictionary of every pair to boolean.
+
+        Takes the cartesian product of the input lists.
+
+        Example: kwargs={
+            'tag_id': ['tag0', 'tag1', ...],
+            'thumbnail_id': ['thumb0', 'thumb1', ...]
+        Yields the map {
+            (tag0, thumb0): bool,
+            (tag0, thumb1): bool,
+            (tag1, thumb0): bool,
+            (tag1, thumb1): bool}'''
+        cls._validate_keys(kwargs.keys())
+        fetch = []
+        sql, bind = cls._get_select_tuple(**kwargs)
+        yield cls._execute(sql, bind, fetch)
+        result = defaultdict(lambda: False)
+        keys = cls._get_keys()
+        for row in fetch:
+            result[(row[keys[0]], row[keys[1]])] = True
+        raise tornado.gen.Return(result)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def save(cls, **kwargs):
+        '''Given a pair of keys, return True if save creates new row.
+
+        Yields False if row already exists. Raise exception on other results.
+        Example: kwargs={'tag_id': 'tag0', 'thumbnail_id': 'thumb0'}'''
+        cls._validate_scalar_values(**kwargs)
+        kwargs['async'] = True
+        rows_changed = yield cls.save_many(**kwargs)
+        raise tornado.gen.Return(rows_changed == 1)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def save_many(cls, **kwargs):
+        '''Allow saving of many mapping relations at once.
+
+        Returns the number of rows created.
+
+        Example: kwargs={
+            'tag_id': ['tag0', 'tag1', ...],
+            'thumbnail_id': ['thumb0', 'thumb1', ...]}
+        Saves all the pairs of items in given lists, i.e., saves
+        [(tag0, thumb0), (tag0, thumb1), (tag1, thumb0), (tag1, thumb1)]'''
+
+        # Validate input
+        cls._validate_keys(kwargs.keys())
+
+        try:
+            pairs = cls._get_unique_pairs(**kwargs)
+        except ValueError:
+            raise tornado.gen.Return(0)
+
+        # Build and execute insert.
+        sql, bind = cls._get_insert_tuple(pairs)
+        cursor = yield cls._execute(sql, bind)
+        raise tornado.gen.Return(cursor.rowcount)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(cls, **kwargs):
+        '''Delete a single mapping object row.
+
+        Example kwargs={
+            'tag_id': 'tag0', 'thumbnail_id': 'thumb0'}
+        Yields True if the row exists and is deleted else False.'''
+        cls._validate_scalar_values(**kwargs)
+        kwargs['async'] = True
+        rows_changed = yield cls.delete_many(**kwargs)
+        raise tornado.gen.Return(rows_changed == 1)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_many(cls, **kwargs):
+        '''Delete many mapping object rows.
+
+        Deletes all pairs made from the product of input lists.
+        Yields the number of rows deleted.'''
+        cls._validate_keys(kwargs.keys())
+        sql, bind = cls._get_delete_tuple(**kwargs)
+        cursor = yield cls._execute(sql, bind)
+        raise tornado.gen.Return(cursor.rowcount)
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def _execute(sql, bind, fetch=None):
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        try:
+            cursor = yield conn.execute(sql, bind)
+            if type(fetch) is list:
+                fetch.extend(cursor.fetchall())
+
+        except Exception as e:
+            statemon.state.increment('postgres_unknown_errors')
+            raise e
+        finally:
+            db.return_connection(conn)
+        raise tornado.gen.Return(cursor)
+
+    @classmethod
+    def _get_key_and_value(cls, **kwargs):
+        args = kwargs.copy()
+        args.pop('async', None)
+        key, values = cls._get_key_and_values(**args)
+        if len(values) is not 1:
+            raise TypeError('Expect exactly one value in get')
+        return key, values[0]
+
+    @classmethod
+    def _get_key_and_values(cls, **kwargs):
+        args = kwargs.copy()
+        args.pop('async', None)
+        if len(args) is not 1:
+            raise TypeError('Expect exactly one key in get kwargs')
+        keys = cls._get_keys()
+        if keys[0] in args.keys():
+            values = args[keys[0]]
+            key = keys[0]
+        elif keys[1] in args.keys():
+            values = args[keys[1]]
+            key = keys[1]
+        else:
+            raise KeyError('Unrecognized key in %s' % args.keys())
+        if type(values) is not list:
+            values = [values]
+        return key, values
+
+    @classmethod
+    def _validate_scalar_values(cls, **kwargs):
+        '''Return true if both values inputs are int/str or lists
+        of one element.'''
+        keys = cls._get_keys()
+        values0 = kwargs[keys[0]]
+        values1 = kwargs[keys[1]]
+        if (
+            (type(values0) in [int, str, unicode]) or
+            (type(values0) is list and len(values0) is 1)
+        ) and (
+            (type(values1) in [int, str, unicode]) or
+            (type(values1) is list and len(values1) is 1)
+        ):
+            return
+        raise ValueError('Called with long list or object')
+
+    @classmethod
+    def _validate_keys(cls, keys):
+        if not len(keys) == 2:
+            raise KeyError('Wrong number of arguments')
+        if not set(keys) == set(cls._get_keys()):
+            raise KeyError('Bad key in save %s' % keys)
+
+    @classmethod
+    def _get_unique_pairs(cls, **kwargs):
+        '''Gather unique pairs of input keys.'''
+        keys = cls._get_keys()
+        left_values = kwargs[keys[0]]
+        right_values = kwargs[keys[1]]
+        if not left_values or not right_values:
+            raise ValueError('Input must be valued')
+        if type(left_values) in [str, unicode, int]:
+            left_values = [left_values]
+        else:
+            left_values = list(set(left_values))
+        if type(right_values) in [str, unicode, int]:
+            right_values = [right_values]
+        else:
+            right_values = list(set(right_values))
+        return set(itertools.product(left_values, right_values))
+
+    @classmethod
+    def _get_select_single_col_tuple(cls, key, values):
+        return (
+            'SELECT * FROM {table} WHERE {key} IN ({values})'.format(
+                table=cls._get_table(),
+                key=key,
+                values=cls._format_values_bind(values)),
+            [str(v) for v in values])
+
+    @classmethod
+    def _get_select_tuple(cls, **kwargs):
+        '''Get select sql string with %s placeholders, and a list of binds.'''
+        keys = cls._get_keys()
+        left_values = kwargs[keys[0]]
+        right_values = kwargs[keys[1]]
+        if type(left_values) is not list:
+            left_values = [left_values]
+        if type(right_values) is not list:
+            right_values = [right_values]
+        return ('''
+            SELECT *
+            FROM {table}
+            WHERE {table}.{key1} IN ({left_values}) AND
+                  {table}.{key2} IN ({right_values});'''.format(
+                table=cls._get_table(),
+                key1=keys[0],
+                key2=keys[1],
+                left_values=cls._format_values_bind(left_values),
+                right_values=cls._format_values_bind(right_values)),
+            [str(v) for v in left_values + right_values])
+
+    @classmethod
+    def _get_insert_tuple(cls, values):
+        '''Get insert sql string with %s placeholders, and a list of binds.'''
+        keys = cls._get_keys()
+        return ('''
+            WITH new_values AS (
+                SELECT *
+                FROM (
+                    VALUES {values}
+                ) AS input_values
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {table}
+                    WHERE input_values.column1 = {table}.{key1} AND
+                          input_values.column2 = {table}.{key2}
+                )
+            )
+            INSERT INTO {table}
+            SELECT * FROM new_values;'''.format(
+                table=cls._get_table(),
+                key1=keys[0],
+                key2=keys[1],
+                values=cls._format_insert_values_bind(values)),
+            [str(v) for v in itertools.chain.from_iterable(values)])
+
+    @classmethod
+    def _get_delete_tuple(cls, **kwargs):
+        keys = cls._get_keys()
+        left_values = kwargs[keys[0]]
+        right_values = kwargs[keys[1]]
+        if type(left_values) is not list:
+            left_values = [left_values]
+        if type(right_values) is not list:
+            right_values = [right_values]
+        return ('''
+            DELETE FROM {table}
+            WHERE {table}.{key1} IN ({left_values}) AND
+                  {table}.{key2} IN ({right_values})'''.format(
+                table=cls._get_table(),
+                key1=keys[0],
+                key2=keys[1],
+                left_values=cls._format_values_bind(left_values),
+                right_values=cls._format_values_bind(right_values)),
+            [str(v) for v in (left_values + right_values)])
+
+    @staticmethod
+    def _format_values_bind(values):
+        '''Given list of values, get valid IN clause expression.
+        E.g., [0, 1, 2, 3] => '%s,%s,%s,%s' '''
+        return ','.join(['%s' for _ in values])
+
+    @staticmethod
+    def _format_insert_values_bind(values):
+        '''Given list of 2-ples, get valid VALUES clause expression.
+        E.g., [(0,0), (0,1), (0,1), (0,2)] =>
+              '(%s,%s),(%s,%s),(%s,%s),(%s,%s)' '''
+        return ','.join(['(%s, %s)' for _ in values])
+
+
+class TagThumbnail(MappingObject):
+    '''TagThumbnail represents an association of a tag to a thumbnail.'''
+
+    @staticmethod
+    def _get_table():
+        return 'tag_thumbnail'
+
+    @staticmethod
+    def _get_keys():
+        return ['tag_id', 'thumbnail_id']
+
+
+class Tag(Searchable, StoredObject):
+    '''Tag is a generic relation associating a set of user objects.'''
+
+    @staticmethod
+    def _get_search_arguments():
+        return [
+            'account_id',
+            'limit',
+            'name',
+            'offset',
+            'query',
+            'since',
+            'show_hidden',
+            'until',
+            'tag_type']
+    @staticmethod
+    def _get_where_part(key, args={}):
+        if key == 'query':
+            return "_data->>'name' ~* %s"
+
+    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
+        tag_id = tag_id or uuid.uuid4().hex
+        self.account_id = account_id
+        self.name = name
+        self.tag_type = tag_type if tag_type in [
+            TagType.VIDEO, TagType.GALLERY] else None
+        super(Tag, self).__init__(tag_id)
+
+    @staticmethod
+    def _baseclass_name():
+        return Tag.__name__
+
+
 class AbstractHashGenerator(object):
-    ' Abstract Hash Generator '
+    '''Abstract Hash Generator'''
 
     @staticmethod
     def _api_hash_function(_input):
@@ -1920,7 +2531,8 @@ class User(NamespacedStoredObject):
                  reset_password_token=None, 
                  secondary_email=None, 
                  cell_phone_number=None, 
-                 send_emails=True):
+                 send_emails=True,
+                 email_verified=None):
  
         super(User, self).__init__(username)
 
@@ -1967,6 +2579,13 @@ class User(NamespacedStoredObject):
 
         # whether or not we should send this user emails 
         self.send_emails = send_emails 
+
+        # If the user has verified their email address.
+        # If set to None, assume the address is verified to support legacy.
+        self.email_verified = email_verified
+
+    def is_email_verified(self):
+        return self.email_verified is not False
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2077,7 +2696,7 @@ class NeonUserAccount(NamespacedStoredObject):
         # the key on the billing site that we need to get information 
         # about this customer 
         self.billing_provider_ref = billing_provider_ref  
-        
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -4972,7 +5591,7 @@ class BillingPlans(StoredObject):
         '''
         return BillingPlans.__name__
 
-class VideoMetadata(StoredObject):
+class VideoMetadata(Searchable, StoredObject):
     '''
     Schema for metadata associated with video which gets stored
     when the video is processed
@@ -4988,7 +5607,7 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None, hidden=None, share_token=None):
+                 publish_date=None, hidden=None, share_token=None, tag_id=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -5023,6 +5642,34 @@ class VideoMetadata(StoredObject):
 
         # If user has deleted this video, flag it deleted.
         self.hidden = hidden
+
+        # For associating to thumbnails via a tag.
+        self.tag_id = tag_id
+
+    @staticmethod
+    def _get_search_arguments():
+        return [
+            'account_id',
+            'limit',
+            'title',
+            'offset',
+            'query',
+            'since',
+            'show_hidden',
+            'until']
+
+    @staticmethod
+    def _get_join_part():
+        return "JOIN request AS r ON t._data->>'job_id' = r._data->>'job_id'"
+
+    @staticmethod
+    def _get_where_part(key, args={}):
+        if key == 'query':
+            return "r._data->>'video_title' ~* %s"
+        if key == 'account_id':
+            if args.get(key):
+                args[key] = '{}%'.format(args[key])
+            return "t._data->>'key' LIKE %s"
 
     def _set_keyname(self):
         '''Key by the account id'''
@@ -5285,143 +5932,6 @@ class VideoMetadata(StoredObject):
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
         yield VideoMetadata.delete(key, async=True)
-
-    @classmethod
-    @tornado.gen.coroutine
-    def search_videos(cls,
-                      account_id=None,
-                      since=None,
-                      until=None,
-                      limit=25,
-                      search_query=None,
-                      skip_deleted=False):
-
-        """Does a basic search over the videometadatas in the DB
-
-           account_id  : if specified will only search videos for that account,
-                         defaults to None, meaning it will search all accounts
-                         for videos
-           since       : if specified will find videos since this date,
-                         defaults to None, meaning it will grab the 25 most
-                         recent videos
-           until       : if specified will find videos until this date,
-                         defaults to None
-           limit       : if specified it limits the search to this many
-                        videos, defaults to 25
-           search_query: A string that, if valid regex, is applied via PG's
-                         ~* (case insensitive posix regex) operator to title and,
-                         if not valid regex, applied as a simple %<search_query>%
-                         expression. For the latter, terms must all appear
-                         and appear in order in a title to match.
-           show_hidden : A boolean. Default true. If false, add criterion to
-                         where clause not to include hidden videos.
-
-
-           Returns : a dictionary of the following
-               videos - the videos that the search returned
-               since_time - this is the time of the most recent video that
-                            the search returned, it's mainly here to prevent
-                            consumers from having to do this
-        """
-        where_clause = ""
-        videos = []
-        since_time = None
-        until_time = None
-        wc_params = []
-        rv = {}
-
-        where_clause = "v._data->'job_id' != 'null'"
-        order_clause = "ORDER BY v.created_time DESC"
-        join_clause = None
-        if since:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " v.created_time > to_timestamp(%s)::timestamp"
-            # switch up the order clause so the page starts at the right spot
-            order_clause = "ORDER BY v.created_time ASC"
-            wc_params.append(since)
-
-        if until:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " v.created_time < to_timestamp(%s)::timestamp"
-            wc_params.append(until)
-
-        if account_id:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " v._data->>'key' LIKE %s"
-            wc_params.append(account_id+'_%')
-
-        if skip_deleted:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " (v._data->>'hidden')::BOOLEAN IS NOT TRUE"
-
-        columns = ["v._data",
-                   "v._type",
-                   "v.created_time AS created_time_pg",
-                   "v.updated_time AS updated_time_pg"]
-
-        # Join request to query searches on video title.
-        if search_query is not None:
-
-            join_clause  = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
-            if where_clause:
-                where_clause += " AND "
-
-            # Assume it's a regex.
-            try:
-                re.compile(search_query)
-            except sre_constants.error:
-                # Escape its special characters if not valid.
-                search_query = re.escape(search_query)
-            where_clause += " r._data->>'video_title' ~* %s"
-            wc_params.append(search_query)
-
-        query = cls.get_select_query(
-            columns,
-            where_clause,
-            join_clause=join_clause,
-            table_name="videometadata AS v",
-            limit_clause="LIMIT %d" % limit,
-            order_clause=order_clause)
-
-        results = yield cls.execute_select_query(
-            query,
-            wc_params=wc_params,
-            cursor_factory=psycopg2.extras.RealDictCursor)
-
-        def _get_time(result):
-            # need micros here
-            created_time = result['created_time_pg']
-            cc_tt = time.mktime(created_time.timetuple())
-            _time = (cc_tt + created_time.microsecond / 1000000.0)
-            return _time
-
-        try:
-            do_reverse = False
-            if since:
-                since_time = _get_time(results[-1])
-                until_time = _get_time(results[0])
-                do_reverse = True
-            else:
-                since_time = _get_time(results[0])
-                until_time = _get_time(results[-1])
-        except (KeyError,IndexError):
-            pass
-
-        for result in results:
-            video = cls._create(result['_data']['key'], result)
-            videos.append(video)
-
-        if do_reverse:
-            videos.reverse()
-
-        rv['videos'] = videos
-        rv['since_time'] = since_time
-        rv['until_time'] = until_time
-        raise tornado.gen.Return(rv)
 
 
 class VideoStatus(DefaultedStoredObject):

@@ -101,7 +101,7 @@ define('model_file', default=None, help='File that contains the model')
 define('model_server_port', default=9000, type=int,
        help="the port currently being used by model servers")
 define('model_autoscale_groups', default='AquilaOnDemand', type=str,
-       help="Comma separated list of autscaling group names")
+       help="Comma separated list of autoscaling group names")
 define('request_concurrency', default=22, type=int,
        help=("the maximum number of concurrent scoring requests to"
              " make at a time. Should be less than or equal to the"
