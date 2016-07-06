@@ -303,7 +303,7 @@ def calc_meta_analysis_from_dataframe(data):
         'random_effects_error_pct' : (1 - np.sqrt(1/w_sum) / standard_error)
     }
     index = None
-    if len(data.index.names) == 0:
+    if len(data.index.names) == 1:
         index = [0]
     return pandas.DataFrame(d, index=index)
 
