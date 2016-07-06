@@ -14,6 +14,7 @@ from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
+import numpy as np
 from requests_toolbelt import MultipartEncoder
 import stripe
 import tornado.gen
@@ -3218,8 +3219,14 @@ class TestThumbnailHandler(TestControllersBase):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
-        neondata.ThumbnailMetadata('testingtid', width=500, urls=['s']).save()
-        self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
+        neondata.ThumbnailMetadata(
+            'testingtid', 
+            width=500, 
+            urls=['s'], 
+            features=np.array([1.0,2.0,3.0,4.0]), 
+            model_version='kfmodel').save()
+        self.test_video = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid1')).save()
         neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid2')).save()
@@ -3414,6 +3421,10 @@ class TestThumbnailHandler(TestControllersBase):
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
+        self.assertEquals('kfmodel_0', rjson['feature_ids'][0])
+        self.assertEquals('kfmodel_1', rjson['feature_ids'][1])
+        self.assertEquals('kfmodel_2', rjson['feature_ids'][2])
+        self.assertEquals('kfmodel_3', rjson['feature_ids'][3])
         self.assertEquals(rjson['width'], 500)
         self.assertEquals(rjson['thumbnail_id'], 'testingtid')
 
@@ -3522,6 +3533,13 @@ class TestThumbnailHandler(TestControllersBase):
         new_tn = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(new_tn['enabled'],old_tn['enabled'])
+
+    @tornado.testing.gen_test
+    def test_thumbnail_update_no_params(self):
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
 
     @tornado.testing.gen_test
     def test_delete_thumbnail_not_implemented(self):

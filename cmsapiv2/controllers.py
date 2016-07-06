@@ -1246,7 +1246,8 @@ class ThumbnailHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions']
+                'type', 'external_ref', 'created', 'updated', 'renditions',
+                'feature_ids']
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1255,7 +1256,6 @@ class ThumbnailHandler(APIV2Handler):
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
-
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
@@ -1270,6 +1270,8 @@ class ThumbnailHandler(APIV2Handler):
         elif field == 'renditions':
             urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
             retval = ThumbnailHelper.renditions_of(urls)
+        elif field == 'feature_ids': 
+            retval = ThumbnailHelper.get_feature_ids(obj) 
         else:
             raise BadRequestError('invalid field %s' % field)
 
@@ -1310,6 +1312,20 @@ class ThumbnailHelper(object):
             if not rv.get(tid):
                 rv[tid] = []
         raise tornado.gen.Return(rv)
+
+    @staticmethod 
+    def get_feature_ids(obj): 
+        # TODO order these by importance 
+        # load in pkl file, and multiply, order by index
+        if not obj.features: 
+            return None 
+        if not obj.model_version: 
+            return None
+        model_name = obj.model_version
+        rv = [ neondata.Feature.create_key(
+            model_name, i[0]) for i, x in np.ndenumerate(obj.features) ]
+        import pdb; pdb.set_trace() 
+        return rv 
 
     @staticmethod
     def renditions_of(urls_obj):

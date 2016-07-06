@@ -791,7 +791,11 @@ class StoredObject(object):
 
     def to_json(self):
         '''Returns a json version of the object'''
-        return json.dumps(self, default=lambda o: o.to_dict())
+        def json_dumper(obj): 
+            if isinstance(obj, numpy.ndarray): 
+                return obj.tolist() 
+            return obj.to_dict()
+        return json.dumps(self, default=json_dumper)
     
     def get_json_data(self):
         '''
