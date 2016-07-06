@@ -179,9 +179,11 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     nwins = sig_data[(sig_data['extra_conversions'] > 0) & 
                      (sig_data['p_value'] > 0.95)].set_index(index_names)
     
-    agg_stats = dict([('total_neon_winners_%i' % i, 
-                       count_unique_index(nwins[
-                           nwins['rank'] <= i])) for i in range(5)])
+    total_neon_winners = dict([(i, count_unique_index(
+        nwins[nwins['rank'] <= i])) for i in range(5)])
+
+    meta_analysis = dict([(i, calc_meta_analysis_from_dataframe(
+        all_data[all_data['rank'] == i])) for i in range(5)])
 
     lots_of_clicks = all_data.reset_index().groupby(
         all_data.index.names).filter(
@@ -194,33 +196,36 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     #    np.sum(x['conv']) < 50)
 
     sig_data = sig_data.set_index(data.index.names)
-    agg_stats.update(
-        {'significant_video_count': count_unique_index(sig_data, 'video_id'),
-         'total_video_count' : count_unique_index(all_data, 'video_id'),
+    agg_stats = {
+        'significant_video_count': count_unique_index(sig_data, 'video_id'),
+        'total_video_count' : count_unique_index(all_data, 'video_id'),
+        'base_winners' : count_unique_index(base_winners, 'video_id'),
+        'total_neon_winners' : total_neon_winners,
          'all_lift' : calc_lift_from_dataframe(all_data),
          'significant lift': calc_lift_from_dataframe(sig_data),
          'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
          'shutdown_bad_thumbs' : calc_lift_from_dataframe(
              all_data, 'xtra_conv_with_clamp'),
-         'cap_runaways' : calc_lift_from_dataframe(cap_runaways)})
+         'cap_runaways' : calc_lift_from_dataframe(cap_runaways),
+         'meta_analysis' : meta_analysis}
     
     
     index=None
-    if len(data.index.names) == 1:
-        index = [0]
+    #if len(data.index.names) == 1:
+    #    index = [0]
 
     return pandas.DataFrame(agg_stats, index=index)
 
 def count_unique_index(data, level='video_id'):
     groups = [x for x in data.index.names if x not in level]
     if len(groups) == 0:
-        return len(set(data.index))
+        return pandas.Series(len(set(data.index)))
     return data.reset_index().groupby(groups).apply(
         lambda x: len(set(x[level])))
 
 def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
     if len(data) == 0:
-        return float('nan')
+        return pandas.Series(float('nan'))
     #base_sums = data.groupby(['is_base']).sum()
     slices = [x for x in data.index.names if x != 'video_id']
     data = data.reset_index()
@@ -242,7 +247,61 @@ def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
     lift = type_sums[xtra_conv_col]['neon'] / (all_sums['tot_conv'] - 
            type_sums[xtra_conv_col]['neon'])
 
-    return lift
+    return pandas.Series(lift)
+
+def calc_meta_analysis_from_dataframe(data):
+    '''Calculate the meta analysis from a dataframe
+
+    Using random effects model assumption on the relative risk (or
+    ratio of CTRs) and meta analysis math from:
+    http://www.meta-analysis.com/downloads/Intro_Models.pdf
+
+    And Relative Risk approximations from:
+    http://en.wikipedia.org/wiki/Relative_risk
+
+    This is the DerSimonian and Laird method.
+
+    '''
+    data = data[(data['conv_base'] > 0) & (data['conv_thumb'] > 0) &
+                (data['type'] == 'neon')]
+
+    n_neon = data['conv_thumb'] / data['ctr_thumb']
+    n_base = data['conv_base'] / data['ctr_base']
+
+    log_ratio = (data['ctr_thumb'] / data['ctr_base']).apply(np.log)
+    var_log_ratio = ((1-data['ctr_thumb']) / (data['ctr_thumb'] * n_neon) +
+                     (1-data['ctr_base']) / (data['ctr_base'] * n_base))
+
+    w = 1 / var_log_ratio
+    w_sum = np.sum(w)
+
+    q = w.dot(np.square(log_ratio)) - w.dot(log_ratio).apply(np.square) / w_sum
+    c = w_sum - np.sum(np.square(w)) / w_sum
+
+    t_2 = max(0, (q - len(data) + 1) / c)
+    w_star = 1 / (var_log_ratio + t_2)
+
+    mean_log_ratio_star = w_star.dot(log_ratio) / np.sum(w_star)
+    var_log_ratio_star = 1 / np.sum(w_star)
+    standard_error = np.sqrt(var_log_ratio_star)
+
+    low = np.exp(mean_log_ratio_star - 1.96*standard_error)
+    up = np.exp(mean_log_ratio_star + 1.96*standard_error)
+    mn = np.exp(mean_log_ratio_star)
+
+    p_value = scipy.stats.norm.sf(mean_log_ratio_star / standard_error) * 2 
+
+    d = {
+        'mean' : mn-1,
+        'p_value' : p_value,
+        'low_95' : low - 1,
+        'high_95' : up - 1,
+        'random_effects_error_pct' : (1 - np.sqrt(1/w_sum) / standard_error)
+    }
+    if len(data.index.names) > 1:
+        # The is a sub split, so make this a dataframe
+        return pandas.DataFrame(d).stack()
+    return pandas.Series(d)
 
 def calc_thumb_stats(base_impressions, base_conversions,
                      thumb_impressions, thumb_conversions):
