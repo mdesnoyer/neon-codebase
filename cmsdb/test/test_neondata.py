@@ -2681,7 +2681,7 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
         key = neondata.Feature.create_key('kfmodel', 1) 
         yield neondata.Feature(key).save(async=True)
         feature = yield neondata.Feature.get(key, async=True)
-        self.assertEquals(feature.index, '1') 
+        self.assertEquals(feature.index, 1) 
         self.assertEquals(feature.name, 'unknown') 
         self.assertEquals(feature.model_name, 'kfmodel')
  
@@ -2692,7 +2692,7 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
         key = neondata.Feature.create_key('kfmodel', 1) 
         yield neondata.Feature(key).save(async=True)
         feature = yield neondata.Feature.modify(key, _modify, async=True)
-        self.assertEquals(feature.index, '1') 
+        self.assertEquals(feature.index, 1) 
         self.assertEquals(feature.name, 'newname') 
         self.assertEquals(feature.model_name, 'kfmodel')
 
@@ -2702,7 +2702,20 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
         yield neondata.Feature(key, name='oldname').save(async=True)
         yield neondata.Feature.delete(key, async=True)
         feature = yield neondata.Feature.get(key, async=True)
-        self.assertEquals(feature.name, 'unknown') 
+        self.assertEquals(feature.name, 'unknown')
+ 
+    @tornado.testing.gen_test 
+    def test_get_by_model_name(self): 
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2) 
+        yield neondata.Feature(key).save(async=True)
+
+        fs = yield neondata.Feature.get_by_model_name('kfmodel', async=True)
+        f1 = fs[0]
+        f2 = fs[1] 
+        self.assertEquals(f1.index, 1)  
+        self.assertEquals(f2.index, 2)  
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

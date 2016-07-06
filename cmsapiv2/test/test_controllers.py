@@ -6930,6 +6930,90 @@ class TestEmailHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         self.assertRegexpMatches(rjson['message'],
             'user does not')
+
+class TestFeatureHandler(TestControllersBase):
+    def setUp(self):
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
+        self.acct.save()
+        user = neondata.User('fenger@neon-lab.com',
+            access_level=neondata.AccessLevels.GLOBAL_ADMIN)
+        user.save()
+        self.account_id = self.acct.neon_api_key
+
+        # Mock out the token decoding
+        self.token_decode_patcher = patch(
+            'cmsapiv2.apiv2.JWTHelper.decode_token')
+        self.token_decode_mock = self.token_decode_patcher.start()
+        self.token_decode_mock.return_value = {
+            'username' : 'fenger@neon-lab.com'
+            }
+        self.http_mocker = patch('utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+              self.http_mocker.start())
+        super(TestFeatureHandler, self).setUp()
+
+    def tearDown(self):
+        self.http_mocker.stop()
+        self.token_decode_patcher.stop()
+        super(TestFeatureHandler, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_one_or_other_required(self):
+        url = '/api/v2/feature' 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(
+                self.get_url(url))
+	    self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test
+    def test_get_by_model_name(self):
+        key = neondata.Feature.create_key('kfmodel', 1)
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2)
+        yield neondata.Feature(key).save(async=True)
+ 
+        url = '/api/v2/feature?model_name=%s' % 'kfmodel' 
+        response = yield self.http_client.fetch(
+            self.get_url(url))
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body) 
+        self.assertEquals(rjson['feature_count'], 2)
+        f1 = rjson['features'][0]  
+        self.assertEquals(f1['index'], 1) 
+        self.assertEquals(f1['name'], 'unknown') 
+        self.assertEquals(f1['variance_explained'], 0.0) 
+        self.assertEquals(f1['model_name'], 'kfmodel')
+ 
+        f2 = rjson['features'][1]  
+        self.assertEquals(f2['index'], 2) 
+        self.assertEquals(f2['name'], 'unknown') 
+        self.assertEquals(f2['variance_explained'], 0.0) 
+        self.assertEquals(f2['model_name'], 'kfmodel')
+ 
+    @tornado.testing.gen_test
+    def test_get_by_key(self):
+        key = neondata.Feature.create_key('kfmodel', 1)
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2)
+        yield neondata.Feature(key).save(async=True)
+        url = '/api/v2/feature?key=%s' % 'kfmodel_1,kfmodel_2' 
+        response = yield self.http_client.fetch(
+            self.get_url(url))
+
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['feature_count'], 2)
+        f1 = rjson['features'][0]  
+        self.assertEquals(f1['index'], 2) 
+        self.assertEquals(f1['name'], 'unknown') 
+        self.assertEquals(f1['variance_explained'], 0.0) 
+        self.assertEquals(f1['model_name'], 'kfmodel')
+ 
+        f2 = rjson['features'][1]  
+        self.assertEquals(f2['index'], 1) 
+        self.assertEquals(f2['name'], 'unknown') 
+        self.assertEquals(f2['variance_explained'], 0.0) 
+        self.assertEquals(f2['model_name'], 'kfmodel')
  
 if __name__ == "__main__" :
     utils.neon.InitNeon()

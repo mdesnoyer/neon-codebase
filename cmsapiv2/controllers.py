@@ -3043,19 +3043,53 @@ class FeatureHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-            'id' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
             'model_name' : All(Coerce(str), Length(min=1, max=512)), 
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
-        args = schema(self.parse_args())
-
+        args = self.parse_args()
+        schema(args)
         model_name = args.get('model_name', None)
-        feature_ids = args.get('id', None)
-        if (model_name is None) == (feature_id is None):
-            raise Invalid('Exactly one of model_name or feature_id is required')
+        keys = args.get('key', None)
 
-        # TODO implement this, once the data structure is defined for 
-        # it... 
+        if (model_name is None) == (keys is None):
+            raise Invalid('Exactly one of model_name or key is required')
+
+        fields = args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
+        
+        # if keys is set
+        if keys: 
+            keys = set(keys.split(',')) 
+            features = yield neondata.Feature.get_many(keys, async=True)
+        else: 
+            features = yield neondata.Feature.get_by_model_name(
+                model_name, 
+                async=True)
+     
+        res_list = yield [self.db2api(f, fields=fields) for f in features] 
+        
+        rv = { 'features' : res_list, 
+               'feature_count' : len(res_list) }
+ 
+        self.success(rv)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['key', 'model_name', 'created', 'updated', 
+                'name', 'variance_explained', 'index'] 
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['key', 'model_name', 'created', 'updated', 
+                'name', 'variance_explained', 'index'] 
+
+    @classmethod
+    def get_access_levels(cls):
+        return {
+                 HTTPVerbs.GET : neondata.AccessLevels.NONE
+               }
 
 '''*********************************************************************
 Endpoints

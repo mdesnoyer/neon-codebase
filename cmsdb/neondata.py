@@ -2879,7 +2879,7 @@ class Feature(DefaultedStoredObject):
         self.model_name = splits[0] 
 
         # where in the feature vector this is at 
-        self.index = splits[1] 
+        self.index = int(splits[1])
 
         # the 'human' name of the model 
         self.name = name 
@@ -2897,6 +2897,28 @@ class Feature(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return Feature.__name__
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_by_model_name(cls, model_name): 
+        rv = []
+
+        results = yield cls.execute_select_query(cls.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'model_name' = %s",
+                        table_name='feature'),
+                    wc_params=[model_name],
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        for result in results:
+            obj = cls._create(result['_data']['key'], result)
+            rv.append(obj)
+
+        raise tornado.gen.Return(rv)
 
 class CDNHostingMetadataList(DefaultedStoredObject):
     '''A list of CDNHostingMetadata objects.
