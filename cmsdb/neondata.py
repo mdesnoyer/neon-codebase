@@ -1620,13 +1620,13 @@ class Searchable(object):
         '''Builds and executes query to search on arugments.'''
 
         args = OrderedDict(sorted(kwargs.items()))
+        reverse = args.get('since') == True
 
         def _validate():
             args.pop('async', None)
             allowed = cls._get_search_arguments()
             if filter(lambda k: k in allowed, args) != args.keys():
                 raise KeyError('Bad argument to search %s' % args)
-
         def _query():
             return 'SELECT {c} FROM {table} AS t {join}{where}{order}{limit}{offset}'.format(
                 c=_columns(),
@@ -1665,7 +1665,6 @@ class Searchable(object):
                 elif value:
                     parts.append("t._data->>'{}' = %s".format(key))
             return ' WHERE %s' % ' AND '.join(parts) if parts else ''
-
         def _limit():
             return ' LIMIT %d' % kwargs.get('limit') \
                     if kwargs.get('limit') else ''
@@ -1673,7 +1672,10 @@ class Searchable(object):
             return ' OFFSET %d' % kwargs.get('offset') \
                     if kwargs.get('offset') else ''
         def _order():
-            return ' ORDER BY t.created_time DESC'
+            if reverse:
+                return ' ORDER BY t.created_time ASC'
+            else:
+                return ' ORDER BY t.created_time DESC'
         def _bind():
             return [v for k, v in args.items() \
                     if k not in ['limit', 'offset', 'show_hidden'] and v]
@@ -1683,6 +1685,8 @@ class Searchable(object):
             _query(),
             _bind(),
             cursor_factory=psycopg2.extras.RealDictCursor)
+        if reverse:
+            result.reverse()
         raise tornado.gen.Return(result)
 
 
