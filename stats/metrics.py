@@ -202,7 +202,7 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     agg_stats = {
         ('significant_video_count', None): count_unique_index(sig_data),
         ('total_video_count', None) : count_unique_index(all_data, 'video_id'),
-        ('base_winners', None) : count_unique_index(base_winners, 'video_id')
+        ('base_winners', None) : count_unique_index(base_winners, 'video_id'),
          ('all_lift', None) : calc_lift_from_dataframe(all_data),
          ('significant lift', None): calc_lift_from_dataframe(sig_data),
          ('lots_clicks_lift', None) : calc_lift_from_dataframe(lots_of_clicks),
