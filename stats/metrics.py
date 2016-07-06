@@ -275,7 +275,7 @@ def calc_meta_analysis_from_dataframe(data):
     w = 1 / var_log_ratio
     w_sum = np.sum(w)
 
-    q = w.dot(np.square(log_ratio)) - w.dot(log_ratio).apply(np.square) / w_sum
+    q = w.dot(np.square(log_ratio)) - ((w.dot(log_ratio) ** 2) / w_sum)
     c = w_sum - np.sum(np.square(w)) / w_sum
 
     t_2 = max(0, (q - len(data) + 1) / c)
