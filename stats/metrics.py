@@ -181,9 +181,11 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     
     total_neon_winners = dict([(i, count_unique_index(
         nwins[nwins['rank'] <= i])) for i in range(5)])
+    total_neon_winners = pandas.DataFrame(total_neon_winners).unstack()
 
     meta_analysis = dict([(i, calc_meta_analysis_from_dataframe(
         all_data[all_data['rank'] == i])) for i in range(5)])
+    meta_analysis = pandas.DataFrame(meta_analysis).unstack()
 
     lots_of_clicks = all_data.reset_index().groupby(
         all_data.index.names).filter(
@@ -289,11 +291,11 @@ def calc_meta_analysis_from_dataframe(data):
     up = np.exp(mean_log_ratio_star + 1.96*standard_error)
     mn = np.exp(mean_log_ratio_star)
 
-    p_value = scipy.stats.norm.sf(mean_log_ratio_star / standard_error) * 2 
+    p_value = (1-scipy.stats.norm.sf(mean_log_ratio_star / standard_error)) * 2 
 
     d = {
-        'mean' : mn-1,
-        'p_value' : p_value,
+        'mean' : mn - 1,
+        'p_value' : 1 - p_value,
         'low_95' : low - 1,
         'high_95' : up - 1,
         'random_effects_error_pct' : (1 - np.sqrt(1/w_sum) / standard_error)
