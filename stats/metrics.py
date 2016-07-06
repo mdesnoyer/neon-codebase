@@ -179,13 +179,14 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     nwins = sig_data[(sig_data['extra_conversions'] > 0) & 
                      (sig_data['p_value'] > 0.95)].set_index(index_names)
     
-    total_neon_winners = dict([(i, count_unique_index(
+    total_neon_winners = dict([(('total_neon_winners', i), count_unique_index(
         nwins[nwins['rank'] <= i])) for i in range(5)])
-    total_neon_winners = pandas.DataFrame(total_neon_winners).unstack()
 
-    meta_analysis = dict([(i, calc_meta_analysis_from_dataframe(
+    meta_analysis = dict([('random_effects_%i' % i, calc_meta_analysis_from_dataframe(
         all_data[all_data['rank'] == i])) for i in range(5)])
-    meta_analysis = pandas.DataFrame(meta_analysis).unstack()
+    meta_analysis = pandas.concat([calc_meta_analysis_from_dataframe(
+        all_data[all_data['rank'] == i]) for i in range(5)],
+        keys=['random_effects_%i' % i for i in range(5)], axis=1)
 
     lots_of_clicks = all_data.reset_index().groupby(
         all_data.index.names).filter(
@@ -199,17 +200,18 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
 
     sig_data = sig_data.set_index(data.index.names)
     agg_stats = {
-        'significant_video_count': count_unique_index(sig_data, 'video_id'),
-        'total_video_count' : count_unique_index(all_data, 'video_id'),
-        'base_winners' : count_unique_index(base_winners, 'video_id'),
-        'total_neon_winners' : total_neon_winners,
-         'all_lift' : calc_lift_from_dataframe(all_data),
-         'significant lift': calc_lift_from_dataframe(sig_data),
-         'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
-         'shutdown_bad_thumbs' : calc_lift_from_dataframe(
+        ('significant_video_count', None): count_unique_index(sig_data),
+        ('total_video_count', None) : count_unique_index(all_data, 'video_id'),
+        ('base_winners', None) : count_unique_index(base_winners, 'video_id')
+         ('all_lift', None) : calc_lift_from_dataframe(all_data),
+         ('significant lift', None): calc_lift_from_dataframe(sig_data),
+         ('lots_clicks_lift', None) : calc_lift_from_dataframe(lots_of_clicks),
+         ('shutdown_bad_thumbs', None) : calc_lift_from_dataframe(
              all_data, 'xtra_conv_with_clamp'),
-         'cap_runaways' : calc_lift_from_dataframe(cap_runaways),
-         'meta_analysis' : meta_analysis}
+         ('cap_runaways', None) : calc_lift_from_dataframe(cap_runaways)}
+    agg_data.update(total_neon_winners)
+    agg_data = agg_data.concat([pandas.DataFrame(agg_data), meta_analysis],
+                               axis=1)
     
     
     index=None
@@ -300,10 +302,10 @@ def calc_meta_analysis_from_dataframe(data):
         'high_95' : up - 1,
         'random_effects_error_pct' : (1 - np.sqrt(1/w_sum) / standard_error)
     }
-    if len(data.index.names) > 1:
-        # The is a sub split, so make this a dataframe
-        return pandas.DataFrame(d).stack()
-    return pandas.Series(d)
+    index = None
+    if len(data.index.names) == 0:
+        index = [0]
+    return pandas.DataFrame(d, index=index)
 
 def calc_thumb_stats(base_impressions, base_conversions,
                      thumb_impressions, thumb_conversions):
