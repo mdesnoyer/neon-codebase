@@ -1759,26 +1759,32 @@ class TestPostgresDBConnections(NeonDbTestCase):
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         self.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
-    @tornado.testing.gen_test(timeout=20.0)
+    def tearDown(self):
+        super(TestPostgresDBConnections, self).tearDown()
+        self.postgresql.stop()
+
+    @tornado.testing.gen_test
     def test_retry_connection_fails(self):
+        ps = 'momoko.Connection.connect'
         exception_mocker = patch('momoko.Connection.connect')
         exception_mock = self._future_wrap_mock(exception_mocker.start())
         exception_mock.side_effect = psycopg2.OperationalError('blah blah')
-
         pg1 = neondata.PostgresDB()
-        with self.assertRaises(Exception):
-            yield pg1.get_connection()
+        with options._set_bounded('cmsdb.neondata.max_connection_retries', 1):
+            with self.assertRaises(Exception):
+                yield pg1.get_connection()
         exception_mocker.stop()
 
-    @tornado.testing.gen_test(timeout=20.0)
+    @tornado.testing.gen_test
     def test_retry_connection_fails_then_success(self):
         exception_mocker = patch('momoko.Connection.connect')
         exception_mock = self._future_wrap_mock(exception_mocker.start())
         exception_mock.side_effect = psycopg2.OperationalError('blah blah')
 
         pg1 = neondata.PostgresDB()
-        with self.assertRaises(Exception):
-            yield pg1.get_connection()
+        with options._set_bounded('cmsdb.neondata.max_connection_retries', 1): 
+            with self.assertRaises(Exception):
+                yield pg1.get_connection()
         exception_mocker.stop()
         conn = yield pg1.get_connection()
         self.assertTrue("dbname=test" in conn.dsn)
@@ -1879,11 +1885,35 @@ class TestPostgresDB(NeonDbTestCase):
         # this would previously hang, and die out because momoko would
         # not return a connection
         conn3 = yield pg.get_connection()
-
         self.assertEquals(len(pool.conns.dead), 0)
 
+    @tornado.testing.gen_test
+    def test_pool_momoko_starving(self):
+        with options._set_bounded('cmsdb.neondata.max_pool_size', 3),\
+         options._set_bounded('cmsdb.neondata.max_connection_retries', 1):
+            pg = neondata.PostgresDB()
+            # fill up the pool, with a flurry of connections
+            yield pg.get_connection()
+            yield pg.get_connection()
+            rt1 = yield pg.get_connection()
+            rt2 = yield pg.get_connection()
+            with self.assertRaises(Exception):
+                with self.assertLogExists(logging.ERROR, 'Retrying PG'):
+                    cwt = options.get('cmsdb.neondata.connection_wait_time')
+                    with options._set_bounded(
+                        'cmsdb.neondata.connection_wait_time', 0.1):
+                        yield pg.get_connection()
 
-class TestPostgresPubSub(NeonDbTestCase):
+        # now return the connections and make sure we can get more
+        pg.return_connection(rt1)
+        pg.return_connection(rt2)
+        new_conn = yield pg.get_connection()
+        self.assertEquals(type(new_conn), momoko.connection.Connection)
+
+class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestPostgresPubSub, self).setUp()
+
     def tearDown(self):
         neondata.PostgresPubSub.instance = None
         super(TestPostgresPubSub, self).tearDown()

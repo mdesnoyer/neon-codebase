@@ -37,7 +37,7 @@ from utils.http import ResponseCode, HTTPVerbs
 import utils.sync
 from utils.options import define, options
 import uuid
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url, ALLOW_EXTRA
 
 _log = logging.getLogger(__name__)
 
@@ -215,7 +215,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
            Raises:
              NotAuthorizedErrors if not allowed
         """
-        request.set_access_token_information()
         if access_level_required is neondata.AccessLevels.NONE:
             raise tornado.gen.Return(True)
 
@@ -555,6 +554,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             internal_only = False
 
         try:
+            self.set_access_token_information()
             yield self.is_authorized(access_level_dict[self.request.method],
                                      self.request.method in account_required_list,
                                      internal_only)
