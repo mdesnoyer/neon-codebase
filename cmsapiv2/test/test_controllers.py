@@ -2144,11 +2144,11 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(job.api_param, 5)
 
         # Check for a tag.
-        tag_id = rjson['video']['tag_id']
-        self.assertIsNotNone(tag_id)
-        tag = neondata.Tag.get(tag_id)
+        tag_ids = rjson['video']['tag_ids']
+        self.assertTrue(tag_ids)
+        tag = neondata.Tag.get(tag_ids[0])
         self.assertEqual(tag.account_id, self.account_id_api_key)
-        self.assertEqual(tag.tag_type, 'video')
+        self.assertEqual(tag.tag_type, neondata.TagType.VIDEO)
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
@@ -2745,12 +2745,12 @@ class TestVideoHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url))
 
         rjson = json.loads(response.body)
-        self.assertEquals(response.code, 200)
-        self.assertEquals({
+        self.assertEqual(response.code, 200)
+        self.assertEqual({
                 'job_id': 'job1',
                 'publish_date': '2015-06-10',
                 'state': neondata.ExternalRequestState.PROCESSED,
-                'tag_id': None,
+                'tag_ids': [],
                 'testing_enabled': False,
                 'title': 'Title',
                 'url': 'http://someurl.com',
@@ -3081,24 +3081,6 @@ class TestVideoHandler(TestControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         request = neondata.NeonApiRequest.get('j1', self.account_id_api_key)
         self.assertEqual('New title', request.video_title)
-
-        tag = neondata.Tag(account_id=self.account_id_api_key, name='Old')
-        tag.save()
-        video_id = neondata.InternalVideoID.generate(self.account_id_api_key, 'v2')
-        video = neondata.VideoMetadata(video_id, tag_id=tag.get_id())
-        video.save()
-        body = json.dumps({
-            'video_id': 'v2',
-            'title': 'New'})
-        response = yield self.http_client.fetch(
-            url,
-            method='PUT',
-            headers=headers,
-            body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
-        rjson = json.loads(response.body)
-        tag = neondata.Tag.get(rjson['tag_id'])
-        self.assertEqual('New', tag.name)
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_active(self):
@@ -7452,7 +7434,11 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
                           account_id=self.account_id)
                       for _ in xrange(5)]
         [t.save() for t in thumbnails]
-        tag = neondata.Tag(None, name='My Photos', account_id=self.account_id)
+        tag = neondata.Tag(
+            None,
+            name='My Photos',
+            account_id=self.account_id,
+            tag_type=neondata.TagType.GALLERY)
         tag.save()
         neondata.TagThumbnail.save_many(
             tag_id=tag.get_id(),
@@ -7481,7 +7467,11 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         given_thumb_ids = {t.get_id() for t in thumbnails
             if t.get_id() != removed_thumb.get_id()}
         # Make some tags.
-        tags = [neondata.Tag(i, name='name' + i, account_id=self.account_id)
+        tags = [neondata.Tag(
+                i,
+                name='name' + i,
+                account_id=self.account_id,
+                tag_type=neondata.TagType.GALLERY)
             for i in 'abced']
         [t.save() for t in tags]
         removed_tag = random.choice(tags)

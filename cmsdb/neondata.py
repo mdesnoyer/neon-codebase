@@ -2304,10 +2304,15 @@ class Tag(Searchable, StoredObject):
 
     def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
         tag_id = tag_id or uuid.uuid4().hex
+
+        # Owner
         self.account_id = account_id
+        # User's descriptive name
         self.name = name
+        # System's definition of how this tag is used
         self.tag_type = tag_type if tag_type in [
             TagType.VIDEO, TagType.GALLERY] else None
+
         super(Tag, self).__init__(tag_id)
 
     @staticmethod
@@ -5607,7 +5612,8 @@ class VideoMetadata(Searchable, StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None, hidden=None, share_token=None, tag_id=None):
+                 publish_date=None, hidden=None, share_token=None,
+                 tag_ids=[]):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -5643,8 +5649,8 @@ class VideoMetadata(Searchable, StoredObject):
         # If user has deleted this video, flag it deleted.
         self.hidden = hidden
 
-        # For associating to thumbnails via a tag.
-        self.tag_id = tag_id
+        # Tag ids associate lists of thumbnails to the video.
+        self.tag_ids = tag_ids
 
     @staticmethod
     def _get_search_arguments():
@@ -5932,6 +5938,13 @@ class VideoMetadata(Searchable, StoredObject):
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
         yield VideoMetadata.delete(key, async=True)
+
+    @staticmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_by_tag(tag_ids):
+        '''Given a list of tag id, return a dict of id->video ids'''
+        return {t: [] for t in tag_ids}
 
 
 class VideoStatus(DefaultedStoredObject):

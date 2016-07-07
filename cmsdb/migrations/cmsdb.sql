@@ -234,6 +234,8 @@ CREATE TABLE tag_thumbnail (
 );
 
 ALTER TABLE tag_thumbnail OWNER TO pgadmin;
+
+
 --
 -- Name: thumbnail; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --

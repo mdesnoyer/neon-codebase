@@ -1510,7 +1510,7 @@ class TestAddingImageData(NeonDbTestCase):
         cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket',
                                             do_salt=False)
 
-        video_info = VideoMetadata('acct1_vid1')
+        video_info = VideoMetadata('acct1_vid1', tag_ids=['tag_id'])
         thumb_info = ThumbnailMetadata(None,
                                        ttype=ThumbnailType.CUSTOMUPLOAD,
                                        rank=-1,
@@ -1917,6 +1917,16 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         neondata.PostgresPubSub.instance = None
         super(TestPostgresPubSub, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.postgresql.stop()
 
     @tornado.testing.gen_test()
     def test_listen_and_notify(self):

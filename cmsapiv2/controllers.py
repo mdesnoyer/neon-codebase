@@ -6,17 +6,19 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from apiv2 import *
 import api.brightcove_api
-import numpy as np
-import PIL.Image
-import io
-import StringIO
-
+from apiv2 import *
+from collections import OrderedDict
 import cmsapiv2.client
+from cmsdb.neondata import TagType
 import fractions
+import io
+import itertools
 import logging
 import model
+import numpy as np
+import PIL.Image
+import StringIO
 import utils.autoscale
 import video_processor.video_processing_queue
 _log = logging.getLogger(__name__)
@@ -1061,7 +1063,7 @@ class TagHandler(APIV2Handler):
             'type': CustomVoluptuousTypes.TagType
         })(self.args)
         tag_type = self.args['type'] if self.args.get('type') \
-            else neondata.TagType.GALLERY
+            else TagType.GALLERY
         tag = neondata.Tag(
             None,
             account_id=self.args['account_id'],
@@ -1171,7 +1173,67 @@ class TagHandler(APIV2Handler):
                                  HTTPVerbs.PUT,
                                  HTTPVerbs.POST]}
 
+class ContentResponse(object):
+
+    @tornado.gen.coroutine
+    def result(self, tags, fields):
+        '''Build a result in api response-format from Tags.
+
+        Since the input is a bunch of object ids, the work here is to pull
+        in the corresponding objects and build the result list.
+
+        Input- list of Tag object
+        Returns - list of tag with nested lists of thumbnail or video:
+            [tag dict{
+                id: tag id,
+                name: tag name,
+                videos: [<list of video dicts>]
+                thumbnails: [<list of thumbnail dicts>]'''
+
+        # Map of tag id to tag
+        tag_map = {tag.get_id(): tag for tag in tags}
+        _tagged_map = yield neondata.TagThumbnail.get_many(
+            tag_id=[t.get_id() for t in tags],
+            async=True)
+        tagged_map = OrderedDict(_tagged_map)
+        video_tag_ids = [tag.get_id() for tag in tags if tag.tag_type == TagType.VIDEO]
+        video_ids_map = yield neondata.VideoMetadata.get_by_tag(
+            video_tag_ids,
+            async=True)
+        video_ids = list(set(itertools.chain.from_iterable(video_ids_map.values())))
+
+        # All video objects
+        videos = yield neondata.VideoMetadata.get_many(video_ids, async=True)
+        # Join their request objects
+        job_ids = [v.job_id for v in videos]
+        requests = yield neondata.NeonApiRequest.get_many(job_ids, async=True)
+        # Map of video id to api-format video
+        # @TODO optimize pulling out the thumbnails db read inside of db2api.
+        video_map = yield {v.get_id(): VideoHelper.db2api(v, r, fields) if v and r else None
+                for v, r in zip(videos, requests)}
+
+        # De-duped list of thumb id
+        gallery_tag_ids = [tag.get_id() for tag in tags if tag.tag_type == TagType.GALLERY]
+        thumb_ids_map = yield neondata.TagThumbnail.get_many(tag_id=gallery_tag_ids, async=True)
+        thumb_ids = list(set(itertools.chain.from_iterable(thumb_ids_map.values())))
+
+        # All thumbnail objects
+        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
+        # Map of thumb id to api-format thumbnail
+        thumb_map = yield {t.get_id(): ThumbnailHandler.db2api(t, fields) for t in thumbs}
+
+        # Collate the tag id with the video and thumb lists in the order received.
+        result = [{
+            'id': tag_id,
+            'name': tag_map[tag_id].name,
+            'videos': [video_map[vid] for vid in ids if video_map.get(vid)],
+            'thumbnails': [thumb_map[tid] for tid in ids if thumb_map.get(tid)]}
+                for tag_id, ids in tagged_map.items()]
+        raise tornado.gen.Return(result)
+
+
 class ThumbnailResponse(object):
+
     @classmethod
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
@@ -1182,33 +1244,6 @@ class ThumbnailResponse(object):
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
                 'created', 'updated']
-
-    @tornado.gen.coroutine
-    def _items(self, tags, fields):
-        '''Build a result from tag keys.
-
-        Input- list tag objects
-        Returns - list of tag with nested thumbnails:
-            [tag dict{
-                id: tag id,
-                name: tag name,
-                thumbnails: <list of thumbnail dicts>}]'''
-
-        # Get all the Thumbnails mapped by a tag.
-        tag_ids = [tag.get_id() for tag in tags]
-        mapping = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
-        thumb_ids = list({tid for tids in mapping.values() for tid in tids})
-        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
-        # Make a map from key to object.
-        tag_map = {tag.get_id(): tag for tag in tags}
-        thumb_map = yield {th.get_id(): self.db2api(th, fields) for th in thumbs}
-        # Replace each tid in mapping with a ThumbnailMetadata.
-        result = [{
-            'id': tag_id,
-            'name': tag_map[tag_id].name,
-            'thumbnails': [thumb_map[tid] for tid in tids if thumb_map.get(tid)]}
-                for tag_id, tids in mapping.items()]
-        raise tornado.gen.Return(result)
 
 
     @classmethod
@@ -1242,7 +1277,7 @@ TagSearchExternalHandler : class responsible for searching tags
                            from an external source
    HTTP Verbs     : get
 *********************************************************************'''
-class TagSearchExternalHandler(ThumbnailResponse, APIV2Handler):
+class TagSearchExternalHandler(ContentResponse, APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         Schema({
@@ -1262,7 +1297,7 @@ class TagSearchExternalHandler(ThumbnailResponse, APIV2Handler):
         _fields = self.args.get('fields')
         fields = _fields.split(',') if _fields else None
 
-        items = yield self._items(tags, fields)
+        items = yield self.result(tags, fields)
 
         self.success({
             'items': items,
@@ -1640,7 +1675,28 @@ class ThumbnailHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def get_renditions_from_tids(tids):
+    def get_thumbnails(tids):
+        """gets thumbnailmetadata objects
+
+        Keyword arguments:
+        tids -- a list of tids that needs to be retrieved
+        """
+        thumbnails = []
+        if tids:
+            thumbnails = yield tornado.gen.Task(
+                neondata.ThumbnailMetadata.get_many,
+                tids)
+            thumbnails = yield [ThumbnailHandler.db2api(x) for
+                                x in thumbnails]
+            renditions = yield ThumbnailHelper.get_renditions(tids)
+            for thumbnail in thumbnails:
+                thumbnail['renditions'] = renditions[thumbnail['thumbnail_id']]
+
+        raise tornado.gen.Return(thumbnails)
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def get_renditions(tids):
         """Given list of thumbnails ids, get all renditions as map of tid.
 
         Input- list of thumbnail ids
@@ -1731,7 +1787,7 @@ class VideoHelper(object):
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
         request.api_param = int(args.get('n_thumbs', 5))
-        request.callback_email = args.get('callback_email', None) 
+        request.callback_email = args.get('callback_email', None)
         yield request.save(async=True)
 
         if request:
@@ -1801,8 +1857,8 @@ class VideoHelper(object):
                 account_id=account_id_api_key,
                 tag_type='video',
                 name=api_request.video_title)
-            tag.save()
-            video.tag_id = tag.get_id()
+            yield tag.save(async=True)
+            video.tag_ids = [tag.get_id()]
 
             # add the job id save the video
             video.job_id = api_request.job_id
@@ -1829,27 +1885,6 @@ class VideoHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def get_thumbnails_from_ids(tids):
-        """gets thumbnailmetadata objects
-
-        Keyword arguments:
-        tids -- a list of tids that needs to be retrieved
-        """
-        thumbnails = []
-        if tids:
-            thumbnails = yield tornado.gen.Task(
-                neondata.ThumbnailMetadata.get_many,
-                tids)
-            thumbnails = yield [ThumbnailHandler.db2api(x) for
-                                x in thumbnails]
-            renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
-            for thumbnail in thumbnails:
-                thumbnail['renditions'] = renditions[thumbnail['thumbnail_id']]
-
-        raise tornado.gen.Return(thumbnails)
-
-    @staticmethod
-    @tornado.gen.coroutine
     def get_search_results(account_id=None, since=None, until=None, query=None,
                            limit=None, fields=None,
                            base_url='/api/v2/videos/search',
@@ -1864,7 +1899,7 @@ class VideoHelper(object):
             show_hidden=show_hidden,
             async=True)
 
-        vid_dict = yield VideoHelper.build_video_dict(videos, fields)
+        vid_dict = yield VideoHelper.build_response(videos, fields)
 
         vid_dict['next_page'] = VideoHelper.build_page_url(
             base_url,
@@ -1886,9 +1921,8 @@ class VideoHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def build_video_dict(videos,
-                         fields,
-                         video_ids=None):
+    def build_response(videos, fields, video_ids=None):
+
         vid_dict = {}
         vid_dict['videos'] = None
         vid_dict['video_count'] = 0
@@ -1896,12 +1930,9 @@ class VideoHelper(object):
         vid_counter = 0
         index = 0
         videos = [x for x in videos if x and x.job_id]
-        job_ids = [(v.job_id, v.get_account_id())
-                      for v in videos]
+        job_ids = [(v.job_id, v.get_account_id()) for v in videos]
 
-        requests = yield neondata.NeonApiRequest.get_many(
-                       job_ids,
-                       async=True)
+        requests = yield neondata.NeonApiRequest.get_many(job_ids, async=True)
         for video, request in zip(videos, requests):
             if video is None or request is None and video_ids:
                 new_videos.append({'error': 'video does not exist',
@@ -1919,7 +1950,6 @@ class VideoHelper(object):
         vid_dict['video_count'] = vid_counter
 
         raise tornado.gen.Return(vid_dict)
-
 
     @staticmethod
     def build_page_url(base_url,
@@ -1946,7 +1976,7 @@ class VideoHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def db2api(video, request, fields=None, tag=None):
+    def db2api(video, request, fields=None):
         """Converts a database video metadata object to a video
         response dictionary
 
@@ -1959,13 +1989,13 @@ class VideoHelper(object):
         """
         if fields is None:
             fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled', 'job_id', 'tag_id']
+                      'testing_enabled', 'job_id', 'tag_ids']
 
         new_video = {}
         for field in fields:
             if field == 'thumbnails':
                 new_video['thumbnails'] = yield \
-                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
+                  ThumbnailHelper.get_thumbnails(video.thumbnail_ids)
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -1997,8 +2027,8 @@ class VideoHelper(object):
                 new_video[field] = video.updated
             elif field == 'url':
                 new_video[field] = video.url
-            elif field == 'tag_id':
-                new_video[field] = video.tag_id
+            elif field == 'tag_ids':
+                new_video[field] = video.tag_ids or []
             else:
                 raise BadRequestError('invalid field %s' % field)
 
@@ -2115,7 +2145,7 @@ class VideoHandler(ShareableContentHandler):
         videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many,
                                         internal_video_ids)
 
-        vid_dict = yield VideoHelper.build_video_dict(
+        vid_dict = yield VideoHelper.build_response(
                        videos,
                        fields,
                        video_ids)
@@ -2164,32 +2194,23 @@ class VideoHandler(ShareableContentHandler):
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
 
-        # we may need to update the request and/or tag object as well
-        db2api_fields = {'testing_enabled', 'video_id', 'tag_id'}
-        api_request, tag = None, None
-        if title is not None:
-            if video.job_id is not None:
+        # we may need to update the request object as well
+        db2api_fields = {'testing_enabled', 'video_id'}
+        api_request = None
+        if title is not None and video.job_id is not None:
                 def _update_request(r):
                     r.video_title = title
-
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
                     account_id,
                     _update_request,
                     async=True)
                 db2api_fields.add('title')
-            if video.tag_id is not None:
-                def _update_tag(t):
-                    t.name = title
-                tag = yield neondata.Tag.modify(
-                    video.tag_id,
-                    _update_tag,
-                    async=True)
-                db2api_fields.add('title')
 
         statemon.state.increment('put_video_oks')
-        output = yield self.db2api(video, api_request,
-                                   fields=list(db2api_fields), tag=tag)
+        output = yield self.db2api(
+            video, api_request,
+            fields=list(db2api_fields))
         self.success(output)
 
     @classmethod
@@ -2223,7 +2244,7 @@ class VideoHandler(ShareableContentHandler):
 
     @staticmethod
     @tornado.gen.coroutine
-    def db2api(video, request, fields=None, tag=None):
+    def db2api(video, request, fields=None):
         video_obj = yield VideoHelper.db2api(video, request, fields)
         raise tornado.gen.Return(video_obj)
 
@@ -2252,8 +2273,10 @@ class VideoStatsHandler(APIV2Handler):
             internal_video_ids.append(internal_video_id)
 
         # even if the video_id does not exist an object is returned
-        video_statuses = yield tornado.gen.Task(neondata.VideoStatus.get_many,
-                                                internal_video_ids)
+        video_statuses = yield neondata.VideoStatus.get_many(
+            internal_video_ids,
+            async=True)
+
         fields = args.get('fields', None)
         if fields:
             fields = set(fields.split(','))
@@ -3429,7 +3452,6 @@ def main():
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
     server = tornado.httpserver.HTTPServer(application)
-    #utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
     tornado.ioloop.IOLoop.current().start()
 
