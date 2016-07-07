@@ -451,7 +451,7 @@ class VideoProcessor(object):
 
             _log.info('Finished downloading video %s' % self.video_url)
 
-        except (youtube_dl.utils.DownloadError
+        except (youtube_dl.utils.DownloadError,
                 youtube_dl.utils.ExtractorError, 
                 youtube_dl.utils.UnavailableVideoError,
                 socket.error) as e:
@@ -462,12 +462,14 @@ class VideoProcessor(object):
                 new_url = None
                 try:
                     db_integration = yield neondata.AbstractIntegration.get(
-                        self.video_metadata.integration_id)
+                        self.video_metadata.integration_id,
+                        async=True)
                     integration = integrations.create_ovp_integration(
                         self.job_params['api_key'], db_integration)
-                    video_info = yield integration.lookup_video(
-                        self.job_params['video_id'])
-                    new_url = integration.get_video_url(video_info)
+                    video_info = yield integration.lookup_videos(
+                        [self.job_params['video_id']])
+                    if len(video_info) == 1:
+                        new_url = integration.get_video_url(video_info[0])
                 except Exception as integ_exception:
                     _log.warn('Unable to build OVP integration %s: %s' %
                               (self.video_metadata.integration_id,

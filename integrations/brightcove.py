@@ -237,22 +237,24 @@ class CMSAPIIntegration(BrightcoveIntegration):
         raise tornado.gen.Return(video)
 
     @tornado.gen.coroutine
-    def lookup_video(self, ovp_video_id):
+    def lookup_videos(self, ovp_video_ids):
+        videos = []
         try:
-            videos = yield self.bc_api.get_videos(q='id:%s' % ovp_video_id)
+            videos = yield self.bc_api.get_videos(
+                q=' '.join(['id:%s' % x for x in ovp_video_ids]))
             if len(videos) == 0:
                 raise integrations.ovp.OVPError(
-                    'Video with id %s does not exist' % ovp_video_id)
-            video = videos[0]
-            video['sources'] = yield self.bc_api.get_video_sources(
-                ovp_video_id)
+                    'Video with id %s does not exist' % ovp_video_ids)
+            for video in videos:
+                video['sources'] = yield self.bc_api.get_video_sources(
+                    video['id'])
         except (brightcove_api.BrightcoveApiServerError,
                 brightcove_api.BrightcoveApiClientError) as e:
             statemon.state.increment('bc_apiclient_errors')
             _log.error('Brightcove Error occurred trying to get video : %s' % e)
             raise integrations.ovp.OVPError(e)
 
-        raise tornado.gen.Return(video)
+        raise tornado.gen.Return(videos)
 
     @tornado.gen.coroutine
     def submit_new_videos(self):
@@ -410,26 +412,12 @@ class MediaAPIIntegration(BrightcoveIntegration):
 
         Returns: dictionary of video_id => job_id or exception
         '''
-        try:
-            bc_video_info = yield self.bc_api.find_videos_by_ids(
-                ovp_video_ids,
-                video_fields=self.get_submit_video_fields(),
-                custom_fields=self.get_custom_fields(),
-                async=True)
-        except brightcove_api.BrightcoveApiServerError as e:
-            statemon.state.increment('bc_apiserver_errors')
-            _log.error('Server error getting data from Brightcove for '
-                       'platform %s: %s' % (self.platform.get_id(), e))
-            raise integrations.ovp.OVPError(e)
-        except brightcove_api.BrightcoveApiClientError as e:
-            statemon.state.increment('bc_apiclient_errors')
-            _log.error('Client error getting data from Brightcove for '
-                       'platform %s: %s' % (self.platform.get_id(), e))
-            raise integrations.ovp.OVPError(e)
+        bc_video_info = yield self.lookup_videos(ovp_video_ids)
 
         self.set_video_iter_with_videos(bc_video_info)
-        retval = yield self.submit_ovp_videos(self.get_next_video_item_playlist,
-                                              continue_on_error=continue_on_error)
+        retval = yield self.submit_ovp_videos(
+            self.get_next_video_item_playlist,
+            continue_on_error=continue_on_error)
 
         raise tornado.gen.Return(retval)
 
@@ -581,10 +569,10 @@ class MediaAPIIntegration(BrightcoveIntegration):
         raise tornado.gen.Return(video)
 
     @tornado.gen.coroutine
-    def lookup_video(self, ovp_video_id):
+    def lookup_videos(self, ovp_video_ids):
         try:
             videos = yield self.bc_api.find_videos_by_ids(
-                [ovp_video_id],
+                ovp_video_ids,
                 video_fields=self.get_submit_video_fields(),
                 custom_fields=self.get_custom_fields(),
                 async=True)
@@ -599,7 +587,7 @@ class MediaAPIIntegration(BrightcoveIntegration):
                        'platform %s: %s' % (self.platform.get_id(), e))
             raise integrations.ovp.OVPError(e)
 
-        raise tornado.gen.Return(videos[0])
+        raise tornado.gen.Return(videos)
 
     def skip_old_video(self, publish_date, video_id):
         rv = False

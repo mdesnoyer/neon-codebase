@@ -1830,6 +1830,28 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
             kwargs)
 
     @tornado.testing.gen_test
+    def test_lookup_video(self):
+        self.mock_get_videos.side_effect = [[
+            { 'id' : 1234567,
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000l,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+              }
+            }]]
+
+        video_info = yield self.integration.lookup_videos([1234567])
+
+        self.assertEquals(len(video_info), 1)
+        self.assertEquals(self.integration.get_video_url(video_info[0]),
+                          'http://video.mp4')
+
+    @tornado.testing.gen_test
     def test_continue_on_error(self):
         self.mock_get_videos.side_effect = [[
             { 'id' : 1234567,
@@ -1941,12 +1963,13 @@ class TestCMSAPIIntegration(test_utils.neontest.AsyncTestCase):
             'width' : 1280
             }]]
 
-        vid_info = yield self.integration.lookup_video('vid1')
+        vid_info = yield self.integration.lookup_videos(['vid1'])
 
+        self.assertEquals(len(vid_info), 1)
         self.mock_get_videos.assert_called_with(q='id:vid1')
         self.mock_get_video_sources.assert_called_with('vid1')
 
-        self.assertEquals(vid_info, {
+        self.assertEquals(vid_info[0], {
             'id': 'vid1',
             'name' : 'some video',
             'sources' : [{
@@ -1954,6 +1977,9 @@ class TestCMSAPIIntegration(test_utils.neontest.AsyncTestCase):
                 'width' : 1280
                 }]
             })
+
+        self.assertEquals(self.integration.get_video_url(vid_info[0]),
+                          'some_url.mp4')
 
     @tornado.testing.gen_test
     def test_lookup_video_errors(self):
@@ -1963,15 +1989,15 @@ class TestCMSAPIIntegration(test_utils.neontest.AsyncTestCase):
             api.brightcove_api.BrightcoveApiClientError]
 
         with self.assertRaises(integrations.ovp.OVPError):
-            yield self.integration.lookup_video('vid1')
+            yield self.integration.lookup_videos(['vid1'])
 
         with self.assertLogExists(logging.ERROR, 'Brightcove Error occurred'):
             with self.assertRaises(integrations.ovp.OVPError):
-                yield self.integration.lookup_video('vid1')
+                yield self.integration.lookup_videos(['vid1'])
 
         with self.assertLogExists(logging.ERROR, 'Brightcove Error occurred'):
             with self.assertRaises(integrations.ovp.OVPError):
-                yield self.integration.lookup_video('vid1')
+                yield self.integration.lookup_videos(['vid1'])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

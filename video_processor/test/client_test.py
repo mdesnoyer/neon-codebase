@@ -22,6 +22,7 @@ import boto.exception
 import cmsdb.cdnhosting
 from cmsdb import neondata
 from cvutils.imageutils import PILImageUtils
+import integrations
 import json
 import logging
 from mock import MagicMock, patch, ANY
@@ -111,7 +112,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         cdn.save()
 
         self.video_id = '%s_vid1' % self.api_key
-        self.api_request = neondata.OoyalaApiRequest(
+        self.api_request = neondata.BrightcoveApiRequest(
             'job1', self.api_key,
             'int1', 'vid1',
             'some fun video',
@@ -222,7 +223,12 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                                        "title",
                                                        url, 'neon', None)
         elif request_type == "brightcove":
-            i_id = "b_id"
+            integration = neondata.BrightcoveIntegration(
+                api_key, 
+                application_client_id='client',
+                application_client_secret='secret')
+            integration.save()
+            i_id = integration.integration_id
             jparams = request_template.brightcove_api_request %(
                 j_id, vid, api_key, "brightcove", api_key, j_id, i_id)
             self.api_request = neondata.BrightcoveApiRequest(
@@ -230,8 +236,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                         'title', url,
                                         'rtok', 'wtok', None) 
             self.api_request.previous_thumbnail = "http://prevthumb"
+            
         elif request_type == "ooyala":
-            i_id = "b_id"
+            i_id = "oid"
             jparams = request_template.ooyala_api_request %(j_id, vid, api_key,
                             "ooyala", api_key, j_id, i_id)
             self.api_request = neondata.OoyalaApiRequest(
@@ -312,6 +319,54 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.extracted_default_thumbnail,
                           'http://my_default_thumbnail.jpg')
+
+    @patch('video_processor.client.integrations.create_ovp_integration')
+    @tornado.testing.gen_test
+    def test_download_video_moved(self, ovp_mock):
+        # When a video cannot be downloaded and it's on an
+        # integration, we see if that video has moved and try again.
+        valid_response = {
+            u'_type': u'video',
+            u'upload_date': u'20110620', 
+            u'protocol': u'https', 
+            u'creator': None, 
+            u'format_note': u'hd720', 
+            u'height': 720, 
+            u'like_count': 0, 
+            u'player_url': None, 
+            u'id': 'yces6PZOsgc', 
+            u'view_count': 328}
+            
+        self.youtube_extract_info_mock.side_effect = [
+            youtube_dl.utils.DownloadError('not there'),
+            valid_response,
+            valid_response
+            ]
+
+        lookup_mock = self._future_wrap_mock(ovp_mock().lookup_videos)
+        lookup_mock.side_effect = [[{'url' : 'http://new_url.com'}]]
+        ovp_mock().get_video_url.side_effect = lambda x: x['url']       
+            
+        vprocessor = self.setup_video_processor("brightcove")
+
+        with self.assertLogExists(logging.INFO, 
+                                  'Trying to download at its new location'):
+            yield vprocessor.download_video_file()
+
+        # Make sure the video was downloaded from the new url
+        self.youtube_extract_info_mock.assert_called_with(
+            'http://new_url.com',
+            download=True)
+        self.assertEquals(self.youtube_extract_info_mock.call_count, 3)
+
+        # Make sure the integration was built properly
+        bc_int = neondata.BrightcoveIntegration.get(
+            vprocessor.job_params['integration_id'])
+        ovp_mock.assert_called_with(self.na.neon_api_key, bc_int)
+        lookup_mock.assert_called_with(['video1'])
+
+        self.assertEquals(vprocessor.video_metadata.url, 
+                          'http://new_url.com')
 
     @tornado.testing.gen_test
     def test_download_video_errors(self):
