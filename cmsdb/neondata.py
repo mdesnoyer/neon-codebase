@@ -4925,7 +4925,11 @@ class AccountLimits(StoredObject):
                  max_video_posts=10, 
                  refresh_time_video_posts=datetime.datetime(2050,1,1), 
                  seconds_to_refresh_video_posts=2592000.0,
-                 max_video_size=900.0):
+                 max_video_size=900.0,
+                 email_posts=0,
+                 max_email_posts=60, 
+                 refresh_time_email_posts=datetime.datetime(2000,1,1), 
+                 seconds_to_refresh_email_posts=3600.0):
  
         super(AccountLimits, self).__init__(account_id)
         
@@ -4938,13 +4942,26 @@ class AccountLimits(StoredObject):
 
         # when the video_posts counter will be reset 
         self.refresh_time_video_posts = refresh_time_video_posts.strftime(
-                            "%Y-%m-%d %H:%M:%S.%f") 
+            "%Y-%m-%d %H:%M:%S.%f") 
 
         # amount of seconds to add to now() when resetting the timer 
         self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
 
         # maximum video length we will process in seconds 
-        self.max_video_size = max_video_size 
+        self.max_video_size = max_video_size
+
+        # the number of email posts this account has made in the period 
+        self.email_posts = email_posts
+
+        # maximum amount of emails this account can send in a time period 
+        self.max_email_posts = max_email_posts 
+
+        # when the email posts counter will be reset 
+        self.refresh_time_email_posts = refresh_time_email_posts.strftime(
+            "%Y-%m-%d %H:%M:%S.%f") 
+
+        # amount of seconds to add to now() when resetting refresh_time 
+        self.seconds_to_refresh_email_posts = seconds_to_refresh_email_posts 
 
     def populate_with_billing_plan(self, bp): 
         '''helper that takes a billing plan and populates the object 

@@ -7000,7 +7000,65 @@ class TestEmailHandler(TestControllersBase):
                 x, 
                 200, 
                 buffer=StringIO('{"code": "Hello There you fool"}')))
+        limit = neondata.AccountLimits(self.account_id)
+        yield limit.save(async=True)
+
         response = yield self._send_authed_request(url, body) 
+        
+        # happens on on_finish (meaning we got our response already) 
+        # wait a bit before checking 
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(self.account_id).email_posts,
+            1,
+            async=True)
+        self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test 
+    def test_send_email_limit_hit(self): 
+        url = '/api/v2/%s/email' % self.account_id 
+        body = { 
+            'template_slug' : 'reset-password'
+        }
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(
+                x, 
+                200, 
+                buffer=StringIO('{"code": "Hello There you fool"}')))
+        limit = neondata.AccountLimits(
+            self.account_id, 
+            max_email_posts=0, 
+            refresh_time_email_posts=datetime(2050,1,1))
+
+        yield limit.save(async=True)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self._send_authed_request(url, body)
+            self.assertEquals(e.exception.code, 429)
+
+    @tornado.testing.gen_test 
+    def test_send_email_limit_reset(self): 
+        url = '/api/v2/%s/email' % self.account_id 
+        body = { 
+            'template_slug' : 'reset-password'
+        }
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(
+                x, 
+                200, 
+                buffer=StringIO('{"code": "Hello There you fool"}')))
+        limit = neondata.AccountLimits(
+            self.account_id, 
+            email_posts=2, 
+            max_email_posts=2, 
+            refresh_time_email_posts=datetime(2000,1,1))
+
+        yield limit.save(async=True)
+        response = yield self._send_authed_request(url, body)
+ 
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(self.account_id).email_posts,
+            1,
+            async=True)
         self.assertEquals(response.code, 200)
  
     @tornado.testing.gen_test
