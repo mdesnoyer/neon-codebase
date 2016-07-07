@@ -387,6 +387,7 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     cleaned_prefix = _get_s3_cleaned_prefix(dag=dag,
                                             execution_date=execution_date,
                                             prefix=output_prefix)
+    _log.info('d output path is %s' % output_path)
     _log.info('d output bucket is %s' % output_bucket)
     _log.info('d cleaned prefix is %s' % cleaned_prefix)
     _log.info('d output prefix is %s' % output_prefix)
@@ -526,6 +527,8 @@ def _run_mr_cleaning_job(**kwargs):
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
 
+    _log.info("output path received is %s" % kwargs['output_path'])
+
     cluster = ClusterGetter.get_cluster()
     cluster.connect(os.path.basename(__file__))
 
@@ -552,8 +555,9 @@ def _run_mr_cleaning_job(**kwargs):
     cleaning_job_output_path = os.path.join("s3://", output_bucket,
                                             cleaned_prefix)
 
-    #_delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
-    #                                 output_path=kwargs['output_path'])
+    _delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
+                                     output_path=kwargs['output_path'])
+
     _log.info("{task}: calling Neon Map/Reduce clicklogs cleaning job".format(
         task=task))
 
