@@ -636,6 +636,10 @@ def _delete_staging_files(**kwargs):
 
     staging_full_prefix = _get_s3_staging_prefix(dag, execution_date,
                                                  staging_prefix)
+    
+    _log.info('Deleting stage file from bucket %s' % staging_bucket)
+    _log.info('Deleting stage file from prefix %s' % staging_full_prefix)
+
     return _delete_s3_prefix(staging_bucket, staging_full_prefix)
 
 
