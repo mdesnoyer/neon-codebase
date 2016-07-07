@@ -1473,7 +1473,7 @@ class LocalSearcher(object):
         self.video_name = video_name
         if TESTING:
             self._set_up_testing()
-        fps = video.get(cv2.CAP_PROP_FPS) or 30.0
+        self.fps = video.get(cv2.CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         self.num_frames = num_frames
         # account for the case where the video is very short
@@ -1486,7 +1486,7 @@ class LocalSearcher(object):
                                      search_divisor)
         _log.info('Search width: %i' % (self.local_search_width))
         _log.info('Search step: %i' % (self.local_search_step))
-        video_time = float(num_frames) / fps
+        video_time = float(num_frames) / self.fps
         self.search_algo = self._search_algo(num_frames,
                                              self.local_search_width,
                                              self.startend_clip)
@@ -1534,32 +1534,52 @@ class LocalSearcher(object):
                    self.video_name)
             _log.error(msg)
             raise model.errors.PredictionError(msg)
+
+        return (self._format_result(self.results),
+            self._format_result(self.bad_results, flip_score=True))
+
+    def _format_result(self, results, flip_score=None):
+        '''Given a ResultsList, return the expected format for choose_thumbnails_impl'''
+
+        rv = []
         raw_results = self.results.get_results()
-        # format it into the expected format
-        results = []
+        unit = -1 if flip_score else 1
+
         if not len(raw_results):
-            _log.debug('No suitable frames have been found for video %s!'
-                      ' Will uniformly select frames', video_name)
-            # increment the statemon
+            _log.debug(
+                'No suitable frames have been found for video %s!'
+                ' Will uniformly select frames', self.video_name)
+
+            # Increment the statemon.
             statemon.state.increment('all_frames_filtered')
-            # select which frames to use
-            frames = np.linspace(int(self.num_frames * self.startend_clip),
-                                 int(self.num_frames * (1 - self.startend_clip)),
-                                 self.n_thumbs).astype(int)
+
+            # Select which frames to use.
+            frames = np.linspace(
+                int(self.num_frames * self.startend_clip),
+                int(self.num_frames * (1 - self.startend_clip)),
+                self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
+
             for frame, frameno in zip(rframes, frames):
                 # TODO: get the scores of these frames more efficiently (async)
                 score = self.predictor.predict(frame)
-                formatted_result = (frame, score, frameno,
-                                    frameno / float(fps), '')
-                results.append(formatted_result)
+                formatted_result = (
+                    frame,
+                    unit * score,
+                    frameno,
+                    frameno / float(self.fps), '')
+                rv.append(formatted_result)
         else:
             _log.debug('%i thumbs found', len(raw_results))
             for rr in raw_results:
-                formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
-                                    '')
-                results.append(formatted_result)
-        return results
+                formatted_result = (
+                    rr[0],
+                    unit * rr[1],
+                    rr[2],
+                    rr[2] / float(self.fps),
+                    '')
+                rv.append(formatted_result)
+        return rv
 
     def _worker(self, workerno=None):
         '''

@@ -87,13 +87,13 @@ class Model(object):
         return (float('-inf'), self.filt.short_description())
 
        
-    def choose_thumbnails(self, video, n=1, video_name=''):
+    def choose_thumbnails(self, video, n=1, video_name='', m=0):
         '''Select the top n thumbnails from a video.
 
         Returns:
         ([(image,score,frame_no,timecode,attribute)]) sorted by score
         '''
-        return self.video_searcher.choose_thumbnails(video, n, video_name)
+        return self.video_searcher.choose_thumbnails(video, n, video_name, m)
 
 
     def restore_additional_data(self, filename):
