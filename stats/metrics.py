@@ -209,8 +209,8 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
          ('shutdown_bad_thumbs', None) : calc_lift_from_dataframe(
              all_data, 'xtra_conv_with_clamp'),
          ('cap_runaways', None) : calc_lift_from_dataframe(cap_runaways)}
-    agg_data.update(total_neon_winners)
-    agg_data = agg_data.concat([pandas.DataFrame(agg_data), meta_analysis],
+    agg_stats.update(total_neon_winners)
+    agg_stats = pandas.concat([pandas.DataFrame(agg_stats), meta_analysis],
                                axis=1)
     
     
@@ -218,7 +218,7 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     #if len(data.index.names) == 1:
     #    index = [0]
 
-    return pandas.DataFrame(agg_stats, index=index)
+    return agg_stats
 
 def count_unique_index(data, level='video_id'):
     groups = [x for x in data.index.names if x not in level]
