@@ -250,7 +250,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.api_request.api_param = 1 
         self.api_request.save()
         vprocessor = VideoProcessor(
-            job, self.model,
+            job,
+            self.model,
             self.model_version,
             multiprocessing.BoundedSemaphore(1),
             self.job_queue_mock,
@@ -499,18 +500,18 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_process_video(self):
-       
-        '''
-        Verify execution of the process_all call in ProcessVideo
-        '''
+        '''Verify execution of the process_all call in ProcessVideo'''
+
         vprocessor = self.setup_video_processor("neon", url='http://video.com')
-        yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+        yield vprocessor.process_video(self.test_video_file, n_thumbs=5, m_thumbs=6)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
         cargs, kwargs = self.model.choose_thumbnails.call_args
-        self.assertEquals(kwargs, {'n':5,
-                                   'video_name':  'http://video.com'})
+        self.assertEquals(kwargs, {
+            'n': 5,
+            'm': 6,
+            'video_name': 'http://video.com'})
         self.assertEquals(len(cargs), 1)
 
         #verify video metadata has been populated
@@ -1854,21 +1855,20 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         with options._set_bounded('video_processor.client.max_fail_count', 1):
             yield self._run_job({
                 'api_key': self.api_key,
-                'video_id' : 'vid1',
-                'job_id' : 'job1',
+                'video_id': 'vid1',
+                'job_id': 'job1',
                 'video_title': 'some fun video',
                 'callback_url': 'http://callback.com',
-                'video_url' : 's3://my-videos/test.mp4'
-                })
+                'video_url': 's3://my-videos/test.mp4'})
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
-        self.assertEquals(api_request.state,
-                          neondata.RequestState.INT_ERROR)
+        self.assertEquals(api_request.state, neondata.RequestState.INT_ERROR)
 
         # Check the state variables
-        self.assertEquals(statemon.state.get('video_processor.client.processing_error'),
-                          1)
+        self.assertEquals(
+            statemon.state.get('video_processor.client.processing_error'),
+            1)
         self.assertEquals(
             statemon.state.get('video_processor.client.save_vmdata_error'),
             1)

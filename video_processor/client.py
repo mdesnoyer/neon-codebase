@@ -185,6 +185,8 @@ class VideoProcessor(object):
         self.n_thumbs = int(self.job_params.get('topn', None) or
                             self.job_params.get('api_param', None) or 5)
         self.n_thumbs = max(self.n_thumbs, 1)
+        self.m_thumbs = int(self.job_params.get('botm', None) or 5)
+        self.m_thumbs = max(self.m_thumbs, 0)
 
         # The default thumb url extracted from the video url
         self.extracted_default_thumbnail = None
@@ -239,12 +241,14 @@ class VideoProcessor(object):
 
             #Process the video
             n_thumbs = max(self.n_thumbs, 5)
+            m_thumbs = max(self.m_thumbs, 6)
 
             with self.cv_semaphore:
                 statemon.state.increment('workers_cv_processing')
                 try:
                     yield self.process_video(self.tempfile.name,
-                                             n_thumbs=n_thumbs)
+                                             n_thumbs=n_thumbs,
+                                             m_thumbs=m_thumbs)
                 finally:
                     statemon.state.decrement('workers_cv_processing')
 
@@ -479,7 +483,7 @@ class VideoProcessor(object):
             raise VideoDownloadError(msg)
 
     @tornado.gen.coroutine
-    def process_video(self, video_file, n_thumbs=1):
+    def process_video(self, video_file, n_thumbs=1, m_thumbs=None):
         ''' process all the frames from the partial video downloaded '''
         # The video might have finished by somebody else so double
         # check that we still want to process it.
@@ -581,6 +585,7 @@ class VideoProcessor(object):
               self.model.choose_thumbnails(
                   mov,
                   n=n_thumbs,
+                  m=m_thumbs,
                   video_name=self.video_url)
             results = sorted(results, key=lambda x:x[1], reverse=True)
         except model.errors.VideoReadError:

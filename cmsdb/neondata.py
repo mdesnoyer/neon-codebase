@@ -2465,7 +2465,7 @@ class ProcessingStrategy(DefaultedStoredObject):
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
                  filter_text=True, text_filter_params=None, 
-                 filter_text_thresh=0.04):
+                 filter_text_thresh=0.04, m_thumbs=6):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -2489,9 +2489,12 @@ class ProcessingStrategy(DefaultedStoredObject):
         # local search width for the documentation.
         self.local_search_step = local_search_step
 
-        # The number of thumbs that are desired as output from the video
+        # The number of top thumbs that are desired as output from the video
         # searching process.
         self.n_thumbs = n_thumbs
+
+        # Likewise, the number of bottom thumbs
+        self.m_thumbs = m_thumbs
 
         # (this should rarely need to be changed)
         # feat_score_weight is a multiplier that allows the feature score to

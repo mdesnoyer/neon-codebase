@@ -1133,7 +1133,8 @@ class LocalSearcher(object):
                  testing_dir=None,
                  filter_text=True,
                  text_filter_params=None,
-                 filter_text_thresh=0.04):
+                 filter_text_thresh=0.04,
+                 m_thumbs=6):
         '''
         Inputs:
             predictor:
@@ -1147,6 +1148,8 @@ class LocalSearcher(object):
                      across 12 frames (about 0.5 sec)
             n_thumbs:
                 The number of top images to store.
+            m_thumbs:
+                The number of bottom images to store.
             feat_score_weight:
                 The degree to which the combined feature score should effect
                 the rank of the frames. New frames are added to results
@@ -1256,6 +1259,7 @@ class LocalSearcher(object):
         self._orig_local_search_width = local_search_width
         self._orig_local_search_step = local_search_step
         self.n_thumbs = n_thumbs
+        self.m_thumbs = m_thumbs
         self._feat_score_weight = feat_score_weight
         self.mixing_samples = mixing_samples
         self._search_algo = search_algo
@@ -1358,6 +1362,7 @@ class LocalSearcher(object):
         self._orig_local_search_width = processing_strategy.local_search_width
         self._orig_local_search_step = processing_strategy.local_search_step
         self.n_thumbs = processing_strategy.n_thumbs
+        self.m_thumbs = processing_strategy.m_thumbs
         self._feat_score_weight = processing_strategy.feat_score_weight
         self.mixing_samples = processing_strategy.mixing_samples
         self.max_variety = processing_strategy.max_variety
@@ -1387,17 +1392,19 @@ class LocalSearcher(object):
     def min_score(self):
         return self.results.min
 
-    def choose_thumbnails(self, video, n=None, video_name='',):
+    def choose_thumbnails(self, video, n=None, video_name='', m=None):
         self._reset()
         if n is None:
             n = self.n_thumbs
+        if m is None:
+            m = self.m_thumbs
         rand_seed = int(1000*time()) % 2 ** 32
         _log.info('Beginning thumbnail selection for video %s, random seed '
                   'for this run is %i with max thumbs %i', video_name,
                   rand_seed, n)
         np.random.seed(rand_seed)
-        thumbs = self.choose_thumbnails_impl(video, n, video_name)
-        return thumbs
+        best, worst = self.choose_thumbnails_impl(video, n, video_name, m)
+        return best + worst
 
     def _set_up_testing(self):
         vname = self.video_name
@@ -1417,7 +1424,7 @@ class LocalSearcher(object):
         else:
             raise Exception("Could not create testing dir!")
 
-    def choose_thumbnails_impl(self, video, n=None, video_name=''):
+    def choose_thumbnails_impl(self, video, n=None, video_name='', m=None):
         # start up the threads
         self._inq = Queue(maxsize=2)
         threads = [threading.Thread(target=self._worker, args=(x,))
@@ -1430,6 +1437,8 @@ class LocalSearcher(object):
             self.stats[gen_name] = Statistics()
         if n is not None:
             self.n_thumbs = n
+        if m is not None:
+            self.m_thumbs = m
         # create a prep object for analysis crops
         self._prep = pycvutils.ImagePrep(crop_frac=self.analysis_crop)
         self.stats['score'] = Statistics()
@@ -1442,6 +1451,14 @@ class LocalSearcher(object):
                                     self.col_stat.percentile(
                                             100. / self.n_thumbs))
         self.results = ResultsList(n_thumbs=self.n_thumbs,
+                           min_acceptable=f_min_var_acc,
+                           max_rejectable=f_max_var_rej,
+                           feat_score_weight=self._feat_score_weight,
+                           adapt_improve=self.adapt_improve,
+                           max_variety=self.max_variety,
+                           combination_function=self.combiner.result_combine)
+        # Storage for the bottom m frames
+        self.bad_results = ResultsList(n_thumbs=self.m_thumbs,
                            min_acceptable=f_min_var_acc,
                            max_rejectable=f_max_var_rej,
                            feat_score_weight=self._feat_score_weight,
@@ -1662,6 +1679,9 @@ class LocalSearcher(object):
             best_frameno = framenos[np.argmax(comb)]
             best_frame = frames[np.argmax(comb)]
             best_gold = gold[np.argmax(comb)]
+            worst_frameno = framenos[np.argmin(comb)]
+            worst_frame = frames[np.argmin(comb)]
+            worst_gold = gold[np.argmin(comb)]
             # unbind gold, so that you don't have a MEMORY CATASTROPHE
             del gold
             # ---------- START OF TEXT PROCESSING
@@ -1727,6 +1747,9 @@ class LocalSearcher(object):
                                    start_score, end_frame, end_score, best_frameno,
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
+                np.max(comb), meta=meta, feat_score_func=feat_score_func)
+            # For bad, invert framescore.
+            self.bad_results.accept_replace(worst_frameno, -framescore, worst_gold,
                 np.max(comb), meta=meta, feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):
