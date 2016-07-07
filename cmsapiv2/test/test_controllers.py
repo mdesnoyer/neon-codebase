@@ -7032,8 +7032,8 @@ class TestEmailHandler(TestControllersBase):
         yield limit.save(async=True)
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            response = yield self._send_authed_request(url, body) 
-	    self.assertEquals(e.exception.code, 429)
+            response = yield self._send_authed_request(url, body)
+            self.assertEquals(e.exception.code, 429)
 
     @tornado.testing.gen_test 
     def test_send_email_limit_reset(self): 
