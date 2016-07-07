@@ -270,8 +270,8 @@ class CMSAPIIntegration(BrightcoveIntegration):
         images = video.get('images', None) 
         if not images: 
             _log.error('Unable to find images for video %s' % video)
-            return None 
- 
+            return None, {'id': None}
+        
         thumb_url = None 
         thumb_ref = None
  
