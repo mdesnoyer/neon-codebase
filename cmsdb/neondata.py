@@ -2918,9 +2918,7 @@ class Feature(DefaultedStoredObject):
                     wc_params=[model_name],
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
-        for result in results:
-            obj = cls._create(result['_data']['key'], result)
-            rv.append(obj)
+        rv = [ cls._create(r['_data']['key'], r) for r in results ]
 
         raise tornado.gen.Return(rv)
 
