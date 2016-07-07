@@ -191,7 +191,7 @@ def _get_s3_cleaned_prefix(dag, execution_date, prefix=''):
     """
     return _do_s3_prefix_fixup(
         os.path.join(prefix, dag.dag_id, 'cleaned',
-                     execution_date.strftime("%Y/%m/%d/%H"), ''))
+                     execution_date.strftime("%Y/%m/%d"), ''))
 
 
 def _get_s3_input_files(dag, execution_date, task, input_path):
@@ -293,7 +293,7 @@ def _get_s3_staging_prefix(dag, execution_date, prefix=''):
     :return type: str
     """
     return _do_s3_prefix_fixup(os.path.join(prefix,
-                                            execution_date.strftime("%Y/%m/%d/%H"), ''))
+                                            execution_date.strftime("%Y/%m/%d"), ''))
 
 
 def _get_s3_tais(input_path):
