@@ -788,9 +788,9 @@ mr_cleaning_job = PythonOperator(
     python_callable=_run_mr_cleaning_job,
     provide_context=True,
     op_kwargs=dict(staging_path=options.staging_path,
-                   output_path=options.output_path, timeout=60 * 240),
+                   output_path=options.output_path, timeout=60 * 300),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
-    execution_timeout=timedelta(minutes=75),
+    execution_timeout=timedelta(minutes=300),
     on_failure_callback=_check_compute_cluster_capacity,
     on_success_callback=_check_compute_cluster_capacity,
     on_retry_callback=_check_compute_cluster_capacity)
