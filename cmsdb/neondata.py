@@ -5116,8 +5116,8 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=None,
-                                       save_objects=False, video=None,
+        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=cdn_metadata,
+                                       save_objects=save_objects, video=video,
                                        append_to_good=True, async=True)
         raise tornado.gen.Return(rv)
 
@@ -5126,8 +5126,8 @@ class VideoMetadata(StoredObject):
     def add_bad_thumbnail(self, thumb, image, cdn_metadata=None,
                       save_objects=False, video=None):
         '''Add a bad thumbnail to the video. Reference above.'''
-        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=None,
-                                       save_objects=False, video=None,
+        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=cdn_metadata,
+                                       save_objects=save_objects, video=video,
                                        append_to_good=False, async=True)
         raise tornado.gen.Return(rv)
 
