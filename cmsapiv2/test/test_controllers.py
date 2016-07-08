@@ -265,7 +265,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
                       async=True)
         self.assertEquals(account.name, 'meisnew')
         self.assertEquals(account.email, 'a@a.bc')
-        self.assertEqual(account.serving_enabled, True)
+        self.assertEquals(account.serving_enabled, True)
 
         user = yield neondata.User.get('a@a.com',
                    async=True)
@@ -319,7 +319,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
                       async=True)
         self.assertEquals(account.name, 'meisnew')
         self.assertEquals(account.email, 'a@a.bc')
-        self.assertEqual(account.serving_enabled, True)
+        self.assertEquals(account.serving_enabled, True)
 
         user = yield neondata.User.get('a@a.com',
                    async=True)
