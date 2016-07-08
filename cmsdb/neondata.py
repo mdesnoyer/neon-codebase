@@ -5171,7 +5171,6 @@ class VideoMetadata(StoredObject):
                 self.__dict__ = updated_video.__dict__
         else:
             target.append(thumb.key)
-            sucess = yield self.save(async=True)
 
         raise tornado.gen.Return(thumb)
 
