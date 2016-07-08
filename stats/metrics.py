@@ -305,11 +305,12 @@ def calc_meta_analysis_from_dataframe(data, level='video_id'):
     mn = np.exp(mean_log_ratio_star)
 
     if len(groups) > 0:
-        p_value = 2 * (1 - (mean_log_ratio_star / standard_error).apply(
-            scipy.stats.norm.sf))
+        p_value = (mean_log_ratio_star / standard_error).apply(
+            scipy.stats.norm.sf)
     else:
-        p_value = 2 * (1 - scipy.stats.norm.sf(mean_log_ratio_star /
-                                               standard_error))
+        p_value = scipy.stats.norm.sf(mean_log_ratio_star /
+                                      standard_error)
+    p_value = 2 * np.minimum(p_value, 1-p_value)
 
     d = {
         'mean' : mn - 1,
