@@ -5118,7 +5118,7 @@ class VideoMetadata(StoredObject):
         '''
         rv = yield self._add_thumbnail(thumb, image, cdn_metadata=None,
                                        save_objects=False, video=None,
-                                       append_to_good=True)
+                                       append_to_good=True, async=True)
         raise tornado.gen.Return(rv)
 
     @utils.sync.optional_sync
@@ -5128,7 +5128,7 @@ class VideoMetadata(StoredObject):
         '''Add a bad thumbnail to the video. Reference above.'''
         rv = yield self._add_thumbnail(thumb, image, cdn_metadata=None,
                                        save_objects=False, video=None,
-                                       append_to_good=False)
+                                       append_to_good=False, async=True)
         raise tornado.gen.Return(rv)
 
     @utils.sync.optional_sync
