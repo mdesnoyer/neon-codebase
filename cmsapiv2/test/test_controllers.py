@@ -442,6 +442,8 @@ class TestNewAccountHandler(TestAuthenticationBase):
         (self.assertEqual(account_id, mapper.value) for mapper in mappers)
         self.assertIsNotNone(neondata.AccountLimits.get(account_id))
         self.assertIsNotNone(neondata.ExperimentStrategy.get(account_id))
+        account = neondata.NeonUserAccount.get(account_id)
+        self.assertFalse(account.serving_enabled)
 
     @tornado.testing.gen_test
     def test_create_new_account_invalid_email(self):
@@ -912,7 +914,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
     @tornado.testing.gen_test
     def test_verify_with_no_user_saved(self):
         email = 'yo@notgmail.com'
-        account = neondata.NeonUserAccount('name', 'a0')
+        account = neondata.NeonUserAccount('name', 'a0', serving_enabled=False)
         yield account.save(async=True)
         account.email = email
         cell = '867-5309'
@@ -946,6 +948,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         self.assertEqual(email, rjson['email'])
         self.assertEqual([email], rjson['users'])
         account = yield neondata.NeonUserAccount.get('a0', async=True)
+        self.assertTrue(account.serving_enabled)
         user = yield neondata.User.get(email, async=True)
         self.assertEqual(email, user.username)
         self.assertEqual(cell, user.cell_phone_number)
@@ -954,7 +957,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
     @tornado.testing.gen_test
     def test_verify_with_account_keyed_user(self):
         email = 'yo@notgmail.com'
-        account = neondata.NeonUserAccount('name', 'a0')
+        account = neondata.NeonUserAccount('name', 'a0', serving_enabled=False)
         yield account.save(async=True)
         account.email = email
         user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN, email_verified=False)
@@ -995,6 +998,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         self.assertEqual(email, rjson['email'])
         self.assertEqual([email], rjson['users'])
         account = yield neondata.NeonUserAccount.get('a0', async=True)
+        self.assertTrue(account.serving_enabled)
         user = yield neondata.User.get(email, async=True)
         self.assertTrue(user.is_email_verified())
         self.assertEqual(email, user.username)

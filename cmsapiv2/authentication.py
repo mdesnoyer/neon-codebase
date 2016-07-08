@@ -354,7 +354,9 @@ class AccountHelper(object):
         """Add an account that is kept via the session cookie."""
 
         # Save anonymous Neon user account.
-        account = neondata.NeonUserAccount(uuid.uuid1().hex)
+        account = neondata.NeonUserAccount(
+            uuid.uuid1().hex,
+            serving_enabled=False)
         account.users = [account.get_id()]
         yield account.save(async=True)
         # Save the initial admin user.
@@ -392,6 +394,8 @@ class AccountHelper(object):
         # Instantiate account and user from payload in verifier.
         account = neondata.NeonUserAccount.create(
             verifier.extra_info['account'])
+        # Enable this for Mastermind serving.
+        account.serving_enabled = True
         user_json = json.loads(verifier.extra_info['user'])
         user = neondata.User._create(
             user_json['_data']['key'],
