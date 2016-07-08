@@ -207,6 +207,8 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
+        self.thumb_model_version = None
+
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
     def __del__(self):
@@ -592,19 +594,23 @@ class VideoProcessor(object):
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in results])
         rank=0
-        for image, score, frame_no, timecode, attribute in results:
+        for (image, score, frame_no, timecode, attribute, model_version,
+             features) in results:
             # Only return unfiltered images unless they are all
             # filtered, in which case, return them all.
             if not exists_unfiltered_images or (
                     attribute is not None and attribute == ''):
                 meta = neondata.ThumbnailMetadata(
                     None,
+                    internal_vid=self.video_metadata.key,
                     ttype=neondata.ThumbnailType.NEON,
                     model_score=score,
-                    model_version=self.model_version,
+                    model_version=model_version,
+                    features=features,
                     frameno=frame_no,
                     filtered=attribute,
                     rank=rank)
+                self.thumb_model_version = model_version
                 self.thumbnails.append((meta, PILImageUtils.from_cv(image)))
                 rank += 1 
 
@@ -630,18 +636,11 @@ class VideoProcessor(object):
             cv_image = self._get_specific_frame(mov, int(nframes / 2))
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.CENTERFRAME,
                 frameno=int(nframes / 2),
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
-            yield meta.score_image(self.model.predictor,
-                                   self.model_version,
-                                   image=cv_image)
-        except model.errors.PredictionError as e:
-            _log.warn('Error predicting score for the center frame: %s' %
-                      e)
-            # We don't wait to fail in this case because we don't care
-            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting center frame from %s:"
                        " %s" % (self.video_url, e))
@@ -662,18 +661,11 @@ class VideoProcessor(object):
             cv_image = self._get_specific_frame(mov, frameno)
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.RANDOM,
                 frameno=frameno,
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
-            yield meta.score_image(self.model.predictor,
-                                   self.model_version,
-                                   image=cv_image)
-        except model.errors.PredictionError as e:
-            _log.warn('Error predicting score for the random frame: %s' %
-                      e)
-            # We don't wait to fail in this case because we don't care
-            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting random frame from %s:"
                            " %s" % (self.video_url, e))
@@ -763,8 +755,25 @@ class VideoProcessor(object):
                         % (api_key, self.video_metadata.integration_id), 10)
             cdn_metadata = [neondata.NeonCDNHostingMetadata()]
 
+        # Get any known thumbs for the video
+        known_thumbs = []
+        known_video = yield neondata.VideoMetadata.get(self.video_metadata.key,
+                                                       async=True)
+        if known_video:
+            known_tids = reduce(
+                lambda x,y: x & y,
+                [set(x.thumbnail_ids) for x in known_video.job_results])
+            known_tids &= known_video.thumbnail_ids
+
+            known_thumbs = yield neondata.ThumbnailMetadata.get_many(
+                known_tids, async=True)
+
         # Attach the thumbnails to the video. This will upload the
         # thumbnails to the appropriate CDNs.
+        video_result = neondata.VideoJobThumbnailList(
+            age=self.job_params.get('age'),
+            gender=self.job_params.get('gender'),
+            model_version=self.model_version)
         if len(filter(lambda x: x[0].type == neondata.ThumbnailType.NEON,
                       self.thumbnails)) < 1:
             # TODO (Sunil): Video to be marked as failed or int err ? 
@@ -773,11 +782,24 @@ class VideoProcessor(object):
                     % (self.video_metadata.key, self.video_metadata.url))
         
         for thumb_meta, image in self.thumbnails:
-            yield self.video_metadata.add_thumbnail(
-                thumb_meta, image,
-                cdn_metadata=cdn_metadata,
-                save_objects=False,
-                async=True)
+            # If we have a thumbnail of this type already and it's
+            # scored with the same model, we do not need to keep the
+            # new one around
+            same_thumbs = [x for x in known_thumbs if 
+                           x.type == thumb_meta.type and 
+                           x.model_version == self.thumb_model_version]
+            if (thumb_meta.type != neondata.ThumbnailType.NEON and 
+                len(same_thumbs) > 0):
+                same_thumbs = sorted(same_thumbs, key=lambda x: x.rank)
+                video_result.thumbnail_ids.append(same_thumbs[0].key)
+            else:
+                # Fill out the data on this thumb and add it to the results
+                yield thumb_meta.add_image_data(image, self.video_metadata,
+                                                cdn_metadata,
+                                                async=True)
+                yield thumb_meta.score_image(self.model.predictor,
+                                             image=PILImageUtils.to_cv(image))
+                video_result.thumbnail_ids.append(thumb_meta.key)
             
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
@@ -861,7 +883,6 @@ class VideoProcessor(object):
                 # long process, not a big deal, but we might want to
                 # fix that
                 yield thumb.score_image(self.model.predictor,
-                                        self.model_version,
                                         save_object=True)
 
         except neondata.ThumbDownloadError, e:
@@ -1164,7 +1185,7 @@ class VideoClient(multiprocessing.Process):
 
     ##### Model Methods #####
 
-    def load_model(self):
+    def load_model(self, job):
         ''' load model '''
         _log.info('Generating predictor instance')
         aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
@@ -1172,12 +1193,11 @@ class VideoClient(multiprocessing.Process):
         predictor = model.predictor.DeepnetPredictor(
             port=options.model_server_port,
             concurrency=options.request_concurrency,
-            aquila_connection=aquila_conn)
+            aquila_connection=aquila_conn,
+            gender=job.get('gender'),
+            age=job.get('age'))
         predictor.connect()
-        # TODO (nick): Figure out how to get the aquila server to relay the
-        #              model version to the local model.
-        self.model_version = '%s-aqv1.1.250' % os.path.basename(
-            self.model_file)
+        self.model_version = os.path.basename(self.model_file)
         # note, the model file is no longer a complete model, but is instead
         # an input dictionary for local search.
         self.model = model.generate_model(self.model_file, predictor)
@@ -1220,7 +1240,7 @@ class VideoClient(multiprocessing.Process):
             # TODO(mdesnoyer): Only load the model once. Right now,
             # there's a memory problem so we load the model for every
             # job.
-            self.load_model()
+            self.load_model(job)
             vprocessor = VideoProcessor(job, self.model,
                                         self.model_version,
                                         self.cv_semaphore,

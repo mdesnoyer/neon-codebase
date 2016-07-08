@@ -1678,6 +1678,26 @@ class NamespacedStoredObject(StoredObject):
                                [cls.format_key(k) for k in keys], async=True)
         raise tornado.gen.Return(rv) 
 
+class UnsaveableStoredObject(NamespacedStoredObject):
+    '''A Stored object that cannot be saved directly to the DB.'''
+    def __init__(self):
+        self.key = ''
+
+    def save(self):
+        raise NotImplementedError()
+
+    @classmethod
+    def save_all(cls, *args, **kwargs):
+        raise NotImplementedError()
+
+    @classmethod
+    def modify(cls, *args, **kwargs):
+        raise NotImplementedError()
+
+    @classmethod
+    def modify_many(cls, *args, **kwargs):
+        raise NotImplementedError()
+
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
 
@@ -2722,7 +2742,7 @@ class CDNHostingMetadataList(DefaultedStoredObject):
     def get_json_data(self):
         return json.dumps(json.loads(self.to_json())['_data'])
 
-class CDNHostingMetadata(NamespacedStoredObject):
+class CDNHostingMetadata(UnsaveableStoredObject):
     '''
     Specify how to host the the images with one CDN platform.
 
@@ -2810,29 +2830,6 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
         # the created and updated on these objects
         # self.created = self.updated = str(datetime.datetime.utcnow())
-
-    # TODO(sunil or mdesnoyer): Write a function to add a new
-    # rendition size to the list and upload the requisite images to
-    # where they are hosted. Some of the functionality will be in
-    # cdnhosting, but this object will have to be saved too. We
-    # probably want to update all the images in the account or it
-    # could have parameters like a single image, all the images newer
-    # than a date etc.
-
-    def save(self):
-        raise NotImplementedError()
-
-    @classmethod
-    def save_all(cls, *args, **kwargs):
-        raise NotImplementedError()
-
-    @classmethod
-    def modify(cls, *args, **kwargs):
-        raise NotImplementedError()
-
-    @classmethod
-    def modify_many(cls, *args, **kwargs):
-        raise NotImplementedError()
 
     @classmethod
     def _create(cls, key, obj_dict):
@@ -3894,7 +3891,9 @@ class NeonApiRequest(NamespacedStoredObject):
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None,
             callback_state=CallbackState.NOT_SENT, 
-            callback_email=None):
+            callback_email=None,
+            age=None,
+            gender=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -3936,7 +3935,11 @@ class NeonApiRequest(NamespacedStoredObject):
         # what email address should we send this to, when done processing
         # this could be associated to an existing user(username), 
         # but that is not required 
-        self.callback_email = None 
+        self.callback_email = callback_email 
+
+        # Demographic parameters for the video processing
+        self.age = age
+        self.gender= gender
 
     @classmethod
     def key2id(cls, key):
@@ -4759,18 +4762,15 @@ class ThumbnailMetadata(StoredObject):
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
     @tornado.gen.coroutine
-    def score_image(self, predictor, model_version, image=None,
-                    save_object=False):
+    def score_image(self, predictor, image=None, save_object=False):
         '''Adds the model score to the image.
 
         Inputs:
         predictor - a model.predictor.Predictor object used to get the score
-        model_version - name of the model being used
         image - OpenCV image data. If not provided, image will be downloaded
         save_object - If true, the score is saved to the database
         '''
-        if (self.model_version == model_version and 
-            self.model_score is not None):
+        if (self.model_score is not None or self.features is not None):
             # No need to compute the score, it's there
             return
 
@@ -4779,13 +4779,14 @@ class ThumbnailMetadata(StoredObject):
                 self.urls[-1], async=True)
             image = cvutils.imageutils.PILImageUtils.to_cv(pil_image)
 
-        self.model_score = yield predictor.predict(image, async=True)
-        self.model_version = model_version
+        (self.model_score, features, model_version) = \
+          yield predictor.predict(image, async=True)
 
         if save_object:
             def _set_score(x):
                 x.model_score = self.model_score
-                x.model_version = self.model_version
+                x.model_version = model_version
+                x.features = features
             yield ThumbnailMetadata.modify(self.key, _set_score, async=True)
 
     @classmethod
@@ -5000,6 +5001,15 @@ class BillingPlans(StoredObject):
         '''
         return BillingPlans.__name__
 
+class VideoJobThumbnailList(UnsaveableStoredObject):
+    '''Represents the list of thumbnails from a video processing job.'''
+    def __init__(self, age=None, gender=None, thumbnail_ids=None,
+                 model_version=None):
+        self.age = age
+        self.gender = gender
+        self.thumbnail_ids = thumbnail_ids or []
+        self.model_version = model_version
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -5016,9 +5026,17 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None, hidden=None, share_token=None):
-        super(VideoMetadata, self).__init__(video_id) 
-        self.thumbnail_ids = tids or []
+                 publish_date=None, hidden=None, share_token=None,
+                 job_results=None):
+        super(VideoMetadata, self).__init__(video_id)
+        # DEPRECATED in favour of job_results. Will
+        # contain the thumbs from the first job only.
+        self.thumbnail_ids = tids or [] 
+
+        # A list of VideoJobThumbnailList objects representing the
+        # thumbnails extracted for each processing step.
+        self.job_results = job_results or []
+        
         self.url = video_url 
         self.duration = duration # in seconds
         self.video_valence = vid_valence 

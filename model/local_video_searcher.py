@@ -744,7 +744,8 @@ class _Result(object):
     def __init__(self, frameno=None, score=-np.inf, image=None,
                  feat_score=None, meta=None,
                  feat_score_weight=None, feat_score_func=None,
-                 combination_function=None):
+                 combination_function=None, model_vers=None,
+                 aq_features=None):
         self._defined = False
         if score and frameno:
             self._defined = True
@@ -752,6 +753,8 @@ class _Result(object):
                         ' score %.3f') % (frameno, score))
         self.score = score
         self.frameno = frameno
+        self.model_vers = model_vers
+        self.aq_feautres = aq_features
         self._feat_score = feat_score
         self._feat_score_func = feat_score_func
         self._hash = getrandbits(128)
@@ -929,7 +932,8 @@ class ResultsList(object):
             self.dists[entry_idx, idx] = dst
 
     def accept_replace(self, frameno, score, image=None, feat_score=None,
-                       meta=None, feat_score_func=None):
+                       meta=None, feat_score_func=None, model_vers=None,
+                       aq_features=None):
         '''
         Attempts to insert a result into the results list. If it does not
         qualify, it returns False, otherwise returns True
@@ -939,7 +943,9 @@ class ResultsList(object):
                           feat_score=feat_score, meta=meta,
                           feat_score_weight=self._feat_score_weight,
                           feat_score_func=feat_score_func,
-                          combination_function=self._combination_function)
+                          combination_function=self._combination_function,
+                          model_vers=model_vers,
+                          aq_features=aq_features)
             self._considered_thumbs += 1
             if score < self.min:
                 _log.debug('Frame %i [%.3f] rejected due to score' % (frameno,
@@ -1095,7 +1101,7 @@ class ResultsList(object):
     def get_results(self):
         '''
         Returns the results in sorted order, sorted by score. Returns them
-        as (image, score, frameno)
+        as (image, score, frameno, model_vers)
         '''
         with self._lock:
             _log.debug('Dumping results')
@@ -1106,7 +1112,8 @@ class ResultsList(object):
                 if not res_obj._defined:
                     continue
                 image = self._improve_raw_img(res_obj.image)
-                res.append([image, res_obj.score, res_obj.frameno])
+                res.append([image, res_obj.score, res_obj.frameno,
+                            res_obj.model_vers, res_obj.aq_features])
             return res
 
 
@@ -1387,7 +1394,7 @@ class LocalSearcher(object):
     def min_score(self):
         return self.results.min
 
-    def choose_thumbnails(self, video, n=None, video_name='',):
+    def choose_thumbnails(self, video, n=None, video_name=''):
         self._reset()
         if n is None:
             n = self.n_thumbs
@@ -1532,15 +1539,17 @@ class LocalSearcher(object):
             rframes = [self._get_frame(x) for x in frames]
             for frame, frameno in zip(rframes, frames):
                 # TODO: get the scores of these frames more efficiently (async)
-                score = self.predictor.predict(frame)
+                (score, features, model_vers) = self.predictor.predict(
+                    frame)
                 formatted_result = (frame, score, frameno,
-                                    frameno / float(fps), '')
+                                    frameno / float(fps), 
+                                    '', model_vers, features)
                 results.append(formatted_result)
         else:
             _log.debug('%i thumbs found', len(raw_results))
             for rr in raw_results:
                 formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
-                                    '')
+                                    '', rr[3], rr[4])
                 results.append(formatted_result)
         return results
 
@@ -1707,7 +1716,8 @@ class LocalSearcher(object):
             else:
                 meta = None
         try:
-            indi_framescore = self.predictor.predict(best_frame)
+            (indi_framescore, features, model_vers) = self.predictor.predict(
+                best_frame)
         except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
             _log.warn('Problem obtaining score localsearch frame %s: %s',
@@ -1727,7 +1737,8 @@ class LocalSearcher(object):
                                    start_score, end_frame, end_score, best_frameno,
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
-                np.max(comb), meta=meta, feat_score_func=feat_score_func)
+                np.max(comb), meta=meta, feat_score_func=feat_score_func,
+                model_vers=model_vers, aq_features=features)
 
     def _take_sample(self, frameno):
         '''
