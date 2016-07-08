@@ -29,7 +29,6 @@ import model.errors
 import multiprocessing
 import numpy as np
 import os
-import pdb
 import pickle
 from PIL import Image
 import psycopg2

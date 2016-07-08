@@ -1405,7 +1405,7 @@ class LocalSearcher(object):
                   rand_seed, n)
         np.random.seed(rand_seed)
         best, worst = self.choose_thumbnails_impl(video, n, video_name, m)
-        return best + worst
+        return best, worst
 
     def _set_up_testing(self):
         vname = self.video_name
