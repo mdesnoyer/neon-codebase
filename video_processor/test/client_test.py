@@ -85,7 +85,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         #Mock Model methods, use pkl to load captured outputs
         ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = ct_output
+        self.model.choose_thumbnails.return_value = (ct_output, [])
         self.model.score.return_value = 1, 2 
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
                                 "test.mp4") 
@@ -592,7 +592,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
              (np.zeros((480, 640, 3), np.uint8), float('-inf'), 600, 20.0,
               'black'),
              (np.zeros((480, 640, 3), np.uint8), float('-inf'), 900, 30.0,
-              'black')])
+              'black')],
+             [])
         vprocessor = self.setup_video_processor("neon")
         yield vprocessor.process_video(self.test_video_file2, n_thumbs=3)
 
@@ -1636,7 +1637,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         load_model_mock = self.model_patcher.start()
         load_model_mock.return_value = self.model
         ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = ct_output
+        self.model.choose_thumbnails.return_value = (ct_output, [])
         self.predictor_patcher = patch(
             'video_processor.client.model.predictor.DeepnetPredictor')
         self.model.predictor = self.predictor_patcher.start()()

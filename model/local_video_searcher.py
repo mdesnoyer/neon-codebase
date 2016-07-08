@@ -918,7 +918,7 @@ class ResultsList(object):
             if n_thumbs is not None:
                 self.n_thumbs = n_thumbs
             self.results = [_Result() for x in range(self.n_thumbs)]
-            self.bad_results = [_Result() for x in range(self.m_thumbs)]
+            self.worst_results = [_Result() for x in range(self.m_thumbs)]
             self.min = self.results[0].score
             self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
             self.failed_scoring = 0
@@ -1459,7 +1459,7 @@ class LocalSearcher(object):
                            max_variety=self.max_variety,
                            combination_function=self.combiner.result_combine)
         # Storage for the bottom m frames
-        self.bad_results = ResultsList(n_thumbs=self.m_thumbs,
+        self.worst_results = ResultsList(n_thumbs=self.m_thumbs,
                            min_acceptable=f_min_var_acc,
                            max_rejectable=f_max_var_rej,
                            feat_score_weight=self._feat_score_weight,
@@ -1536,9 +1536,10 @@ class LocalSearcher(object):
             _log.error(msg)
             raise model.errors.PredictionError(msg)
 
-        good, bad = (self._format_result(self.results),
-            self._format_result(self.bad_results, flip_score=True))
-        return (good, bad)
+        # TODO ret good as bad here but switch when working
+        best, worst = (self._format_result(self.results),
+            self._format_result(self.results))
+        return (best, worst)
 
     def _format_result(self, results, flip_score=None):
         '''Given a ResultsList, return the expected format for choose_thumbnails_impl'''

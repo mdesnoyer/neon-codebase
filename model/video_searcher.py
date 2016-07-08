@@ -74,13 +74,14 @@ class VideoSearcher(object):
     def __str__(self):
         return utils.obj.full_object_str(self)
 
-    def choose_thumbnails(self, video, n=1, video_name=''):
+    def choose_thumbnails(self, video, n=1, video_name='', m=0):
         '''Selects the top n thumbnails from a video.
 
         Inputs:
         video - Hook to a video. Expects cv2.VideoCapture
         n - Number of thumbnails to return.  Sorted by decreasing score.
         video_name - Name of the video for logging purposes
+        m - Number of bad thumbnails to return.
 
         Returns:
         ([(image,score,frame_no,timecode,attribute)]) sorted by score
@@ -94,10 +95,10 @@ class VideoSearcher(object):
         
         thumbs = self.choose_thumbnails_impl(video, new_n, video_name)
         if self.filter_dups:
-            return self.filter_duplicates(thumbs, n, 0)
-        return thumbs
+            return self.filter_duplicates(thumbs, n, 0, m)
+        return thumbs, []
 
-    def choose_thumbnails_impl(self, video, n=1, video_name=''):
+    def choose_thumbnails_impl(self, video, n=1, video_name='', m=0):
         '''Implementation of choose_thumbnails.
 
         Returns:
@@ -194,7 +195,7 @@ class BisectSearcher(VideoSearcher):
                                              colorname_threshold)
         self.processing_time_ratio = processing_time_ratio
 
-    def choose_thumbnails_impl(self, video, n=1, video_name=''):
+    def choose_thumbnails_impl(self, video, n=1, video_name='', m=0):
         brackets = []
         scores = {}
         frames_processed = 0
@@ -450,7 +451,7 @@ class UniformSamplingSearcher(VideoSearcher):
         
         self.sample_step = sample_step # Step in seconds within the video
 
-    def choose_thumbnails_impl(self, video, n=1, video_name=''):
+    def choose_thumbnails_impl(self, video, n=1, video_name='', m=0):
         results = []
             
         duration = video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)

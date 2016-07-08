@@ -208,6 +208,7 @@ class VideoProcessor(object):
         self.model = model
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
+        self.bad_thumbnails = []
 
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
