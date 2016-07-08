@@ -221,7 +221,7 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     return agg_stats
 
 def count_unique_index(data, level='video_id'):
-    groups = [x for x in data.index.names if x not in level]
+    groups = [x for x in data.index.names if x != level]
     if len(groups) == 0:
         return pandas.Series(len(set(data.index)))
     return data.reset_index().groupby(groups).apply(
@@ -253,7 +253,7 @@ def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
 
     return pandas.Series(lift)
 
-def calc_meta_analysis_from_dataframe(data):
+def calc_meta_analysis_from_dataframe(data, level='video_id'):
     '''Calculate the meta analysis from a dataframe
 
     Using random effects model assumption on the relative risk (or
@@ -269,6 +269,12 @@ def calc_meta_analysis_from_dataframe(data):
     data = data[(data['conv_base'] > 0) & (data['conv_thumb'] > 0) &
                 (data['type'] == 'neon')]
 
+    groups = [x for x in data.index.names if x != level]
+    def _safe_sum(mat):
+        if len(groups) > 0:
+            return mat.groupby(level=groups).sum()
+        return mat.sum()
+
     n_neon = data['conv_thumb'] / data['ctr_thumb']
     n_base = data['conv_base'] / data['ctr_base']
 
@@ -277,23 +283,28 @@ def calc_meta_analysis_from_dataframe(data):
                      (1-data['ctr_base']) / (data['ctr_base'] * n_base))
 
     w = 1 / var_log_ratio
-    w_sum = np.sum(w)
+    w_sum = _safe_sum(w)
 
     q = w.dot(np.square(log_ratio)) - ((w.dot(log_ratio) ** 2) / w_sum)
-    c = w_sum - np.sum(np.square(w)) / w_sum
+    c = w_sum - _safe_sum(np.square(w)) / w_sum
 
-    t_2 = max(0, (q - len(data) + 1) / c)
+    if len(groups) > 0:
+        t2 = ((q - data.groupby(level=groups).count() + 1) / c).apply(
+            lambda x: max(x, 0))
+    else:
+        t_2 = max(0, (q - len(data) + 1) / c)
     w_star = 1 / (var_log_ratio + t_2)
 
-    mean_log_ratio_star = w_star.dot(log_ratio) / np.sum(w_star)
-    var_log_ratio_star = 1 / np.sum(w_star)
+    mean_log_ratio_star = w_star.dot(log_ratio) / _safe_sum((w_star)
+    var_log_ratio_star = 1 / _safe_sum(w_star)
     standard_error = np.sqrt(var_log_ratio_star)
 
     low = np.exp(mean_log_ratio_star - 1.96*standard_error)
     up = np.exp(mean_log_ratio_star + 1.96*standard_error)
     mn = np.exp(mean_log_ratio_star)
 
-    p_value = (1-scipy.stats.norm.sf(mean_log_ratio_star / standard_error)) * 2 
+    p_value = (1 - (mean_log_ratio_star / standard_error).apply(
+        scipy.stats.norm.sf)) * 2 
 
     d = {
         'mean' : mn - 1,
