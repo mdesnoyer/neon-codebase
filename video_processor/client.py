@@ -596,6 +596,8 @@ class VideoProcessor(object):
             statemon.state.increment('video_read_error')
             raise BadVideoError(msg)
 
+        _log.info('Top %d bot %d' % (len(top_results), len(bottom_results)))
+
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in top_results])
         rank=0
@@ -623,8 +625,10 @@ class VideoProcessor(object):
                 model_version=self.model_version,
                 frameno=frame_no,
                 filtered=attribute)
-            self.thumbnails.append((meta, PILImageUtils.from_cv(image)))
+            self.bad_thumbnails.append((meta, PILImageUtils.from_cv(image)))
 
+        _log.info([(t[0].frameno, t[0].key) for t in self.thumbnails])
+        _log.info([(t[0].frameno, t[0].key) for t in self.bad_thumbnails])
 
         # Get the baseline frames of the video
         yield self._get_center_frame(video_file)
@@ -797,6 +801,7 @@ class VideoProcessor(object):
                 cdn_metadata=cdn_metadata,
                 save_objects=False,
                 async=True)
+
         for thumb_meta, image in self.bad_thumbnails:
             yield self.video_metadata.add_bad_thumbnail(
                 thumb_meta,
@@ -808,7 +813,7 @@ class VideoProcessor(object):
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
-            for new_thumb, garb in self.thumbnails:
+            for new_thumb, _ in self.thumbnails + self.bad_thumbnails:
                 old_thumb = t_objs[new_thumb.key]
                 # There was already an entry for this thumb, so update
                 urlset = set(new_thumb.urls + old_thumb.urls)
@@ -825,12 +830,15 @@ class VideoProcessor(object):
                 old_thumb.filtered = new_thumb.filtered
         try:
             new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
-                [x[0].key for x in self.thumbnails],
+                [x[0].key for x in self.thumbnails + self.bad_thumbnails],
                 _merge_thumbnails,
                 create_missing=True,\
                 async=True)
-            if len(self.thumbnails) > 0 and len(new_thumb_dict) == 0:
+            if len(self.thumbnails) + len(self.bad_thumbnails) > 0 and len(new_thumb_dict) == 0:
                 raise DBError("Couldn't change some thumbs")
+            #_log.info(self.thumbnails)
+            #_log.info(self.bad_thumbnails)
+            #_log.info(new_thumb_dict)
         except Exception, e:
             _log.error("Error writing thumbnail data to database: %s" % e)
             statemon.state.increment('save_tmdata_error')
@@ -845,9 +853,9 @@ class VideoProcessor(object):
                 neondata.ThumbnailType.NEON,
                 neondata.ThumbnailType.CENTERFRAME,
                 neondata.ThumbnailType.RANDOM]]
-            tidset = set(keep_thumbs +
-                         self.video_metadata.thumbnail_ids)
+            tidset = set(keep_thumbs + self.video_metadata.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
+            video_obj.bad_thumbnail_ids = [t[0].key for t in self.bad_thumbnails]
             video_obj.url = self.video_metadata.url
             video_obj.duration = self.video_metadata.duration
             video_obj.video_valence = self.video_metadata.video_valence
@@ -1015,7 +1023,7 @@ class VideoProcessor(object):
             pass 
         except Exception as e:
             rv = False  
-            _log.error('Unexcepted error %s when sending email')  
+            _log.error('Unexcepted error %s when sending email' % e)  
         finally: 
             raise tornado.gen.Return(rv) 
         

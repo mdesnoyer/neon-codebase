@@ -918,7 +918,6 @@ class ResultsList(object):
             if n_thumbs is not None:
                 self.n_thumbs = n_thumbs
             self.results = [_Result() for x in range(self.n_thumbs)]
-            self.worst_results = [_Result() for x in range(self.m_thumbs)]
             self.min = self.results[0].score
             self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
             self.failed_scoring = 0
@@ -1335,6 +1334,7 @@ class LocalSearcher(object):
         self.video = None
         self.video_name = None
         self.results = None
+        self.worst_results = []
         self.stats = dict()
         self.fps = None
         self.col_stat = None
@@ -1459,13 +1459,8 @@ class LocalSearcher(object):
                            max_variety=self.max_variety,
                            combination_function=self.combiner.result_combine)
         # Storage for the bottom m frames
-        self.worst_results = ResultsList(n_thumbs=self.m_thumbs,
-                           min_acceptable=f_min_var_acc,
-                           max_rejectable=f_max_var_rej,
-                           feat_score_weight=self._feat_score_weight,
-                           adapt_improve=self.adapt_improve,
-                           max_variety=self.max_variety,
-                           combination_function=self.combiner.result_combine)
+        self.worst_results = []
+
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
@@ -1536,17 +1531,22 @@ class LocalSearcher(object):
             _log.error(msg)
             raise model.errors.PredictionError(msg)
 
-        # TODO ret good as bad here but switch when working
-        best, worst = (self._format_result(self.results),
-            self._format_result(self.worst_results, flip_score=True))
+        # Format the best.
+        best = self._format_result(self.results)
+
+        # Sort the worst, then invert the score of each. This
+        # gives the best-of-the-worst in order down to the worst, with
+        # the score oriented the same as the best frames' scores
+        worst = [
+            (rr[0], -rr[1], rr[2], rr[2] / float(self.fps))
+            for rr in sorted(self.worst_results, key=lambda x: x[1])]
         return (best, worst)
 
-    def _format_result(self, results, flip_score=None):
+    def _format_result(self, results):
         '''Given a ResultsList, return the expected format for choose_thumbnails_impl'''
 
         rv = []
         raw_results = results.get_results()
-        unit = -1 if flip_score else 1
 
         if not len(raw_results):
             _log.debug(
@@ -1568,7 +1568,7 @@ class LocalSearcher(object):
                 score = self.predictor.predict(frame)
                 formatted_result = (
                     frame,
-                    unit * score,
+                    score,
                     frameno,
                     frameno / float(self.fps), '')
                 rv.append(formatted_result)
@@ -1577,7 +1577,7 @@ class LocalSearcher(object):
             for rr in raw_results:
                 formatted_result = (
                     rr[0],
-                    unit * rr[1],
+                     rr[1],
                     rr[2],
                     rr[2] / float(self.fps),
                     '')
@@ -1634,6 +1634,7 @@ class LocalSearcher(object):
                 try:
                     with self._act_lock:
                         self._active_searches += 1
+                    _log.info('conduct local search %s' % args)
                     self._conduct_local_search(*args)
                     with self._act_lock:
                         self._active_searches -= 1
@@ -1702,9 +1703,6 @@ class LocalSearcher(object):
             best_frameno = framenos[np.argmax(comb)]
             best_frame = frames[np.argmax(comb)]
             best_gold = gold[np.argmax(comb)]
-            worst_frameno = framenos[np.argmin(comb)]
-            worst_frame = frames[np.argmin(comb)]
-            worst_gold = gold[np.argmin(comb)]
             # unbind gold, so that you don't have a MEMORY CATASTROPHE
             del gold
             # ---------- START OF TEXT PROCESSING
@@ -1771,8 +1769,6 @@ class LocalSearcher(object):
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
                 np.max(comb), meta=meta, feat_score_func=feat_score_func)
-            self.worst_results.accept_replace(worst_frameno, -framescore, worst_gold,
-                -np.min(comb), meta=meta, feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):
         '''
@@ -1802,7 +1798,15 @@ class LocalSearcher(object):
                 self.results.register_failure()
             return
         with self._proc_lock:
-            # Created a sorted list and add a tuple of framescore, frame, minheap sized to m
+
+            # Keep a small heap of the worst frames.
+            _item = (frames[0], -frame_score, frameno)
+            if len(self.worst_results) < self.m_thumbs:
+                self.worst_results.append(_item)
+            else:
+                if -frame_score > self.worst_results[0][1]:
+                    heapq.heapreplace(self.worst_results, _item)
+
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
             self.search_algo.update(frameno, frame_score)
