@@ -278,7 +278,7 @@ def calc_meta_analysis_from_dataframe(data, level='video_id'):
     n_neon = data['conv_thumb'] / data['ctr_thumb']
     n_base = data['conv_base'] / data['ctr_base']
 
-    log_ratio = (data['ctr_thumb'] / data['ctr_base']).apply(np.log)
+    log_ratio = np.log(data['ctr_thumb'] / data['ctr_base'])
     var_log_ratio = ((1-data['ctr_thumb']) / (data['ctr_thumb'] * n_neon) +
                      (1-data['ctr_base']) / (data['ctr_base'] * n_base))
 
@@ -303,8 +303,12 @@ def calc_meta_analysis_from_dataframe(data, level='video_id'):
     up = np.exp(mean_log_ratio_star + 1.96*standard_error)
     mn = np.exp(mean_log_ratio_star)
 
-    p_value = (1 - (mean_log_ratio_star / standard_error).apply(
-        scipy.stats.norm.sf)) * 2 
+    if len(groups) > 0:
+        p_value = 2 * (1 - (mean_log_ratio_star / standard_error).apply(
+            scipy.stats.norm.sf))
+    else:
+        p_value = 2 * (1 - scipy.stats.norm.sf(mean_log_ratio_star /
+                                               standard_error))
 
     d = {
         'mean' : mn - 1,
