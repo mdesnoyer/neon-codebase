@@ -379,7 +379,7 @@ class ImpalaTableBuilder(threading.Thread):
         self.status = 'RUNNING'
         _log.debug("Event '%s' table build thread running" % self.event)
         try:
-            self.table.cluster.connect(os.path.basename(__file__))
+            self.table.cluster.connect()
 
             table = self.table._parquet_table()
             if self.table.exists(table):
@@ -460,7 +460,7 @@ class ImpalaTableLoader(threading.Thread):
         _log.info("Event '%s' table build thread running" % self.event)
 
         try:
-            self.table.cluster.connect(os.path.basename(__file__))
+            self.table.cluster.connect()
             self.table.transport.open()
             avro_table = self.table._avro_table(self.execution_date)
             if self.table.exists(avro_table):
@@ -473,7 +473,7 @@ class ImpalaTableLoader(threading.Thread):
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):
-                _log.debug("Parquet table for event '%s' exists: %s" % 
+                _log.info("Parquet table for event '%s' exists: %s" % 
                            (self.event, parq_table))
                 self.table.load_parquet_table(self.execution_date,
                                               self.hour_interval)
@@ -517,7 +517,7 @@ def wait_for_running_batch_job(cluster, sample_period=30):
     Returns: True if the job was running at some point.
     '''
     found_job = False
-    cluster.connect(os.path.basename(__file__))
+    cluster.connect()
 
     while True:
         response = \
@@ -560,7 +560,7 @@ def get_last_successful_batch_output(cluster):
 
     Returns: The s3 patch of the last sucessful job, or None if there wasn't one
     '''
-    cluster.connect(os.path.basename(__file__))
+    cluster.connect()
 
     response = cluster.query_resource_manager(
         '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')

@@ -183,7 +183,7 @@ class Cluster():
         with self._lock:
             if self.cluster_type != new_type:
                 self.cluster_id = None
-                self.connect(os.path.basename(__file__))
+                self.connect()
 
     def set_public_ip(self, new_ip):
         if new_ip is None or self.public_ip == new_ip:
@@ -226,7 +226,7 @@ class Cluster():
                                            (new_ip, self.master_id))
             self.public_ip = new_ip
 
-    def connect(self, calling_script):
+    def connect(self, cluster_manager_create_cluster=False):
         '''Connects to the cluster.
 
         If it's up, connect to it, otherwise create it
@@ -237,12 +237,11 @@ class Cluster():
                           "Starting a new one instead"
                           % (self.cluster_name, self.cluster_type))
                 # Below condition is to prevent an airflow task accidentally creating
-                # a cluster when the cluster_manager is bringing one up
-                if calling_script == 'cluster_manager.py':
-                    _log.info("creating the cluster since calling script is %s" % calling_script)
+                if cluster_manager_create_cluster:
+                    _log.info("creating the cluster as the request came from cluster manager")
                     self._create()
                 else:
-                    _log.info("Only cluster_manager can create the cluster. %s cannot" % calling_script)
+                    _log.error("cluster not created as the request for create was not from cluster manager")
             else:
                 _log.info("Found cluster %s of type %s with id %s" %
                           (self.cluster_name, self.cluster_type,
@@ -318,7 +317,7 @@ class Cluster():
             extra_ops['mapreduce.reduce.memory.mb'] = 5000
             extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
 
-        self.connect(os.path.basename(__file__))
+        self.connect()
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
                                           input_path, output_path)
 
@@ -588,7 +587,7 @@ class Cluster():
                              ' be set')
 
         with self._lock:
-            self.connect(os.path.basename(__file__))
+            self.connect()
             
             # First find the instance group
             conn = EmrConnection(self.cluster_region)

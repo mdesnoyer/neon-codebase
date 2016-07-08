@@ -150,7 +150,7 @@ def _create_tables(**kwargs):
     """
     event = kwargs['event']
     cluster = ClusterGetter.get_cluster()
-    cluster.connect(os.path.basename(__file__))
+    cluster.connect()
 
     builder = stats.impala_table.ImpalaTableBuilder(cluster, event)
     builder.run()
@@ -357,7 +357,7 @@ def _run_cluster_command(cmd, **kwargs):
     :return:
     """
     cluster = ClusterGetter.get_cluster()
-    cluster.connect(os.path.basename(__file__))
+    cluster.connect()
     ssh_conn = stats.cluster.ClusterSSHConnection(cluster)
     ssh_conn.execute_remote_command(cmd)
 
@@ -369,7 +369,7 @@ def _check_compute_cluster_capacity(op_kwargs):
     """
     ti = op_kwargs['task_instance']
     cluster = ClusterGetter.get_cluster()
-    cluster.connect(os.path.basename(__file__))
+    cluster.connect()
     if False:
         cluster.change_instance_group_size(group_type='TASK', incr_amount=1)
     # else:
@@ -530,18 +530,7 @@ def _run_mr_cleaning_job(**kwargs):
     _log.info("output path received is %s" % kwargs['output_path'])
 
     cluster = ClusterGetter.get_cluster()
-    cluster.connect(os.path.basename(__file__))
-
-    # hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
-    # hdfs_dir = 'mnt/cleaned'
-    # run_time = time.strftime("%Y-%m-%d-%H-%M")
-
-    # cleaned_output_path = "%s/%s/%s" % (
-    #                 hdfs_path,
-    #                 hdfs_dir,
-    #                 run_time)
-
-    #_log.info('cleaned output path is %s' % cleaned_output_path)
+    cluster.connect()
 
     staging_prefix = _get_s3_staging_prefix(dag=dag,
                                             execution_date=execution_date,
@@ -562,8 +551,6 @@ def _run_mr_cleaning_job(**kwargs):
         task=task))
 
     _log.info("Output of clean up job goes to %s" % cleaning_job_output_path)
-    _log.info("Output bucket is %s" % output_bucket)
-    _log.info("Output prefix is %s" % cleaned_prefix)
 
     jar_path = os.path.join(os.path.dirname(__file__), '..', '..', 'java',
                             'target', options.mr_jar)
@@ -600,7 +587,7 @@ def _load_impala_table(**kwargs):
 
     _log.info("{task}: Loading data!".format(task=task))
     cluster = ClusterGetter.get_cluster()
-    cluster.connect(os.path.basename(__file__))
+    cluster.connect()
     try:
         _log.info("Path to build for impala is %s" % os.path.join('s3://', output_bucket, cleaned_prefix))
 
@@ -670,7 +657,7 @@ def _execution_date_has_input_files(**kwargs):
 
 def _update_table_build_times(**kwargs):
     cluster = ClusterGetter.get_cluster()
-    cluster.connect(os.path.basename(__file__))
+    cluster.connect()
     stats.impala_table.update_table_build_times(cluster)
 
 
@@ -780,7 +767,6 @@ no_input_files = DummyOperator(
     dag=clicklogs)
 no_input_files.set_upstream(has_input_files)
 
-
 # Run the Map/Reduce cleaning job on the staged files
 mr_cleaning_job = PythonOperator(
     task_id='mr_cleaning_job',
@@ -796,7 +782,6 @@ mr_cleaning_job = PythonOperator(
     on_retry_callback=_check_compute_cluster_capacity)
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
-
 
 # Load the cleaned files from Map/Reduce into Impala
 load_impala_tables = []
@@ -820,7 +805,6 @@ for event in __EVENTS:
     op.set_upstream([create_op, mr_cleaning_job])
     load_impala_tables.append(op)
 
-
 # Delete the staging files once the Map/Reduce job is done
 delete_staging_files = PythonOperator(
     task_id='delete_staging_files',
@@ -838,7 +822,6 @@ update_table_build_times = PythonOperator(
     provide_context=True,
     python_callable=_update_table_build_times)
 update_table_build_times.set_upstream(load_impala_tables)
-
 
 hdfs_maintenance = PythonOperator(
     task_id='hdfs_maintenance',

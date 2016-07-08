@@ -53,7 +53,7 @@ def main():
                 except subprocess.CalledProcessError as e:
                     _log.error('Error pausing the dag: %s' % e.output)
 
-                cluster.connect(os.path.basename(__file__))
+                cluster.connect(cluster_manager_create_cluster=True)
                 statemon.state.tasks_cleared = 0
 
             if not statemon.state.tasks_cleared:
