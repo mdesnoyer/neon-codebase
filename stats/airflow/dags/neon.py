@@ -728,20 +728,20 @@ clicklogs = DAG('clicklogs', default_args=default_args,
 # TODO(mdesnoyer): Delete this because a separate process should
 # handle bringing the cluster back up.
 
-# Start the EMR cluster if it isn't running
-check_cluster = PythonOperator(
-    task_id='check_cluster',
-    dag=clicklogs,
-    python_callable=_cluster_status,
-    execution_timeout=timedelta(hours=1))
-# Use for alarming on failure
-# on_failure_callback=
+# # Start the EMR cluster if it isn't running
+# check_cluster = PythonOperator(
+#     task_id='check_cluster',
+#     dag=clicklogs,
+#     python_callable=_cluster_status,
+#     execution_timeout=timedelta(hours=1))
+# # Use for alarming on failure
+# # on_failure_callback=
 
-# Create Cloudwatch Alarms for the cluster
-cloudwatch_metrics = DummyOperator(
-    task_id='cloudwatch_metrics',
-    dag=clicklogs)
-cloudwatch_metrics.set_upstream(check_cluster)
+# # Create Cloudwatch Alarms for the cluster
+# cloudwatch_metrics = DummyOperator(
+#     task_id='cloudwatch_metrics',
+#     dag=clicklogs)
+# cloudwatch_metrics.set_upstream(check_cluster)
 
 # Wait a while after the execution date interval has passed before
 # processing to allow Trackserver/Flume to transmit log files to be to
@@ -761,7 +761,7 @@ has_input_files = BranchPythonOperator(
     python_callable=_execution_date_has_input_files,
     provide_context=True,
     op_kwargs=dict(input_path=options.input_path))
-has_input_files.set_upstream(cloudwatch_metrics)
+#has_input_files.set_upstream(cloudwatch_metrics)
 
 # Copy files for the execution date from S3 source location in to an
 # S3 staging location
