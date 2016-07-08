@@ -5152,7 +5152,7 @@ class VideoMetadata(StoredObject):
 
             def _modify(v):
                 if append_to_good:
-                    v.thumbnail_ids(thumbn.key)
+                    v.thumbnail_ids(thumb.key)
                 else:
                     v.bad_thumbnail_ids.append(thumb.key)
 
