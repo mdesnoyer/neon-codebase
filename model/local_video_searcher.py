@@ -1538,7 +1538,7 @@ class LocalSearcher(object):
 
         # TODO ret good as bad here but switch when working
         best, worst = (self._format_result(self.results),
-            self._format_result(self.results))
+            self._format_result(self.worst_results, flip_score=True))
         return (best, worst)
 
     def _format_result(self, results, flip_score=None):
@@ -1771,6 +1771,8 @@ class LocalSearcher(object):
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
                 np.max(comb), meta=meta, feat_score_func=feat_score_func)
+            self.worst_results.accept_replace(worst_frameno, -framescore, worst_gold,
+                -np.min(comb), meta=meta, feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):
         '''
@@ -1800,6 +1802,7 @@ class LocalSearcher(object):
                 self.results.register_failure()
             return
         with self._proc_lock:
+            # Created a sorted list and add a tuple of framescore, frame, minheap sized to m
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
             self.search_algo.update(frameno, frame_score)
