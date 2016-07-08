@@ -285,7 +285,8 @@ def calc_meta_analysis_from_dataframe(data, level='video_id'):
     w = 1 / var_log_ratio
     w_sum = _safe_sum(w)
 
-    q = w.dot(np.square(log_ratio)) - ((w.dot(log_ratio) ** 2) / w_sum)
+    q = _safe_sum(w * np.square(log_ratio)) - (
+        (_safe_sum(w * log_ratio) ** 2) / w_sum)
     c = w_sum - _safe_sum(np.square(w)) / w_sum
 
     if len(groups) > 0:
@@ -295,7 +296,7 @@ def calc_meta_analysis_from_dataframe(data, level='video_id'):
         t_2 = max(0, (q - len(data) + 1) / c)
     w_star = 1 / (var_log_ratio + t_2)
 
-    mean_log_ratio_star = w_star.dot(log_ratio) / _safe_sum(w_star)
+    mean_log_ratio_star = _safe_sum(w_star * log_ratio) / _safe_sum(w_star)
     var_log_ratio_star = 1 / _safe_sum(w_star)
     standard_error = np.sqrt(var_log_ratio_star)
 
