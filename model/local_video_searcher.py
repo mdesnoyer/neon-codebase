@@ -918,6 +918,7 @@ class ResultsList(object):
             if n_thumbs is not None:
                 self.n_thumbs = n_thumbs
             self.results = [_Result() for x in range(self.n_thumbs)]
+            self.bad_results = [_Result() for x in range(self.m_thumbs)]
             self.min = self.results[0].score
             self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
             self.failed_scoring = 0
@@ -1535,14 +1536,15 @@ class LocalSearcher(object):
             _log.error(msg)
             raise model.errors.PredictionError(msg)
 
-        return (self._format_result(self.results),
+        good, bad = (self._format_result(self.results),
             self._format_result(self.bad_results, flip_score=True))
+        return (good, bad)
 
     def _format_result(self, results, flip_score=None):
         '''Given a ResultsList, return the expected format for choose_thumbnails_impl'''
 
         rv = []
-        raw_results = self.results.get_results()
+        raw_results = results.get_results()
         unit = -1 if flip_score else 1
 
         if not len(raw_results):
@@ -1767,9 +1769,6 @@ class LocalSearcher(object):
                                    start_score, end_frame, end_score, best_frameno,
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
-                np.max(comb), meta=meta, feat_score_func=feat_score_func)
-            # For bad, invert framescore.
-            self.bad_results.accept_replace(worst_frameno, -framescore, worst_gold,
                 np.max(comb), meta=meta, feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):

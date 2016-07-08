@@ -88,7 +88,7 @@ class Model(object):
 
        
     def choose_thumbnails(self, video, n=1, video_name='', m=0):
-        '''Select the top n thumbnails from a video.
+        '''Select the top n and/or bottom m thumbnails from a video.
 
         Returns:
         ([(image,score,frame_no,timecode,attribute)]) sorted by score

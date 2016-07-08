@@ -611,6 +611,7 @@ def id_generator(size=32,
 class ThumbnailType(object):
     ''' Thumbnail type enumeration '''
     NEON        = "neon"
+    BAD_NEON    = "bad_neon" # Low scoring, bad thumbnails for contrast
     CENTERFRAME = "centerframe"
     BRIGHTCOVE  = "brightcove" # DEPRECATED. Will be DEFAULT instead
     OOYALA      = "ooyala" # DEPRECATED. Will be DEFAULT instead
@@ -5019,9 +5020,11 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None, hidden=None, share_token=None):
+                 publish_date=None, hidden=None, share_token=None,
+                 bad_tids=[]):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
+        self.bad_thumbnail_ids = bad_tids = []
         self.url = video_url 
         self.duration = duration # in seconds
         self.video_valence = vid_valence 
@@ -5102,20 +5105,42 @@ class VideoMetadata(StoredObject):
 
         Inputs:
         @thumb: ThumbnailMetadata object. Should be incomplete
-                because image based data will be added along with 
+                because image based data will be added along with
                 information about the video. The object will be updated with
                 the proper key and other information
         @image: PIL Image
         @cdn_metadata: A list of CDNHostingMetadata objects for how to upload
-                       the images. If this is None, it is looked up, which is 
+                       the images. If this is None, it is looked up, which is
                        slow.
-        @save_objects: If true, the database is updated. Otherwise, 
+        @save_objects: If true, the database is updated. Otherwise,
                        just this object is updated along with the thumbnail
                        object.
         '''
+        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=None,
+                                       save_objects=False, video=None,
+                                       append_to_good=True)
+        raise tornado.gen.Return(rv)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_bad_thumbnail(self, thumb, image, cdn_metadata=None,
+                      save_objects=False, video=None):
+        '''Add a bad thumbnail to the video. Reference above.'''
+        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=None,
+                                       save_objects=False, video=None,
+                                       append_to_good=False)
+        raise tornado.gen.Return(rv)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _add_thumbnail(self, thumb, image, cdn_metadata=None,
+                      save_objects=False, video=None, append_to_good=True):
+
         thumb.video_id = self.key
-        yield thumb.add_image_data(image, self, cdn_metadata, 
-                                   async=True)
+        yield thumb.add_image_data(image, self, cdn_metadata, async=True)
+
+        target = self.thumbnail_ids if append_to_good else self.bad_thumbnail_ids
+
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
@@ -5125,20 +5150,28 @@ class VideoMetadata(StoredObject):
             if not sucess:
                 raise IOError("Could not save thumbnail")
 
-            updated_video = yield tornado.gen.Task(
-                VideoMetadata.modify,
-                self.key,
-                lambda x: x.thumbnail_ids.append(thumb.key))
+            def _modify(v):
+                if append_to_good:
+                    v.thumbnail_ids(thumbn.key)
+                else:
+                    v.bad_thumbnail_ids.append(thumb.key)
+
+            updated_video = yield self.modify(
+                    self.key,
+                    _modify,
+                    async=True)
+
             if updated_video is None:
                 # It wasn't in the database, so save this object
-                self.thumbnail_ids.append(thumb.key)
-                sucess = yield tornado.gen.Task(self.save)
+                target.append(thumb.key)
+                sucess = yield self.save(async=True)
                 if not sucess:
                     raise IOError("Could not save video data")
             else:
                 self.__dict__ = updated_video.__dict__
         else:
-            self.thumbnail_ids.append(thumb.key)
+            target.append(thumb.key)
+            sucess = yield self.save(async=True)
 
         raise tornado.gen.Return(thumb)
 

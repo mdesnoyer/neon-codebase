@@ -185,8 +185,8 @@ class VideoProcessor(object):
         self.n_thumbs = int(self.job_params.get('topn', None) or
                             self.job_params.get('api_param', None) or 5)
         self.n_thumbs = max(self.n_thumbs, 1)
-        self.m_thumbs = int(self.job_params.get('botm', None) or 5)
-        self.m_thumbs = max(self.m_thumbs, 0)
+        self.m_thumbs = int(self.job_params.get('botm', None) or 6)
+        self.m_thumbs = max(self.m_thumbs, 1)
 
         # The default thumb url extracted from the video url
         self.extracted_default_thumbnail = None
@@ -483,7 +483,7 @@ class VideoProcessor(object):
             raise VideoDownloadError(msg)
 
     @tornado.gen.coroutine
-    def process_video(self, video_file, n_thumbs=1, m_thumbs=None):
+    def process_video(self, video_file, n_thumbs=1, m_thumbs=0):
         ''' process all the frames from the partial video downloaded '''
         # The video might have finished by somebody else so double
         # check that we still want to process it.
@@ -581,13 +581,14 @@ class VideoProcessor(object):
         self.model.update_processing_strategy(processing_strategy)
 
         try:
-            results = \
+            top_results, bottom_results = \
               self.model.choose_thumbnails(
                   mov,
                   n=n_thumbs,
                   m=m_thumbs,
                   video_name=self.video_url)
-            results = sorted(results, key=lambda x:x[1], reverse=True)
+            top_results = sorted(top_results, key=lambda x:x[1], reverse=True)
+            bottom_results = sorted(bottom_results, key=lambda x: x[1], reverse=True)
         except model.errors.VideoReadError:
             msg = "Error using OpenCV to read video. %s" % self.video_url
             _log.error(msg)
@@ -595,9 +596,9 @@ class VideoProcessor(object):
             raise BadVideoError(msg)
 
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
-                                           for x in results])
+                                           for x in top_results])
         rank=0
-        for image, score, frame_no, timecode, attribute in results:
+        for image, score, frame_no, timecode, attribute in top_results:
             # Only return unfiltered images unless they are all
             # filtered, in which case, return them all.
             if not exists_unfiltered_images or (
@@ -612,6 +613,17 @@ class VideoProcessor(object):
                     rank=rank)
                 self.thumbnails.append((meta, PILImageUtils.from_cv(image)))
                 rank += 1 
+
+        for image, score, frame, timecode, attribute in bottom_results:
+            meta = neondata.ThumbnailMetadata(
+                None,
+                ttype=neondata.ThumbnailType.BAD_NEON,
+                model_score=score,
+                model_version=self.model_version,
+                frameno=frame_no,
+                filtered=attribute)
+            self.thumbnails.append((meta, PILImageUtils.from_cv(image)))
+
 
         # Get the baseline frames of the video
         yield self._get_center_frame(video_file)
@@ -776,14 +788,22 @@ class VideoProcessor(object):
             statemon.state.increment('no_thumbs')
             _log.warn("No thumbnails extracted for video %s url %s"\
                     % (self.video_metadata.key, self.video_metadata.url))
-        
+
         for thumb_meta, image in self.thumbnails:
             yield self.video_metadata.add_thumbnail(
-                thumb_meta, image,
+                thumb_meta,
+                image,
                 cdn_metadata=cdn_metadata,
                 save_objects=False,
                 async=True)
-            
+        for thumb_meta, image in self.bad_thumbnails:
+            yield self.video_metadata.add_bad_thumbnail(
+                thumb_meta,
+                image,
+                cdn_metadata=cdn_metadata,
+                save_objects=False,
+                async=True)
+
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
