@@ -289,7 +289,7 @@ def calc_meta_analysis_from_dataframe(data, level='video_id'):
     c = w_sum - _safe_sum(np.square(w)) / w_sum
 
     if len(groups) > 0:
-        t2 = ((q - data.groupby(level=groups).count() + 1) / c).apply(
+        t2 = ((q - data.groupby(level=groups).count().ix[:,0] + 1) / c).apply(
             lambda x: max(x, 0))
     else:
         t_2 = max(0, (q - len(data) + 1) / c)
