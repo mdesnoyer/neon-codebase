@@ -592,7 +592,8 @@ class VideoProcessor(object):
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in results])
         rank=0
-        for image, score, frame_no, timecode, attribute in results:
+        for (image, score, frame_no, timecode, attribute, model_version,
+             features) in results:
             # Only return unfiltered images unless they are all
             # filtered, in which case, return them all.
             if not exists_unfiltered_images or (
@@ -601,7 +602,8 @@ class VideoProcessor(object):
                     None,
                     ttype=neondata.ThumbnailType.NEON,
                     model_score=score,
-                    model_version=self.model_version,
+                    model_version=model_version,
+                    features=features,
                     frameno=frame_no,
                     filtered=attribute,
                     rank=rank)
@@ -630,6 +632,7 @@ class VideoProcessor(object):
             cv_image = self._get_specific_frame(mov, int(nframes / 2))
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.CENTERFRAME,
                 frameno=int(nframes / 2),
                 rank=0)
@@ -662,6 +665,7 @@ class VideoProcessor(object):
             cv_image = self._get_specific_frame(mov, frameno)
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.RANDOM,
                 frameno=frameno,
                 rank=0)

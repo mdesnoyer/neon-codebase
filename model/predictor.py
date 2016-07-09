@@ -131,7 +131,37 @@ def _aquila_prep(image):
     img = _center_crop_to(img, w=299, h=299)
     return np.array(img).astype(np.uint8)
 
+class DemographicSignatures(object):
+    '''Object that manages all the signatures for different demographics.
 
+    dot this vector with your image signature and you get the model
+    score for that image for that demographic.
+    
+    '''
+    __metaclass__ = utils.obj.KeyedSingleton
+
+    def __init__(self, model_name):
+        # Load up the file
+        fn = os.path.join(os.path.dirname(__file__),
+                          'demographics',
+                          '%s.pkl' % model_name)
+        try:
+            self.mat = pandas.read_pickle(fn)
+        except IOError as e:
+            _log.error('Could not read a valid model file at %s: %s' % (fn, e))
+            raise KeyError(model_name)
+
+    def get_signature(self, gender=None, age=None):
+        '''Returns a signature vector for a given demographic group.
+
+        dot this vector with your image signature and you get the
+        model score for that image for that demographic.
+        '''
+        if gender is None:
+            gender = 'None'
+        if age is None:
+            age = 'None'
+        return self.mat[gender][age]
 
 class Predictor(object):
     '''An abstract valence predictor.
@@ -191,7 +221,8 @@ class Predictor(object):
         Inputs:
         image - numpy array of the image
 
-        Returns: predicted valence score
+        Returns: (predicted valence score, feature vector, model_version) 
+                 any can be None
 
         Raises: NotTrainedError if it has been called before train() has.
         '''
@@ -200,8 +231,9 @@ class Predictor(object):
         while cur_try < ntries:
             cur_try += 1
             try:
-                score = yield self._predict(image, *args, **kwargs)
-                raise tornado.gen.Return(score)
+                score, vec, vers = yield self._predict(image,
+                                                       *args, **kwargs)
+                raise tornado.gen.Return((score, vec, vers))
             except tornado.gen.Return:
                 raise
             except Exception as e:
@@ -221,7 +253,8 @@ class Predictor(object):
         Inputs:
         image - numpy array of the image
 
-        Returns: predicted valence score
+        Returns: (predicted valence score, feature vector, model_version) 
+                 any can be None
 
         Raises: NotTrainedError if it has been called before train() has.
         '''
@@ -285,7 +318,8 @@ class DeepnetPredictor(Predictor):
     the gRPC channel changes.'''
 
     def __init__(self, concurrency=10, port=9000,
-                 aquila_connection=None):
+                 aquila_connection=None,
+                 gender=None, age=None):
         '''
         concurrency - The maximum number of simultaneous requests to
         submit.
@@ -313,6 +347,11 @@ class DeepnetPredictor(Predictor):
         self._conn_callback = None
         self._conn_lock = threading.RLock()
         self._consequtive_connection_failures = 0
+
+        # Optional demographic parameters used to get the target
+        # vector needed when calculating the model score.
+        self.gender = None
+        self.age = None
 
     def _reconnect(self, force_refresh):
         '''
@@ -416,11 +455,22 @@ class DeepnetPredictor(Predictor):
                 self.active -= 1
                 self._cv.notify_all()
 
-        if len(response.valence) != 1:
-            raise model.errors.PredictionError(
-                'Invalid response, must be a single value. Was: %s' % 
-                response.valence)
-        raise tornado.gen.Return(response.valence[0])
+        vers = response.model_version or 'aqv1.1.250'
+
+        if len(response.valence) == 1:
+            # The response is only returning the valence, not the
+            # feature vector
+            raise tornado.gen.Return((response.valence[0], None, vers))
+
+        features = np.array(response.valence)
+        score = None
+        if response.model_version is not None:
+            signatures = DemographicSignatures(response.model_version)
+            target_signature = signatures.get_signature(gender=self.gender,
+                                                        age=self.age)
+            
+            score = target_signature.dot(features)
+        raise tornado.gen.Return((score, features, vers))
 
     def complete(self):
         '''
@@ -504,7 +554,7 @@ class KFlannPredictor(Predictor):
 
         if video_id is None:
             score = self.score_neighbours(self.get_neighbours(image, k=self.k))
-            raise tornado.gen.Return(score)
+            raise tornado.gen.Return((score, None, None))
 
         # If we don't want to include images from the same
         # video, we need to ask for extra neighbours. This
@@ -521,7 +571,7 @@ class KFlannPredictor(Predictor):
             if neighbour[3] <> video_hash:
                 valid_neighbours.append(neighbour)
         score = self.score_neighbours(valid_neighbours)
-        raise tornado.gen.Return(score)
+        raise tornado.gen.Return((score, None, None))
 
     def score_neighbours(self, neighbours):
         '''Returns the score for k neighbours.'''
