@@ -508,8 +508,6 @@ def _stage_files(**kwargs):
             _log.info(("Copying from bucket {src_bucket} to {dest_bucket}").format(src_bucket=keys_to_copy, 
                                                                                 dest_bucket=os.path.join(output_prefix, keys_to_copy_split[-1])))
 
-            _log.info('Output S3 prefix is %s' % output_prefix)
-
             bucket.copy_key(os.path.join(output_prefix, keys_to_copy_split[-1]), 
                             str(bucket.name), 
                             keys_to_copy,
@@ -695,7 +693,7 @@ default_args = {
     'start_date': datetime(2014, 5, 26),
     'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
-    'email_on_retry': False,
+    'email_on_retry': True,
     'retries': 3,
     'retry_interval': timedelta(minutes=1),
 
@@ -709,8 +707,8 @@ default_args = {
 # ----------------------------------
 # clicklogs - stage and clean event clickstream logs (aka 'clicklogs')
 # ----------------------------------
-clicklogs = DAG('clicklogs', default_args=default_args,
-                schedule_interval=timedelta(hours=options.clicklog_period))
+clicklogs = DAG('clicklogs', schedule_interval=timedelta(hours=options.clicklog_period),
+                default_args=default_args)
 
 # TODO(mdesnoyer): Delete this because a separate process should
 # handle bringing the cluster back up.
