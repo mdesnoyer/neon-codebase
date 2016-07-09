@@ -5005,10 +5005,13 @@ class VideoJobThumbnailList(UnsaveableStoredObject):
     '''Represents the list of thumbnails from a video processing job.'''
     def __init__(self, age=None, gender=None, thumbnail_ids=None,
                  model_version=None):
+        self.model_version = model_version
+        self.thumbnail_ids = thumbnail_ids or []
+        
+        # WARNING: If anything is added here, make sure to update
+        # _merge_video_data in video_processor/client.py
         self.age = age
         self.gender = gender
-        self.thumbnail_ids = thumbnail_ids or []
-        self.model_version = model_version
 
 class VideoMetadata(StoredObject):
     '''
@@ -5027,15 +5030,19 @@ class VideoMetadata(StoredObject):
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
                  publish_date=None, hidden=None, share_token=None,
-                 job_results=None):
+                 job_results=None, non_job_thumb_ids=None):
         super(VideoMetadata, self).__init__(video_id)
-        # DEPRECATED in favour of job_results. Will
-        # contain the thumbs from the first job only.
+        # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
+        # contain the thumbs from the most recent job only.
         self.thumbnail_ids = tids or [] 
 
         # A list of VideoJobThumbnailList objects representing the
         # thumbnails extracted for each processing step.
         self.job_results = job_results or []
+
+        # A list of thumbnail ids that are not associated with a
+        # specific run of the job (e.g. default thumb)
+        self.non_job_thumb_ids = non_job_thumb_ids or []
         
         self.url = video_url 
         self.duration = duration # in seconds
@@ -5132,6 +5139,10 @@ class VideoMetadata(StoredObject):
         yield thumb.add_image_data(image, self, cdn_metadata, 
                                    async=True)
 
+        def _add_thumb_to_video_object(video_obj):
+            video_obj.thumbnail_ids.append(thumb.key)
+            video_obj.non_job_thumb_ids.append(thumb.key)
+
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
         # data and then update the video metadata.
@@ -5143,17 +5154,17 @@ class VideoMetadata(StoredObject):
             updated_video = yield tornado.gen.Task(
                 VideoMetadata.modify,
                 self.key,
-                lambda x: x.thumbnail_ids.append(thumb.key))
+                lambda x: _add_thumb_to_video_object(x))
             if updated_video is None:
                 # It wasn't in the database, so save this object
-                self.thumbnail_ids.append(thumb.key)
+                _add_thumb_to_video_object(self)
                 sucess = yield tornado.gen.Task(self.save)
                 if not sucess:
                     raise IOError("Could not save video data")
             else:
                 self.__dict__ = updated_video.__dict__
         else:
-            self.thumbnail_ids.append(thumb.key)
+            _add_thumb_to_video_object(self)
 
         raise tornado.gen.Return(thumb)
 
@@ -5187,8 +5198,8 @@ class VideoMetadata(StoredObject):
                 async=True)
         if thumb is None:
             thumb = ThumbnailMetadata(None,
-                          ttype=ThumbnailType.DEFAULT,
-                          external_id=external_thumbnail_id)
+                                      ttype=ThumbnailType.DEFAULT,
+                                      external_id=external_thumbnail_id)
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)

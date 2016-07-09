@@ -1078,14 +1078,6 @@ class ThumbnailHandler(APIV2Handler):
 
         # Save the image file and thumbnail data object.
         yield self._set_thumb(rank)
-
-        # Update video's thumbnail list.
-        video = yield neondata.VideoMetadata.modify(
-            _video_id,
-            lambda x: x.thumbnail_ids.append(self.thumb.key),
-            async=True)
-        if not video:
-            raise SaveError("Can't save thumbnail to video {}".format(_video_id))
         statemon.state.increment('post_thumbnail_oks')
         yield self._respond_with_thumb()
 
@@ -1119,13 +1111,6 @@ class ThumbnailHandler(APIV2Handler):
         # Set the image from url or body form data.
         yield self._set_image()
 
-        # Get CDN store.
-        cdn = yield neondata.CDNHostingMetadataList.get(
-            neondata.CDNHostingMetadataList.create_key(
-                self.account_id,
-                integration_id),
-            async=True)
-
         # If the thumbnail is tied to a video, set that association.
         if self.video:
             self.thumb = yield self.video.download_and_add_thumbnail(
@@ -1133,10 +1118,11 @@ class ThumbnailHandler(APIV2Handler):
                 image=self.image,
                 image_url=self.args.get('url'),
                 cdn_metadata=cdn,
-                async=True)
+                async=True,
+                save_objects=True)
         else:
             yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
-        yield self.thumb.save(async=True)
+            yield self.thumb.save(async=True)
 
     @tornado.gen.coroutine
     def _set_image(self):

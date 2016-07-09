@@ -815,6 +815,7 @@ class VideoProcessor(object):
                 old_thumb.type = new_thumb.type
                 old_thumb.model_score = new_thumb.model_score
                 old_thumb.model_version = new_thumb.model_version
+                old_thumb.features = new_thumb.features
                 old_thumb.rank = new_thumb.rank
                 old_thumb.phash = new_thumb.phash
                 old_thumb.frameno = new_thumb.frameno
@@ -842,8 +843,19 @@ class VideoProcessor(object):
                 neondata.ThumbnailType.CENTERFRAME,
                 neondata.ThumbnailType.RANDOM]]
             tidset = set(keep_thumbs +
-                         self.video_metadata.thumbnail_ids)
+                         video_result.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
+
+            # Update the job results
+            found_result = False
+            for result in video_obj.job_results:
+                if (result.age == video_result.age and 
+                    result.gender == video_result.gender):
+                    result.thumbnail_ids = video_result.thumbnail_ids
+                    result.model_version = video_result.model_version
+            if not found_result:
+                video_obj.job_results.append(video_result)
+            
             video_obj.url = self.video_metadata.url
             video_obj.duration = self.video_metadata.duration
             video_obj.video_valence = self.video_metadata.video_valence
