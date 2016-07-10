@@ -695,7 +695,7 @@ default_args = {
     'email_on_failure': True,
     'email_on_retry': True,
     'retries': 3,
-    'retry_interval': timedelta(minutes=1),
+    'retry_delay': timedelta(minutes=1),
 
     # 'execution_timeout': timedelta(minutes=2)
     # 'queue': 'bash_queue',
