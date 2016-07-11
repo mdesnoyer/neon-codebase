@@ -54,6 +54,8 @@ _already_exists_errors_ref = statemon.state.get_ref('already_exists_errors')
 
 statemon.define('internal_server_errors', int)
 _internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
+statemon.define('mandrill_template_not_found', int)
+statemon.define('mandrill_email_not_sent', int)
 
 define("token_secret",
     default="9gRvLemgdfHUlzpv",
@@ -87,7 +89,14 @@ define("check_subscription_interval",
     default=3600,
     help="how many seconds in between checking the billing integration",
     type=int)
-
+define("mandrill_api_key", 
+    default='Y7N4ELi5hMDp_RbTQH9OqQ', 
+    help="key from mandrillapp.com used to make api calls", 
+    type=str)
+define("mandrill_base_url", 
+    default='https://mandrillapp.com/api/1.0', 
+    help="mandrill base api url", 
+    type=str)
 define("stripe_api_key",
     default=None,
     help='The API key we use to talk to stripe.')
@@ -98,7 +107,6 @@ class TokenTypes(object):
     VERIFY_TOKEN = 2
     RESET_PASSWORD_TOKEN = 3
     SHARE_TOKEN = 4
-
 
 class APIV2Sender(object):
     def success(self, data, code=ResponseCode.HTTP_OK):
@@ -794,6 +802,86 @@ class ShareableContentHandler(APIV2Handler):
                 account_required,
                 internal_only)
         raise tornado.gen.Return(rv)
+
+class MandrillEmailSender(object): 
+    @staticmethod
+    @tornado.gen.coroutine 
+    def send_mandrill_email(send_to_email,
+                            template_slug,
+                            template_args=None, 
+                            reply_to=None, 
+                            subject=None, 
+                            from_email=None, 
+                            from_name=None):
+  
+        url = '{base_url}/templates/info.json?key={api_key}&name={slug}'.format(
+            base_url=options.mandrill_base_url, 
+            api_key=options.mandrill_api_key, 
+            slug=template_slug) 
+            
+        request = tornado.httpclient.HTTPRequest(
+            url=url,
+            method="GET",
+            request_timeout=8.0)
+
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_template_not_found')
+            raise BadRequestError('Mandrill template unable to be loaded.')
+        
+        template_obj = json.loads(response.body) 
+        template_string = template_obj['code'] 
+
+        if template_args: 
+            email_html = template_string.format(**template_args)
+        else: 
+            email_html = template_string
+ 
+        # send email via mandrill
+        headers_dict = { 
+            'Reply-To' : reply_to if reply_to else 'noreply@neon-lab.com' 
+        }
+        
+        to_list = [{ 
+            'email' : send_to_email, 
+            'type' : 'to'     
+        }]  
+ 
+        message_dict = { 
+            'html' : email_html, 
+            'headers' : headers_dict, 
+            'to' : to_list  
+        }
+
+        if subject: 
+            message_dict['subject'] = subject 
+        if from_email: 
+            message_dict['from_email'] = from_email
+        if from_name: 
+            message_dict['from_name'] = from_name
+
+        json_body = { 
+            'key' : options.mandrill_api_key, 
+            'message' : message_dict  
+        }
+ 
+        url = '{base_url}/messages/send.json'.format(
+            base_url=options.mandrill_base_url)
+        
+        request = tornado.httpclient.HTTPRequest( 
+            url=url, 
+            body=json.dumps(json_body),
+            method='POST', 
+            headers = {"Content-Type" : "application/json"},
+            request_timeout=20.0)
+ 
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_email_not_sent')
+            raise BadRequestError('Unable to send email') 
+
+        raise tornado.gen.Return(True)  
 
 class ShareJWTHelper(object):
     """Implements encode and decode of shared user content JWT tokens.

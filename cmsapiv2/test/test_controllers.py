@@ -52,7 +52,8 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
         self.send_email_mock.return_value = True
         self.send_email_mocker_two = patch(
             'cmsapiv2.authentication.ForgotPasswordHandler._send_email')
-        self.send_email_mock_two = self.send_email_mocker_two.start()
+        self.send_email_mock_two = self._future_wrap_mock(
+            self.send_email_mocker_two.start()) 
         self.send_email_mock_two.return_value = True
         super(TestBase, self).setUp()
 
