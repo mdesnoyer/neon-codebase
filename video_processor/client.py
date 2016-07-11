@@ -243,7 +243,7 @@ class VideoProcessor(object):
                 statemon.state.decrement('workers_downloading')
 
             #Process the video
-            n_thumbs = max(self.n_thumbs, 5)
+            n_thumbs = max(self.n_thumbs, 6)
             m_thumbs = max(self.m_thumbs, 6)
 
             with self.cv_semaphore:
