@@ -1981,6 +1981,260 @@ class TestCMSAPIIntegration(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.integration.get_video_url(vid_info[0]),
                           'some_url.mp4')
 
+    def test_get_best_image_info_poster(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+                "poster": {
+                    "asset_id": "4492153571001",
+                    "sources": [
+                        {
+                            "src": "https://testposter.xyz"
+                        }
+                    ],
+                    "src": "https://testposter.xyz"
+                },
+                "thumbnail": {
+                    "asset_id": "4492154714001",
+                    "sources": [
+                        {
+                            "src": "https://test.xyz"
+                        }
+                    ],
+                    "src": "https://test.xyz"
+                }
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        ii = self.integration._get_best_image_info(video) 
+        url = ii[0]
+        ref_dict = ii[1] 
+        self.assertEquals(url, 'https://testposter.xyz') 
+        self.assertEquals(ref_dict['id'], '4492153571001') 
+ 
+    def test_get_best_image_info_thumbnail(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+                "thumbnail": {
+                    "asset_id": "4492154714001",
+                    "sources": [
+                        {
+                            "src": "https://test.xyz"
+                        }
+                    ],
+                    "src": "https://test.xyz"
+                }
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        ii = self.integration._get_best_image_info(video) 
+        url = ii[0]
+        ref_dict = ii[1] 
+        self.assertEquals(url, 'https://test.xyz') 
+        self.assertEquals(ref_dict['id'], '4492154714001') 
+ 
+    def test_get_best_image_info_dne(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+                "dne": {
+                    "asset_id": "4492154714001",
+                    "sources": [
+                        {
+                            "src": "https://test.xyz"
+                        }
+                    ],
+                    "src": "https://test.xyz"
+                }
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        ii = self.integration._get_best_image_info(video)
+        url = ii[0]
+        ref_dict = ii[1] 
+        self.assertEquals(url, None) 
+        self.assertEquals(ref_dict['id'], None) 
+ 
+    def test_get_best_image_info_no_images(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        with self.assertLogExists(logging.ERROR, 'Unable to find'):
+            ii = self.integration._get_best_image_info(video)
+        self.assertEquals(ii[0], None)
+
+    def test_extract_image_field(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+                "poster": {
+                    "asset_id": "4492153571001",
+                    "sources": [
+                        {
+                            "src": "https://testposter.xyz"
+                        }
+                    ],
+                    "src": "https://testposter.xyz"
+                },
+                "thumbnail": {
+                    "asset_id": "4492154714001",
+                    "sources": [
+                        {
+                            "src": "https://test.xyz"
+                        }
+                    ],
+                    "src": "https://test.xyz"
+                }
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        ifs = self.integration._extract_image_field(video, 'id')
+        self.assertEquals(ifs[0], '4492153571001') 
+        self.assertEquals(ifs[1], '4492154714001')
+ 
+        ifs = self.integration._extract_image_field(video, 'dne')
+        self.assertEquals(ifs, [])
+
+    def test_extract_image_urls(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+                "poster": {
+                    "asset_id": "4492153571001",
+                    "sources": [
+                        {
+                            "src": "https://testposter.xyz"
+                        }
+                    ],
+                    "src": "https://testposter.xyz"
+                },
+                "thumbnail": {
+                    "asset_id": "4492154714001",
+                    "sources": [
+                        {
+                            "src": "https://test.xyz"
+                        }
+                    ],
+                    "src": "https://test.xyz"
+                }
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        iurls = self.integration._extract_image_urls(video)
+        self.assertEquals(iurls[0], 'https://testposter.xyz') 
+        self.assertEquals(iurls[1], 'https://test.xyz')
+
+    def test_get_best_thumbnail_info_exists(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+                "poster": {
+                    "asset_id": "4492153571001",
+                    "sources": [
+                        {
+                            "src": "https://testposter.xyz"
+                        }
+                    ],
+                    "src": "https://testposter.xyz"
+                },
+                "thumbnail": {
+                    "asset_id": "4492154714001",
+                    "sources": [
+                        {
+                            "src": "https://test.xyz"
+                        }
+                    ],
+                    "src": "https://test.xyz"
+                }
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        bii = self.integration.get_video_thumbnail_info(video) 
+        self.assertEquals(bii['thumb_url'], 'https://testposter.xyz')
+        self.assertEquals(bii['thumb_ref'], '4492153571001')
+ 
+    def test_get_best_thumbnail_info_dne(self): 
+        video = {
+            "account_id": "1752604059001",
+            "complete": True,
+            "id": "4492075574001",
+            "images": {
+            },
+            "link": None,
+            "name": "sea_marvels.mp4",
+            "state": "ACTIVE",
+            "updated_at": "2015-09-17T17:41:20.782Z"
+        }
+        with self.assertLogExists(logging.WARNING, 'Unable to find'):
+            bii = self.integration.get_video_thumbnail_info(video)
+        self.assertEquals(bii['thumb_url'], None)
+
+    @tornado.testing.gen_test
+    def test_set_video_iter(self): 
+        self.mock_get_videos.side_effect = [[{
+            'id': 'vid1',
+            'name' : 'some video'
+            }, 
+            { 'id': 'vid2', 
+              'name' : 'some video 2' }]]
+        yield self.integration.set_video_iter()
+        vid_list = list(self.integration.video_iter) 
+        v1 = vid_list[0]
+        v2 = vid_list[1]
+        self.assertEquals(v1['id'], 'vid1') 
+        self.assertEquals(v1['name'], 'some video') 
+        self.assertEquals(v2['id'], 'vid2') 
+        self.assertEquals(v2['name'], 'some video 2')
+ 
+    @tornado.testing.gen_test
+    def test_set_video_iter_exc(self): 
+        self.mock_get_videos.side_effect = [ 
+            api.brightcove_api.BrightcoveApiServerError ]
+        
+        with self.assertLogExists(logging.ERROR, 'Brightcove Error'):
+            yield self.integration.set_video_iter()
+        vid_list = list(self.integration.video_iter)
+        self.assertEquals(len(vid_list), 0) 
+
     @tornado.testing.gen_test
     def test_lookup_video_errors(self):
         self.mock_get_videos.side_effect = [
