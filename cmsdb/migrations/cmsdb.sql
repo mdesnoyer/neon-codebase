@@ -44,6 +44,20 @@ CREATE TABLE abstractintegration (
 ALTER TABLE abstractintegration OWNER TO pgadmin;
 
 --
+-- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE accountlimits (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp, 
+    updated_time timestamp DEFAULT current_timestamp 
+);
+
+
+ALTER TABLE accountlimits OWNER TO pgadmin;
+
+--
 -- Name: brightcoveplayer; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -110,6 +124,8 @@ CREATE TABLE experimentstrategy (
     updated_time timestamp DEFAULT current_timestamp 
 );
 
+ALTER TABLE experimentstrategy OWNER TO pgadmin;
+
 --
 -- Name: feature; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
@@ -122,21 +138,7 @@ CREATE TABLE feature (
 );
 
 
-ALTER TABLE experimentstrategy OWNER TO pgadmin;
-
---
--- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
---
-
-CREATE TABLE accountlimits (
-    _data jsonb,
-    _type character varying(128) NOT NULL,
-    created_time timestamp DEFAULT current_timestamp, 
-    updated_time timestamp DEFAULT current_timestamp 
-);
-
-
-ALTER TABLE accountlimits OWNER TO pgadmin;
+ALTER TABLE feature OWNER TO pgadmin;
 
 --
 -- Name: neonapikey; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
