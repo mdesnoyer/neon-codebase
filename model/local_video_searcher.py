@@ -1621,7 +1621,6 @@ class LocalSearcher(object):
                     break
             req_type, args = item
             if req_type == 'samp':
-                _log.info('pop samp')
                 try:
                     with self._act_lock:
                         self._active_samples += 1
@@ -1632,7 +1631,6 @@ class LocalSearcher(object):
                     _log.exception('Problem sampling frame %i: %s', args, e.message)
                     statemon.state.increment('sampling_problem')
             elif req_type == 'srch':
-                _log.info('pop srch')
                 try:
                     with self._act_lock:
                         self._active_searches += 1
@@ -1837,7 +1835,6 @@ class LocalSearcher(object):
                 return
             if frameno is not None:
                 # then there are still samples to be taken
-                _log.info('put samp')
                 self._inq.put(('samp', frameno))
             else:
                 self.done_sampling = True
@@ -1855,7 +1852,6 @@ class LocalSearcher(object):
                 self.done_searching = True
                 _log.info('Finished searching')
             return
-        _log.info('put srch')
         self._inq.put(('srch', srch_info))
 
     def _update_color_stats(self, images):
