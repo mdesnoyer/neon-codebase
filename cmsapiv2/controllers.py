@@ -1615,7 +1615,7 @@ class VideoHelper(object):
                 new_video['thumbnails'] = yield \
                   VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
             elif field == 'bad_thumbnails':
-                if video.bad_thumbnails_ids:
+                if video.bad_thumbnail_ids:
                     new_video['bad_thumbnails'] = yield \
                         VideoHelper.get_thumbnails_from_ids(video.bad_thumbnail_ids)
                 else:
