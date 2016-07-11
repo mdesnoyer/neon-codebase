@@ -1101,7 +1101,7 @@ class ResultsList(object):
     def get_results(self):
         '''
         Returns the results in sorted order, sorted by score. Returns them
-        as (image, score, frameno, model_vers)
+        as (image, score, frameno, model_vers, aq_features)
         '''
         with self._lock:
             _log.debug('Dumping results')
