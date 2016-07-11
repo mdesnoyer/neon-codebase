@@ -1538,8 +1538,8 @@ class LocalSearcher(object):
         # gives the best-of-the-worst in order down to the worst, with
         # the score oriented the same as the best frames' scores
         worst = [
-            (rr[0], -rr[1], rr[2], rr[2] / float(self.fps))
-            for rr in sorted(self.worst_results, key=lambda x: x[1])]
+            (rr[1], -rr[0], rr[2], rr[2] / float(self.fps), '')
+            for rr in sorted(self.worst_results, key=lambda x: x[0])]
         return (best, worst)
 
     def _format_result(self, results):
@@ -1621,6 +1621,7 @@ class LocalSearcher(object):
                     break
             req_type, args = item
             if req_type == 'samp':
+                _log.info('pop samp')
                 try:
                     with self._act_lock:
                         self._active_samples += 1
@@ -1628,20 +1629,20 @@ class LocalSearcher(object):
                     with self._act_lock:
                         self._active_samples -= 1
                 except Exception, e:
-                    _log.error('Problem sampling frame %i: %s', args, e.message)
+                    _log.exception('Problem sampling frame %i: %s', args, e.message)
                     statemon.state.increment('sampling_problem')
             elif req_type == 'srch':
+                _log.info('pop srch')
                 try:
                     with self._act_lock:
                         self._active_searches += 1
-                    _log.info('conduct local search %s' % args)
                     self._conduct_local_search(*args)
                     with self._act_lock:
                         self._active_searches -= 1
                 except Exception, e:
                     start = args[0]
                     stop = args[2]
-                    _log.warn('Problem local searching %i <---> %i: %s',
+                    _log.exception('Problem local searching %i <---> %i: %s',
                         start, stop, e.message)
                     statemon.state.increment('searching_problem')
 
@@ -1800,12 +1801,15 @@ class LocalSearcher(object):
         with self._proc_lock:
 
             # Keep a small heap of the worst frames.
-            _item = (frames[0], -frame_score, frameno)
+            _item = (-frame_score, frames[0], frameno)
+            #try:
             if len(self.worst_results) < self.m_thumbs:
                 self.worst_results.append(_item)
-            else:
-                if -frame_score > self.worst_results[0][1]:
-                    heapq.heapreplace(self.worst_results, _item)
+            elif -frame_score > self.worst_results[0][0]:
+                heapq.heapreplace(self.worst_results, _item)
+            #except ValueError:
+            #    _log.info(-frame_score)
+            #    _log.info(self.worst_results[0][0])
 
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
@@ -1833,6 +1837,7 @@ class LocalSearcher(object):
                 return
             if frameno is not None:
                 # then there are still samples to be taken
+                _log.info('put samp')
                 self._inq.put(('samp', frameno))
             else:
                 self.done_sampling = True
@@ -1850,6 +1855,7 @@ class LocalSearcher(object):
                 self.done_searching = True
                 _log.info('Finished searching')
             return
+        _log.info('put srch')
         self._inq.put(('srch', srch_info))
 
     def _update_color_stats(self, images):

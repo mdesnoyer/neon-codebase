@@ -596,7 +596,6 @@ class VideoProcessor(object):
             statemon.state.increment('video_read_error')
             raise BadVideoError(msg)
 
-        _log.info('Top %d bot %d' % (len(top_results), len(bottom_results)))
 
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in top_results])
@@ -617,7 +616,7 @@ class VideoProcessor(object):
                 self.thumbnails.append((meta, PILImageUtils.from_cv(image)))
                 rank += 1 
 
-        for image, score, frame, timecode, attribute in bottom_results:
+        for image, score, frame_no, timecode, attribute in bottom_results:
             meta = neondata.ThumbnailMetadata(
                 None,
                 ttype=neondata.ThumbnailType.BAD_NEON,
@@ -627,8 +626,9 @@ class VideoProcessor(object):
                 filtered=attribute)
             self.bad_thumbnails.append((meta, PILImageUtils.from_cv(image)))
 
-        _log.info([(t[0].frameno, t[0].key) for t in self.thumbnails])
-        _log.info([(t[0].frameno, t[0].key) for t in self.bad_thumbnails])
+        _log.info('Top %d bot %d' % (len(top_results), len(bottom_results)))
+        _log.info([(t[0].frameno, t[0].model_score) for t in self.thumbnails])
+        _log.info([(t[0].frameno, t[0].model_score) for t in self.bad_thumbnails])
 
         # Get the baseline frames of the video
         yield self._get_center_frame(video_file)
