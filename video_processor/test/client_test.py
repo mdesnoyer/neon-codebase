@@ -1034,12 +1034,25 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 400, error=Exception('blah'))
-        rv = yield self.vprocessor.send_notification_email(api_request)
-        self.assertTrue(self.submit_mock.called)
-        self.assertEquals(rv, False)
-        self.assertEqual(
-            statemon.state.get('video_processor.client.failed_to_send_result_email'),
-            1)
+        
+        with self.assertLogExists(logging.ERROR, 'Failed to send'):
+            rv = yield self.vprocessor.send_notification_email(api_request)
+            self.assertTrue(self.submit_mock.called)
+            self.assertEquals(rv, False)
+            self.assertEquals(
+                statemon.state.get(
+                    'video_processor.client.failed_to_send_result_email'), 1)
+
+    @tornado.testing.gen_test 
+    def test_send_email_notification_unexpected(self):
+        self.vprocessor.send_notification_email = MagicMock()
+        self.vprocessor.send_notification_email.side_effect = Exception('boom') 
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        api_request.callback_email = 'basetest@invalid.xxx' 
+        with self.assertRaises(Exception):
+            with self.assertLogExists(logging.ERROR, 'Unexpected error'):
+                rv = yield self.vprocessor.send_notification_email(api_request)
+         
          
     @tornado.testing.gen_test
     def test_default_process(self):

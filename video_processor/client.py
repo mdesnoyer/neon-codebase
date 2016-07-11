@@ -859,6 +859,7 @@ class VideoProcessor(object):
                 old_thumb.phash = new_thumb.phash
                 old_thumb.frameno = new_thumb.frameno
                 old_thumb.filtered = new_thumb.filtered
+                old_thumb.features = new_thumb.features
         try:
             new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
                 [x[0].key for x in self.thumbnails + self.bad_thumbnails],
@@ -1047,14 +1048,13 @@ class VideoProcessor(object):
             if response.error: 
                 statemon.state.increment('failed_to_send_result_email')
                 _log.error('Failed to send email to %s due to %s' % 
-                    to_email, 
-                    response.error)
+                    (to_email, response.error))
                 rv = False  
         except AttributeError: 
             pass 
         except Exception as e:
             rv = False  
-            _log.error('Unexcepted error %s when sending email' % e)  
+            _log.error('Unexcepted error %s when sending email', e)  
         finally: 
             raise tornado.gen.Return(rv) 
         
