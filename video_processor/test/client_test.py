@@ -96,7 +96,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.model.predictor = self.predictor_patcher.start()()
         self.predict_mock = self._future_wrap_mock(
             self.model.predictor.predict, require_async_kw=True)
-        self.predict_mock.return_value = 99
+        self.predict_mock.return_value = (99, None, 'model1')
         
         # Fill out database
         na = neondata.NeonUserAccount('acct1')
@@ -872,7 +872,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.model_mock = MagicMock()
         self.predict_mock = self._future_wrap_mock(
             self.model_mock.predictor.predict, require_async_kw=True)
-        self.predict_mock.return_value = 99
+        self.predict_mock.return_value = (99, None, 'model1')
 
         # Mock out http callbacks
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
