@@ -38,6 +38,7 @@ import simplejson as json
 import logging
 import model.scores
 import momoko
+import numpy 
 import psycopg2
 from passlib.hash import sha256_crypt
 import random
@@ -174,7 +175,22 @@ class PostgresDB(tornado.web.RequestHandler):
             # this comes from momoko reconnect_interval 
             self.reconnect_dead = 250.0  
             # the starting size of the pool 
-            self.pool_start_size = 3 
+            self.pool_start_size = 3
+            
+            # support numpy array types 
+            psycopg2.extensions.register_adapter(
+                numpy.ndarray, 
+                psycopg2._psycopg.Binary)
+            def typecast_numpy_array(data, cur): 
+                if data is None: 
+                    return None 
+                buf = psycopg2.BINARY(data,cur)
+                return numpy.frombuffer(buf) 
+            np_array_type = psycopg2.extensions.new_type(
+                psycopg2.BINARY.values, 
+                'np_array_type', 
+                typecast_numpy_array)
+            psycopg2.extensions.register_type(np_array_type) 
         
         def _set_current_host(self): 
             self.old_host = self.host 
@@ -380,23 +396,35 @@ class PostgresDB(tornado.web.RequestHandler):
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a connection')
 
-        def get_insert_json_query_tuple(self, 
-                                        obj, 
-                                        fields='(_data, _type)',
-                                        values='VALUES(%s, %s)',
-                                        extra_params=None):
-            query = "INSERT INTO " + obj._baseclass_name().lower() + \
-                    " " + fields + " " + values
-            params = (obj.get_json_data(), obj.__class__.__name__)
-            if extra_params:
-                params = params + extra_params 
+        def get_insert_json_query_tuple(self, obj):
+            now_str = datetime.datetime.utcnow().strftime(
+                "%Y-%m-%d %H:%M:%S.%f")
+            obj.__dict__['created'] = obj.__dict__['updated'] = now_str
+            fv = obj._get_iq_fields_and_values()
+            fields = fv[0]
+            values = fv[1] 
+
+            extra_params = obj._get_query_extra_params()
+            params = (
+                obj.get_json_data(), 
+                obj.__class__.__name__, 
+                now_str, 
+                now_str) + extra_params
+
+            query = "INSERT INTO {tn} {fields} {values}".format(
+                tn=obj._baseclass_name().lower(),
+                fields=fields, 
+                values=values)
+        
             return (query, params)
 
         def get_update_json_query_tuple(self, obj):
-            query = "UPDATE " + obj._baseclass_name().lower() + \
-                    " SET _data = %s " \
-                    " WHERE _data->>'key' = %s" 
-            params = (obj.get_json_data(), obj.key)   
+            query = "UPDATE {tn} {sets} WHERE _data->>'key' = %s".format(
+                tn=obj._baseclass_name().lower(),
+                sets=obj._get_uq_set_string())
+            params = (obj.get_json_data(),)
+            extra_params = obj._get_query_extra_params()
+            params += extra_params + (obj.key,) 
             return (query, params)
  
         def get_update_many_query_tuple(self, objects): 
@@ -408,17 +436,21 @@ class PostgresDB(tornado.web.RequestHandler):
                   AS changes(key, data)
                 WHERE changes.key = t._data->>'key' 
             '''
-            try: 
+            try:
+                strs = objects[0]._get_umq_sstr_vals_changes(len(objects)) 
                 param_list = []
                 table = objects[0]._baseclass_name().lower()
-                query = "UPDATE %s AS t SET _data = changes.data "\
-                        " FROM (VALUES " % table 
+                query = "UPDATE {tn} AS t {setstr} FROM {valstr} AS {changestr} \
+                    WHERE changes.key = t._data->>'key'".format(
+                        tn=table,
+                        setstr=strs[0], 
+                        valstr=strs[1],
+                        changestr=strs[2]) 
                 for obj in objects: 
-                    query += '(%s, %s::jsonb),' 
                     param_list.append(obj.key)
-                    param_list.append(obj.get_json_data()) 
-                query = query[:-1] 
-                query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
+                    param_list.append(obj.get_json_data())
+                    param_list += obj._get_query_extra_params() 
+                                    
                 return (query, tuple(param_list))  
             except KeyError: 
                 return
@@ -676,6 +708,29 @@ class PythonNaNStrings(object):
     NEGINF = '-Infinite' 
     NAN = 'NaN' 
 
+class PostgresColumn(object):
+    '''Gives information on additional columns, and information stored outside 
+         of _data, _type, created, updated on Postgres tables. 
+
+       This is a class instead of a dictionary, just to enforce/explain what 
+         the various things that are needed  
+    ''' 
+    def __init__(self, 
+                 column_name, 
+                 format_string, 
+                 data_stored=None):
+        # name of the additional column
+        self.column_name = column_name
+        # a format string for insert/update operations 
+        # eg %s::jsonb
+        #    %s::bytea
+        #    %s 
+        #    %d 
+        self.format_string = format_string 
+        # where on the object the data is stored 
+        # a string, this will access the __dict__ directly
+        self.data_stored = data_stored 
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
@@ -736,10 +791,13 @@ class StoredObject(object):
 
     def to_json(self):
         '''Returns a json version of the object'''
-        return json.dumps(self, default=lambda o: o.to_dict())
+        def json_dumper(obj): 
+            if isinstance(obj, numpy.ndarray): 
+                return obj.tolist() 
+            return obj.to_dict()
+        return json.dumps(self, default=json_dumper)
     
     def get_json_data(self):
-         
         '''
             for postgres we only want the _data field, since we 
             have a column that is named _data we do not want _data->_data
@@ -747,15 +805,26 @@ class StoredObject(object):
             override this if you need something custom to get _data
         '''
         def _json_fixer(obj): 
-            for key, value in obj.items(): 
-                if value == float('-inf'):
-                    obj[key] = PythonNaNStrings.NEGINF
-                if value == float('inf'):
-                    obj[key] = PythonNaNStrings.INF
-                if value == float('nan'):
-                    obj[key] = PythonNaNStrings.NAN
+            for key, value in obj.items():
+                try:  
+                    if value == float('-inf'):
+                        obj[key] = PythonNaNStrings.NEGINF
+                    if value == float('inf'):
+                        obj[key] = PythonNaNStrings.INF
+                    if value == float('nan'):
+                        obj[key] = PythonNaNStrings.NAN
+                except ValueError: 
+                    pass 
+            # we want to remove these extras from the _data object 
+            # to prevent the duplication of data
+            addcs = self._additional_columns() 
+            for c in addcs:
+                try:  
+                    del obj[c.column_name]
+                except KeyError: 
+                    pass 
             return obj
-        obj = _json_fixer(self.to_dict()['_data']) 
+        obj = _json_fixer(copy.copy(self.to_dict()['_data'])) 
         def json_serial(obj):
             if isinstance(obj, datetime.datetime):
                 serial = obj.isoformat()
@@ -826,6 +895,14 @@ class StoredObject(object):
                             obj_dict[k]).strftime("%Y-%m-%d %H:%M:%S.%f")
             except KeyError: 
                 pass
+
+            addcs = cls._additional_columns()
+            if addcs: 
+                for c in addcs: 
+                    try:
+                        data_dict[c.column_name] = obj_dict[c.column_name]
+                    except KeyError: 
+                        pass 
  
             # create basic object using the "default" constructor
             obj = classtype(key)
@@ -843,7 +920,6 @@ class StoredObject(object):
             except ValueError:
                 return None
         
-
             return obj
 
     @classmethod
@@ -888,13 +964,13 @@ class StoredObject(object):
         db = PostgresDB()
         conn = yield db.get_connection()
 
-        obj = None 
-        query = "SELECT _data, _type, \
-                        created_time AS created_time_pg,\
-                        updated_time AS updated_time_pg \
+        obj = None
+        query = "SELECT %s \
                  FROM %s \
-                 WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
-
+                 WHERE _data->>'key' = '%s'" % (
+                     cls._get_gq_column_string(),
+                     cls._baseclass_name().lower(), 
+                     key)
         cursor = yield conn.execute(query)
         result = cursor.fetchone()
         if result:
@@ -952,11 +1028,12 @@ class StoredObject(object):
         results = [] 
         db = PostgresDB()
         conn = yield db.get_connection()
-        query = "SELECT _data, _type, \
-                       created_time AS created_time_pg,\
-                       updated_time AS updated_time_pg \
+        query = "SELECT %s \
                  FROM %s \
-                 WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
+                 WHERE _data->>'key' ~ '%s'" % (
+                     cls._get_gq_column_string(),
+                     cls._baseclass_name().lower(), 
+                     pattern)
 
         cursor = yield conn.execute(query)
         for result in cursor:
@@ -980,10 +1057,8 @@ class StoredObject(object):
         db = PostgresDB()
         conn = yield db.get_connection()
         baseclass_name = cls._baseclass_name().lower()
-        query = "SELECT _data, _type, \
-                        created_time AS created_time_pg,\
-                        updated_time AS updated_time_pg FROM "\
-                    + baseclass_name + \
+        column_string = cls._get_gq_column_string() 
+        query = "SELECT " + column_string + " FROM " + baseclass_name + \
                 " WHERE _data->>'key' LIKE %s"
 
         params = ['%'+key_portion+'%']
@@ -1049,7 +1124,9 @@ class StoredObject(object):
         conn = yield db.get_connection()
 
         query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
-        cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
+        cursor = yield conn.execute(
+            query, 
+            cursor_factory=psycopg2.extensions.cursor)
         keys_list = [i[0] for i in cursor.fetchall()]
         db.return_connection(conn)
         rv = [x.partition('_')[2] for x in keys_list if
@@ -1079,12 +1156,12 @@ class StoredObject(object):
         # do this manually 
         yield conn.execute("BEGIN")
  
-        query = "DECLARE get_many CURSOR FOR SELECT _data, _type, \
-                     created_time AS created_time_pg, \
-                     updated_time AS updated_time_pg \
+        query = "DECLARE get_many CURSOR FOR SELECT %s \
                  FROM %s \
-                 WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
-                                                ",".join("'{0}'".format(k) for k in keys))
+                 WHERE _data->>'key' IN(%s)" % (
+                     cls._get_gq_column_string(),
+                     cls._baseclass_name().lower(), 
+                     ",".join("'{0}'".format(k) for k in keys))
         
         yield conn.execute(query)
         for key in keys: 
@@ -1197,12 +1274,12 @@ class StoredObject(object):
         for key in keys: 
             key_to_object[key] = None
  
-        query = "SELECT _data, _type,\
-                        created_time AS created_time_pg,\
-                        updated_time AS updated_time_pg \
+        query = "SELECT %s \
                  FROM %s \
-                 WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
-                                                ",".join("'{0}'".format(k) for k in keys))
+                 WHERE _data->>'key' IN(%s)" % (
+                     create_class._get_gq_column_string(),  
+                     create_class._baseclass_name().lower(), 
+                     ",".join("'{0}'".format(k) for k in keys))
 
         cursor = yield conn.execute(query)
         items = cursor.fetchall()
@@ -1237,28 +1314,17 @@ class StoredObject(object):
             for key, obj in mappings.iteritems():
                original_object = key_to_object.get(key, None)
                if obj is not None and original_object is None: 
-                   created = datetime.datetime.utcnow()
-                   updated = datetime.datetime.utcnow()
-                   obj.__dict__['created'] = created.strftime(
-                        "%Y-%m-%d %H:%M:%S.%f")
-                   obj.__dict__['updated'] = updated.strftime(
-                        "%Y-%m-%d %H:%M:%S.%f")
-                   query_tuple = db.get_insert_json_query_tuple(
-                       obj, 
-                       fields='(_data, _type, created_time, updated_time)',
-                       values='VALUES(%s, %s, %s, %s)', 
-                       extra_params=(created, updated))  
+                   query_tuple = db.get_insert_json_query_tuple(obj)
                    insert_statements.append(query_tuple) 
                elif obj is not None and obj != original_object:
                    update_objs.append(obj)
 
         if update_objs:  
-            try: 
+            try:
                 update_query = db.get_update_many_query_tuple(
                     update_objs)
                 yield conn.execute(update_query[0], 
                                    update_query[1]) 
-
             except Exception as e: 
                 _log.error('unknown error when running \
                             update_query %s : %s' % 
@@ -1347,8 +1413,8 @@ class StoredObject(object):
             query = "DELETE FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), 
                                           key)
-            sql_statements.append(query) 
-        #TODO figure out rv
+            sql_statements.append(query)
+ 
         cursor = yield conn.transaction(sql_statements)
         db.return_connection(conn) 
         raise tornado.gen.Return(True)  
@@ -1475,7 +1541,10 @@ class StoredObject(object):
         ''' Get database query plan of query.'''
         db = PostgresDB()
         conn = yield db.get_connection()
-        cursor = yield conn.execute('EXPLAIN {}'.format(query), wc_params, cursor_factory=cursor_factory)
+        cursor = yield conn.execute(
+            'EXPLAIN {}'.format(query), 
+            wc_params, 
+            cursor_factory=cursor_factory)
         rv = cursor.fetchall()
         db.return_connection(conn)
         raise tornado.gen.Return(rv)
@@ -1496,10 +1565,134 @@ class StoredObject(object):
         '''
         db = PostgresDB()
         conn = yield db.get_connection()
-        cursor = yield conn.execute(query, wc_params, cursor_factory=cursor_factory)
+        cursor = yield conn.execute(
+            query, 
+            wc_params, 
+            cursor_factory=cursor_factory)
         rv = cursor.fetchall()
         db.return_connection(conn)
         raise tornado.gen.Return(rv)
+
+    @classmethod
+    def _additional_columns(cls):
+        '''Returns columns not named _data/_type/created/updated 
+ 
+           Return Value is a list 
+
+           For example, if a StoredObject needs something stored 
+             outside of _data, eg if table t has a widget and a fidget column
+             this should return [PostgresColumn('widget',...), 
+                 PostgresColumn('fidget',...)]
+
+           NOTE these must follow the order of the _get_query_extra_params 
+            tuple from the object itself. 
+        '''
+        return []
+
+    @classmethod
+    def _get_gq_column_string(cls):
+        '''Returns a string of columns that we need to retrieve 
+            on this call 
+
+           only override this method if you need different default
+              columns.  
+        '''
+        dcs = ['_data', 
+               '_type', 
+               'created_time AS created_time_pg',
+               'updated_time AS updated_time_pg']
+
+        acs = cls._additional_columns()
+        ac_col_names = [] 
+        for a in acs: 
+            ac_col_names.append(a.column_name) 
+ 
+        return ','.join(dcs + ac_col_names)
+
+    @classmethod 
+    def _get_iq_fields_and_values(cls): 
+        '''Returns a the fields we need on an insert query 
+              eg (_data, _type)
+ 
+           only override this method if you need different default
+              columns.
+
+           if you want additional fields(columns) added override 
+           the _additional_columns function in this class 
+        '''
+        dcs = [PostgresColumn('_data', '%s::jsonb'), 
+               PostgresColumn('_type', '%s'), 
+               PostgresColumn('created_time', '%s'),
+               PostgresColumn('updated_time', '%s')]
+        acs = cls._additional_columns() 
+        alls = dcs + acs 
+        fields = '(%s)' % ','.join(['%s' % x.column_name for x in alls]) 
+        values = 'VALUES(%s)' % ','.join(['%s' % x.format_string for x in alls])
+        return (fields, values)
+
+    @classmethod 
+    def _get_uq_set_string(cls): 
+        '''Returns the proper set string based on default columns 
+            and the classes extra columns. 
+
+           only override if you need different defaults 
+
+           if you want additional fields override the _additional_columns
+           function in this class 
+ 
+           currently only supports string types TODO add other types 
+        ''' 
+
+        dcs = [PostgresColumn('_data', '%s::jsonb')]
+        acs = cls._additional_columns() 
+        alls = dcs + acs
+        ss = 'SET %s' % ','.join(
+            ['%s = %s' % (x.column_name, x.format_string) for x in alls])
+        return ss
+ 
+    @classmethod 
+    def _get_umq_sstr_vals_changes(cls, object_length): 
+        '''Returns the proper update_many string based on default columns 
+            and the classes extra columns. 
+
+           only override if you need different defaults 
+
+           if you want additional fields override the _additional_columns
+           function in this class 
+ 
+           currently only supports string types TODO add other types
+
+           returns a triple where 
+           0 -> set str SET t._data = changes._data, t._addc1 = changes._addc1
+           1 -> values str VALUES(%s, %s::jsonb, %s, ... , n) 
+           2 -> changes str  changes(key, _data, _addc1, _addc2, _addcn)
+        ''' 
+
+        dcs = [PostgresColumn('key', '%s'), 
+               PostgresColumn('_data', '%s::jsonb')]
+        acs = cls._additional_columns() 
+        alls = dcs + acs
+        ss = 'SET %s' % ','.join(
+            ['{cn} = changes.{cn}'.format(cn=x.column_name) for x in alls[1:]])
+        # this is a somewhat horrible one-liner, 
+        # but it builds up the necessary VALUES string, 
+        # based on the length of the acs, as well as 
+        # how many objects we are updating 
+        vs = '(VALUES %s)' % ','.join(
+            ['(%s)' % (','.join(
+                ['%s' % x.format_string for x in alls])) for x in range(
+                    object_length)])
+        cs = 'changes(%s)' % ','.join(
+            ['%s' % x.column_name for x in alls])
+        return (ss,vs,cs)    
+
+    def _get_query_extra_params(self):
+        '''Returns a tuple of the data meant to be inserted/updated 
+             into the database. Works off of the additional_columns 
+             which should be defined in the baseclass 
+        '''
+        acs = self._additional_columns()  
+        return tuple([self.__dict__[x.data_stored] for x in acs])
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -2312,7 +2505,7 @@ class NeonUserAccount(NamespacedStoredObject):
         query = "SELECT _data->>'key' FROM " + \
                 VideoMetadata._baseclass_name().lower() + \
                 " WHERE _data->>'key' LIKE %s AND updated_time > %s"\
-                " ORDER BY updated_time ASC" 
+                " ORDER BY updated_time ASC"
         # what a mess...escaping 'hack' 
         params = [self.neon_api_key+'%', since]
         cursor = yield conn.execute(
@@ -2685,7 +2878,57 @@ class ExperimentStrategy(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ExperimentStrategy.__name__
+
+class Feature(DefaultedStoredObject):
+    def __init__(self, key, name='unknown', variance_explained=0.0):
+        super(Feature, self).__init__(key)
+        splits = self.get_id().split('_') 
+        if self.get_id() and len(splits) != 2:
+            raise ValueError('Invalid key %s. Must be generated using '
+                             'create_key()' % self.get_id())
+
+        # the 'real' name of the model this references 
+        self.model_name = splits[0] 
+
+        # where in the feature vector this is at 
+        self.index = int(splits[1])
+
+        # the 'human' name of the model 
+        self.name = name 
+
+        # a float explaining the variance of this feature 
+        self.variance_explained = variance_explained 
         
+    @classmethod
+    def create_key(cls, model_name, index):
+        '''Create a key for using in this table'''
+        return '%s_%s' % (model_name, index)
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Feature.__name__
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_by_model_name(cls, model_name): 
+        rv = []
+
+        results = yield cls.execute_select_query(cls.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'model_name' = %s",
+                        table_name='feature'),
+                    wc_params=[model_name],
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        rv = [ cls._create(r['_data']['key'], r) for r in results ]
+
+        raise tornado.gen.Return(rv)
 
 class CDNHostingMetadataList(DefaultedStoredObject):
     '''A list of CDNHostingMetadata objects.
@@ -4594,7 +4837,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None, account_id=None):
+                 external_id=None, account_id=None, features=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -4607,7 +4850,7 @@ class ThumbnailMetadata(StoredObject):
         self.height = height
         self.type = ttype #neon1../ brightcove / youtube
         self.rank = 0 if not rank else rank  #int 
-        self.model_score = model_score #string
+        self.model_score = model_score # DEPRECATED use features instead
         self.model_version = model_version #string
         self.frameno = frameno #int Frame Number
         self.filtered = filtered # String describing how it was filtered
@@ -4626,7 +4869,11 @@ class ThumbnailMetadata(StoredObject):
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
-        
+       
+        # This is a full feature vector. It stores a numpy array of floats. 
+        # Each index is dependent on the model used. Human readable versions of 
+        # this exist in the Features table. 
+        self.features = features  
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
@@ -4635,6 +4882,10 @@ class ThumbnailMetadata(StoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ThumbnailMetadata.__name__
+
+    @classmethod
+    def _additional_columns(cls):
+        return [PostgresColumn('features', '%s::bytea', 'features')]
 
     def _set_keyname(self):
         '''Key the set by the video id'''
