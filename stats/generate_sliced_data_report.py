@@ -795,7 +795,8 @@ def get_full_stats_table(end_time):
                               right_index=True)
 
     # Zero out the non-neon data
-    stat_table.loc[stat_table['type'].isin(options.baseline_types.split(',')), 
+    zero_groups = set(options.baseline_types.split(',')) - set(['neon'])
+    stat_table.loc[stat_table['type'].isin(zero_groups), 
                    ['extra_conversions', 'xtra_conv_at_sig']] = float('nan')
 
     # If there is an assumption of conversions after the winner, adjust the tot_cov column
