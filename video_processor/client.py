@@ -657,10 +657,6 @@ class VideoProcessor(object):
                 filtered=attribute)
             self.bad_thumbnails.append((meta, PILImageUtils.from_cv(image)))
 
-        _log.info('Top %d bot %d' % (len(top_results), len(bottom_results)))
-        _log.info([(t[0].frameno, t[0].model_score) for t in self.thumbnails])
-        _log.info([(t[0].frameno, t[0].model_score) for t in self.bad_thumbnails])
-
         # Get the baseline frames of the video
         yield self._get_center_frame(video_file)
         yield self._get_random_frame(video_file)
