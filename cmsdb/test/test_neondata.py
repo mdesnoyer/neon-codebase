@@ -2310,6 +2310,9 @@ class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
             [so1.key, so2.key], modify_me, async=True)
         for x in rv.itervalues(): 
             self.assertEquals(x.features[0], 1.0) 
+            self.assertEquals(x.features[1], 2.0) 
+            self.assertEquals(x.features[2], 3.0) 
+            self.assertEquals(x.features[3], 4.0) 
         so1 = yield ThumbnailMetadata.get(so1.key, async=True)
         self.assertEquals(so1.features[0], 1.0) 
 

@@ -3535,13 +3535,6 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(new_tn['enabled'],old_tn['enabled'])
 
     @tornado.testing.gen_test
-    def test_thumbnail_update_no_params(self):
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
-            self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
-
-    @tornado.testing.gen_test
     def test_delete_thumbnail_not_implemented(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/%s/thumbnails?thumbnail_id=12234' % (
@@ -6982,7 +6975,7 @@ class TestFeatureHandler(TestControllersBase):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             response = yield self.http_client.fetch(
                 self.get_url(url))
-	    self.assertEquals(e.exception.code, 400)
+            self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test
     def test_get_by_model_name(self):
