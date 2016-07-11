@@ -1536,10 +1536,10 @@ class LocalSearcher(object):
 
         # Sort the worst, then invert the score of each. This
         # gives the best-of-the-worst in order down to the worst, with
-        # the score oriented the same as the best frames' scores
+        # the score oriented so more positive means better.
         worst = [
             (rr[1], -rr[0], rr[2], rr[2] / float(self.fps), '')
-            for rr in sorted(self.worst_results, key=lambda x: x[0])]
+            for rr in sorted(self.worst_results)]
         return (best, worst)
 
     def _format_result(self, results):
