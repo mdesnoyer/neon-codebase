@@ -3045,7 +3045,24 @@ class EmailHandler(APIV2Handler):
             statemon.state.increment('mandrill_email_not_sent')
             raise BadRequestError('Unable to send email')  
         
-        self.success({'message' : 'Email sent to %s' % send_to_email }) 
+        self.success({'message' : 'Email sent to %s' % send_to_email })
+ 
+    @classmethod
+    def get_limits(self):
+        post_list = [{ 'left_arg': 'email_posts',
+                       'right_arg': 'max_email_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_email_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_email_posts',
+                           'timer_resets': [ ('email_posts', 0) ]
+                       },
+                       'values_to_increase': [ ('email_posts', 1) ],
+                       'values_to_decrease': []
+        }]
+        return {
+                   HTTPVerbs.POST: post_list
+               }
             
     @classmethod
     def get_access_levels(cls):
