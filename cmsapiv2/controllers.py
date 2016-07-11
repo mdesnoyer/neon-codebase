@@ -1324,7 +1324,6 @@ class ThumbnailHelper(object):
         model_name = obj.model_version
         rv = [ neondata.Feature.create_key(
             model_name, i[0]) for i, x in np.ndenumerate(obj.features) ]
-        import pdb; pdb.set_trace() 
         return rv 
 
     @staticmethod
