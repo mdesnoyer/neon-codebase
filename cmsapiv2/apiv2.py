@@ -824,7 +824,11 @@ class MandrillEmailSender(object):
             method="GET",
             request_timeout=8.0)
 
-        response = yield tornado.gen.Task(utils.http.send_request, request)
+        response = yield tornado.gen.Task(
+            utils.http.send_request, 
+            request, 
+            async=True)
+
         if response.code != ResponseCode.HTTP_OK:
             statemon.state.increment('mandrill_template_not_found')
             raise BadRequestError('Mandrill template unable to be loaded.')
@@ -853,12 +857,20 @@ class MandrillEmailSender(object):
             'to' : to_list  
         }
 
-        if subject: 
-            message_dict['subject'] = subject 
-        if from_email: 
+        if subject:
+            message_dict['subject'] = subject
+        elif template_obj.get('subject'):
+            message_dict['subject'] = template_obj['subject']
+
+        if from_email:
             message_dict['from_email'] = from_email
-        if from_name: 
+        elif template_obj.get('from_email'):
+            message_dict['from_email'] = template_obj['from_email']
+
+        if from_name:
             message_dict['from_name'] = from_name
+        elif template_obj.get('from_name'):
+            message_dict['from_name'] = template_obj['from_name']
 
         json_body = { 
             'key' : options.mandrill_api_key, 
@@ -875,11 +887,17 @@ class MandrillEmailSender(object):
             headers = {"Content-Type" : "application/json"},
             request_timeout=20.0)
  
-        response = yield tornado.gen.Task(utils.http.send_request, request)
+        response = yield tornado.gen.Task(
+            utils.http.send_request, 
+            request, 
+            async=True)
 
-        if response.code != ResponseCode.HTTP_OK:
+        resp_body = json.loads(response.body)  
+        if response.code != ResponseCode.HTTP_OK or \
+           resp_body.get('reject_reason') is not None:
             statemon.state.increment('mandrill_email_not_sent')
-            raise BadRequestError('Unable to send email') 
+            raise BadRequestError(
+                'Unable to send email, response = %s' % resp_body) 
 
         raise tornado.gen.Return(True)  
 
