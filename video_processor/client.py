@@ -940,7 +940,7 @@ class VideoProcessor(object):
 
         # Send the notifications
         yield self.send_notifiction_response(api_request)
-        yield self.send_notification_email(api_request)
+        yield self.send_notification_email(api_request, new_video_metadata)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
@@ -967,7 +967,7 @@ class VideoProcessor(object):
         return cresp.to_dict()
 
     @tornado.gen.coroutine 
-    def send_notification_email(self, api_request): 
+    def send_notification_email(self, api_request, video): 
         """ 
             sends email to the email that is on the 
             api_request 
@@ -994,7 +994,7 @@ class VideoProcessor(object):
             client = cmsapiv2.client.Client(
                 options.cmsapi_user,
                 options.cmsapi_pass)
-
+            
             # build up the body of the request
             body_params = { 
                 'template_slug' : 'video-results', 
@@ -1015,7 +1015,8 @@ class VideoProcessor(object):
                 statemon.state.increment('failed_to_send_result_email')
                 _log.error('Failed to send email to %s due to %s' % 
                     (to_email, response.error))
-                rv = False  
+                rv = False
+             
         except AttributeError: 
             pass 
         except Exception as e:
