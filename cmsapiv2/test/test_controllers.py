@@ -4807,6 +4807,9 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
                                                     method='POST',
                                                     headers=header)
         rjson2 = json.loads(response.body)
+        access_token = rjson2['access_token']
+        payload = JWTHelper.decode_token(access_token)
+        self.assertEqual(new_account_one.get_id(), payload['account_id'])
         refresh_token2 = rjson2['refresh_token']
         self.assertEquals(refresh_token, refresh_token2)
         account_ids = rjson2['account_ids']
