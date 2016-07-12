@@ -1,5 +1,8 @@
 '''An algorithm to search through a video for the best thumbnails.
 
+WARNING: As of 2016-07, nothing in this file should be used. The interface is broken.
+TODO(Nick): Fix the interface, or remove this module as it has been superseeded by local_video_searcher.
+
 Copyright: 2015 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
@@ -32,6 +35,8 @@ statemon.define('cv_video_read_error', int)
 statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
 
+# TODO(Nick): Merge the local video searcher into this common
+# interface. Also, make this return model.VideoThumbnail object lists.
 class VideoSearcher(object):
     '''Abstract video searcher.'''
     def __init__(self, predictor,

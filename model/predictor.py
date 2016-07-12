@@ -19,6 +19,7 @@ import hashlib
 import logging
 import model.errors
 import numpy as np
+import pandas
 from PIL import Image
 import os
 import pandas as pd
@@ -40,6 +41,7 @@ statemon.define('lost_server_connection', int)  # lost the server connection
 statemon.define('unable_to_connect', int)  # could not connect to server in the first place
 statemon.define('good_deepnet_connection', int)
 statemon.define('prediction_error', int)
+statemon.define('unknown_demographic', int)
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -135,7 +137,7 @@ def _aquila_prep(image):
 class DemographicSignatures(object):
     '''Object that manages all the signatures for different demographics.
 
-    dot this vector with your image signature and you get the model
+git rebase    dot this vector with your image signature and you get the model
     score for that image for that demographic.
     
     '''
@@ -216,7 +218,7 @@ class Predictor(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def predict(self, image, ntries=3, timeout=10.0,
+    def predict(self, image, ntries=3, timeout=10.0, base_time=0.4, 
                 *args, **kwargs):
         '''Predicts the valence score of an image synchronously.
 
@@ -241,7 +243,7 @@ class Predictor(object):
             except Exception as e:
                 _log.warn('Problem scoring image. Retrying: %s' %
                           e)
-                delay = (1 << cur_try) * 0.4 * random.random()
+                delay = (1 << cur_try) * base_time * random.random()
                 yield tornado.gen.sleep(delay)
         statemon.state.increment('prediction_error')
         if isinstance(e, model.errors.PredictionError):
@@ -467,11 +469,16 @@ class DeepnetPredictor(Predictor):
         features = np.array(response.valence)
         score = None
         if response.model_version is not None:
-            signatures = DemographicSignatures(response.model_version)
-            target_signature = signatures.get_signature(gender=self.gender,
-                                                        age=self.age)
-            
-            score = target_signature.dot(features)
+            try:
+                signatures = DemographicSignatures(response.model_version)
+                target_signature = signatures.get_signature(gender=self.gender,
+                                                            age=self.age)
+                score = target_signature.dot(features)
+            except KeyError as e:
+                # Could not get a demographic to match, so keep score as None
+                _log.warn_n('Unknown demographic. model: %s age: %s gender %s'
+                            % (response.model_version, self.gender, self.age))
+                statemon.state.increment('unknown_demographic')
         raise tornado.gen.Return((score, features, vers))
 
     def complete(self):

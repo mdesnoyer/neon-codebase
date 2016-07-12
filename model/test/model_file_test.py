@@ -21,9 +21,9 @@ class TestAllModelFiles(test_utils.neontest.TestCase):
         return os.path.join(os.path.dirname(__file__), '..', 'demographics')
 
     def test_filenames(self):
-        # Checks that all the files are of the form YYYYMMDD_<tag>.pkl
+        # Checks that all the files are of the form YYYYMMDD-<tag>.pkl
         for fn in os.listdir(self._get_model_dir()):
-            self.assertRegexpMatches(fn, '20[0-9]{6}_[a-zA-Z0-9]+\.pkl')
+            self.assertRegexpMatches(fn, '20[0-9]{6}-[a-zA-Z0-9]+\.pkl')
 
     def test_pandas_array(self):
         model_dir = self._get_model_dir()

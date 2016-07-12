@@ -100,7 +100,7 @@ class AutoScaleGroup(object):
         self._executor = concurrent.futures.ThreadPoolExecutor(5)
 
         # Start monitoring this group
-        #RefresherThread().add_group_to_monitor(name)
+        RefresherThread().add_group_to_monitor(name)
 
     def __del__(self):
         # Stop monitoring this group

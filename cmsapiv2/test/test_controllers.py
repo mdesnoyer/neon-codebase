@@ -14,6 +14,7 @@ from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
+import numpy as np
 from requests_toolbelt import MultipartEncoder
 import stripe
 import tornado.gen
@@ -442,6 +443,8 @@ class TestNewAccountHandler(TestAuthenticationBase):
         (self.assertEqual(account_id, mapper.value) for mapper in mappers)
         self.assertIsNotNone(neondata.AccountLimits.get(account_id))
         self.assertIsNotNone(neondata.ExperimentStrategy.get(account_id))
+        account = neondata.NeonUserAccount.get(account_id)
+        self.assertFalse(account.serving_enabled)
 
     @tornado.testing.gen_test
     def test_create_new_account_invalid_email(self):
@@ -912,7 +915,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
     @tornado.testing.gen_test
     def test_verify_with_no_user_saved(self):
         email = 'yo@notgmail.com'
-        account = neondata.NeonUserAccount('name', 'a0')
+        account = neondata.NeonUserAccount('name', 'a0', serving_enabled=False)
         yield account.save(async=True)
         account.email = email
         cell = '867-5309'
@@ -946,6 +949,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         self.assertEqual(email, rjson['email'])
         self.assertEqual([email], rjson['users'])
         account = yield neondata.NeonUserAccount.get('a0', async=True)
+        self.assertTrue(account.serving_enabled)
         user = yield neondata.User.get(email, async=True)
         self.assertEqual(email, user.username)
         self.assertEqual(cell, user.cell_phone_number)
@@ -954,7 +958,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
     @tornado.testing.gen_test
     def test_verify_with_account_keyed_user(self):
         email = 'yo@notgmail.com'
-        account = neondata.NeonUserAccount('name', 'a0')
+        account = neondata.NeonUserAccount('name', 'a0', serving_enabled=False)
         yield account.save(async=True)
         account.email = email
         user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN, email_verified=False)
@@ -995,6 +999,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         self.assertEqual(email, rjson['email'])
         self.assertEqual([email], rjson['users'])
         account = yield neondata.NeonUserAccount.get('a0', async=True)
+        self.assertTrue(account.serving_enabled)
         user = yield neondata.User.get(email, async=True)
         self.assertTrue(user.is_email_verified())
         self.assertEqual(email, user.username)
@@ -3341,8 +3346,14 @@ class TestThumbnailHandler(TestControllersBase):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
-        neondata.ThumbnailMetadata('testingtid', width=500, urls=['s']).save()
-        self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
+        neondata.ThumbnailMetadata(
+            'testingtid', 
+            width=500, 
+            urls=['s'], 
+            features=np.array([1.0,2.0,3.0,4.0]), 
+            model_version='kfmodel').save()
+        self.test_video = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid1')).save()
         neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid2')).save()
@@ -3537,6 +3548,10 @@ class TestThumbnailHandler(TestControllersBase):
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
+        self.assertEquals('kfmodel_0', rjson['feature_ids'][0])
+        self.assertEquals('kfmodel_1', rjson['feature_ids'][1])
+        self.assertEquals('kfmodel_2', rjson['feature_ids'][2])
+        self.assertEquals('kfmodel_3', rjson['feature_ids'][3])
         self.assertEquals(rjson['width'], 500)
         self.assertEquals(rjson['thumbnail_id'], 'testingtid')
 
@@ -4706,25 +4721,47 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
                              password=TestRefreshTokenHandler.password)
         self.user.save()
         super(TestRefreshTokenHandler, self).setUp()
+        self.url = self.get_url('/api/v2/refresh_token')
+        self.headers = {'Content-Type': 'application/json'}
 
     def tearDown(self):
         options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
         super(TestRefreshTokenHandler, self).tearDown()
 
     def test_no_token(self):
-        url = '/api/v2/refresh_token'
         params = json.dumps({})
-        header = { 'Content-Type':'application/json' }
-        self.http_client.fetch(self.get_url(url),
+        self.http_client.fetch(self.url,
                                body=params,
                                method='POST',
                                callback=self.stop,
-                               headers=header)
+                               headers=self.headers)
         response = self.wait()
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 400)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'required key not')
+        self.assertRegexpMatches(rjson['error']['message'], 'required key not')
+
+    @tornado.testing.gen_test
+    def test_user_does_not_exist(self):
+        _, refresh_token = authentication.AccountHelper.get_auth_tokens(
+            {'username': 'no_user'})
+        params = json.dumps({'token': refresh_token})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(self.url, body=params, method='POST',
+                                         headers=self.headers)
+        self.assertEqual(500, e.exception.code)
+
+    @tornado.testing.gen_test
+    def test_user_has_no_account(self):
+        username = 'valid'
+        neondata.User(username).save()
+        _, refresh_token = authentication.AccountHelper.get_auth_tokens(
+            {'username': username})
+        params = json.dumps({'token': refresh_token})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(self.url, body=params, method='POST',
+                                         headers=self.headers)
+        self.assertEqual(500, e.exception.code)
+
 
     def test_refresh_token_expired(self):
         refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp')
@@ -4792,6 +4829,9 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
                                                     method='POST',
                                                     headers=header)
         rjson2 = json.loads(response.body)
+        access_token = rjson2['access_token']
+        payload = JWTHelper.decode_token(access_token)
+        self.assertEqual(new_account_one.get_id(), payload['account_id'])
         refresh_token2 = rjson2['refresh_token']
         self.assertEquals(refresh_token, refresh_token2)
         account_ids = rjson2['account_ids']
@@ -7000,7 +7040,65 @@ class TestEmailHandler(TestControllersBase):
                 x, 
                 200, 
                 buffer=StringIO('{"code": "Hello There you fool"}')))
+        limit = neondata.AccountLimits(self.account_id)
+        yield limit.save(async=True)
+
         response = yield self._send_authed_request(url, body) 
+        
+        # happens on on_finish (meaning we got our response already) 
+        # wait a bit before checking 
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(self.account_id).email_posts,
+            1,
+            async=True)
+        self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test 
+    def test_send_email_limit_hit(self): 
+        url = '/api/v2/%s/email' % self.account_id 
+        body = { 
+            'template_slug' : 'reset-password'
+        }
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(
+                x, 
+                200, 
+                buffer=StringIO('{"code": "Hello There you fool"}')))
+        limit = neondata.AccountLimits(
+            self.account_id, 
+            max_email_posts=0, 
+            refresh_time_email_posts=datetime(2050,1,1))
+
+        yield limit.save(async=True)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self._send_authed_request(url, body)
+            self.assertEquals(e.exception.code, 429)
+
+    @tornado.testing.gen_test 
+    def test_send_email_limit_reset(self): 
+        url = '/api/v2/%s/email' % self.account_id 
+        body = { 
+            'template_slug' : 'reset-password'
+        }
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(
+                x, 
+                200, 
+                buffer=StringIO('{"code": "Hello There you fool"}')))
+        limit = neondata.AccountLimits(
+            self.account_id, 
+            email_posts=2, 
+            max_email_posts=2, 
+            refresh_time_email_posts=datetime(2000,1,1))
+
+        yield limit.save(async=True)
+        response = yield self._send_authed_request(url, body)
+ 
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(self.account_id).email_posts,
+            1,
+            async=True)
         self.assertEquals(response.code, 200)
  
     @tornado.testing.gen_test
@@ -7035,7 +7133,90 @@ class TestEmailHandler(TestControllersBase):
         self.assertRegexpMatches(rjson['message'],
             'user does not')
 
+class TestFeatureHandler(TestControllersBase):
+    def setUp(self):
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
+        self.acct.save()
+        user = neondata.User('fenger@neon-lab.com',
+            access_level=neondata.AccessLevels.GLOBAL_ADMIN)
+        user.save()
+        self.account_id = self.acct.neon_api_key
 
+        # Mock out the token decoding
+        self.token_decode_patcher = patch(
+            'cmsapiv2.apiv2.JWTHelper.decode_token')
+        self.token_decode_mock = self.token_decode_patcher.start()
+        self.token_decode_mock.return_value = {
+            'username' : 'fenger@neon-lab.com'
+            }
+        self.http_mocker = patch('utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+              self.http_mocker.start())
+        super(TestFeatureHandler, self).setUp()
+
+    def tearDown(self):
+        self.http_mocker.stop()
+        self.token_decode_patcher.stop()
+        super(TestFeatureHandler, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_one_or_other_required(self):
+        url = '/api/v2/feature' 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(
+                self.get_url(url))
+            self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test
+    def test_get_by_model_name(self):
+        key = neondata.Feature.create_key('kfmodel', 1)
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2)
+        yield neondata.Feature(key).save(async=True)
+ 
+        url = '/api/v2/feature?model_name=%s' % 'kfmodel' 
+        response = yield self.http_client.fetch(
+            self.get_url(url))
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body) 
+        self.assertEquals(rjson['feature_count'], 2)
+        f1 = rjson['features'][0]  
+        self.assertEquals(f1['index'], 1) 
+        self.assertEquals(f1['name'], 'unknown') 
+        self.assertEquals(f1['variance_explained'], 0.0) 
+        self.assertEquals(f1['model_name'], 'kfmodel')
+ 
+        f2 = rjson['features'][1]  
+        self.assertEquals(f2['index'], 2) 
+        self.assertEquals(f2['name'], 'unknown') 
+        self.assertEquals(f2['variance_explained'], 0.0) 
+        self.assertEquals(f2['model_name'], 'kfmodel')
+ 
+    @tornado.testing.gen_test
+    def test_get_by_key(self):
+        key = neondata.Feature.create_key('kfmodel', 1)
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2)
+        yield neondata.Feature(key).save(async=True)
+        url = '/api/v2/feature?key=%s' % 'kfmodel_1,kfmodel_2' 
+        response = yield self.http_client.fetch(
+            self.get_url(url))
+
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['feature_count'], 2)
+        f1 = rjson['features'][0]  
+        self.assertEquals(f1['index'], 2) 
+        self.assertEquals(f1['name'], 'unknown') 
+        self.assertEquals(f1['variance_explained'], 0.0) 
+        self.assertEquals(f1['model_name'], 'kfmodel')
+ 
+        f2 = rjson['features'][1]  
+        self.assertEquals(f2['index'], 1) 
+        self.assertEquals(f2['name'], 'unknown') 
+        self.assertEquals(f2['variance_explained'], 0.0) 
+        self.assertEquals(f2['model_name'], 'kfmodel')
+ 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()

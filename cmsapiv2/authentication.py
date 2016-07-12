@@ -204,10 +204,16 @@ class RefreshTokenHandler(APIV2Handler):
 
             username = payload['username'].lower()
             user = yield neondata.User.get(username, async=True)
+            if not user:
+                raise NotFoundError('No user found for this username')
+
             account_ids = yield user.get_associated_account_ids(async=True)
+            if not account_ids:
+                raise HTTPError('User has no associated account')
 
             access_token = JWTHelper.generate_token(
-                {'username': username},
+                {'username': username,
+                 'account_id': account_ids[0]},
                 token_type=TokenTypes.ACCESS_TOKEN)
 
             def _update_user(u):
@@ -354,7 +360,9 @@ class AccountHelper(object):
         """Add an account that is kept via the session cookie."""
 
         # Save anonymous Neon user account.
-        account = neondata.NeonUserAccount(uuid.uuid1().hex)
+        account = neondata.NeonUserAccount(
+            uuid.uuid1().hex,
+            serving_enabled=False)
         account.users = [account.get_id()]
         yield account.save(async=True)
         # Save the initial admin user.
@@ -392,6 +400,8 @@ class AccountHelper(object):
         # Instantiate account and user from payload in verifier.
         account = neondata.NeonUserAccount.create(
             verifier.extra_info['account'])
+        # Enable this for Mastermind serving.
+        account.serving_enabled = True
         user_json = json.loads(verifier.extra_info['user'])
         user = neondata.User._create(
             user_json['_data']['key'],
