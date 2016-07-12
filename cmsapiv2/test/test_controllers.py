@@ -4746,11 +4746,9 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
             {'username': 'no_user'})
         params = json.dumps({'token': refresh_token})
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(self.url,
-                                   body=params,
-                                   method='POST',
-                                   headers=self.headers)
-        self.assertEqual(404, e.exception.code)
+            yield self.http_client.fetch(self.url, body=params, method='POST',
+                                         headers=self.headers)
+        self.assertEqual(500, e.exception.code)
 
     @tornado.testing.gen_test
     def test_user_has_no_account(self):
@@ -4760,10 +4758,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
             {'username': username})
         params = json.dumps({'token': refresh_token})
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(self.url,
-                                   body=params,
-                                   method='POST',
-                                   headers=self.headers)
+            yield self.http_client.fetch(self.url, body=params, method='POST',
+                                         headers=self.headers)
         self.assertEqual(500, e.exception.code)
 
 
