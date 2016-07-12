@@ -619,8 +619,8 @@ class VideoProcessor(object):
                   n=n_thumbs,
                   m=m_thumbs,
                   video_name=self.video_url)
-            top_results = sorted(top_results, key=lambda x:x[1], reverse=True)
-            bottom_results = sorted(bottom_results, key=lambda x: x[1], reverse=True)
+            top_results = sorted(top_results, key=lambda x: x.score, reverse=True)
+            bottom_results = sorted(bottom_results, key=lambda x: x.score)
         except model.errors.VideoReadError:
             msg = "Error using OpenCV to read video. %s" % self.video_url
             _log.error(msg)
@@ -628,7 +628,7 @@ class VideoProcessor(object):
             raise BadVideoError(msg)
 
         rank=0
-        for result in results:
+        for result in top_results:
             meta = neondata.ThumbnailMetadata(
                 None,
                 ttype=neondata.ThumbnailType.NEON,
@@ -648,7 +648,7 @@ class VideoProcessor(object):
                 model_score=result.score,
                 model_version=result.model_version,
                 features=result.features,
-                frameno=result.frame_no,
+                frameno=result.frameno,
                 filtered=result.filtered_reason)
             self.bad_thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
 

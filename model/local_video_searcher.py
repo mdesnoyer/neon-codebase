@@ -1589,7 +1589,7 @@ class LocalSearcher(object):
             x.aq_features)
             for x in sorted(self.worst_results)]
 
-        return (best, worse)
+        return best, worst
 
     def _worker(self, workerno=None):
         '''
