@@ -41,6 +41,9 @@ class VideoThumbnail(object):
         self.features = features
         # String describing why this thumbnail was filtered
         self.filtered_reason = filtered_reason
+
+    def __str__(self):
+        return utils.obj.full_object_str(self, ['features', 'image'])
     
 
 class Model(object):
@@ -50,8 +53,7 @@ class Model(object):
         self.predictor = predictor
         self.filt = filt
         if video_searcher is None:
-            self.video_searcher = local_video_searcher.LocalSearcher(
-                predictor)
+            raise ValueError('A vid_searcher is required')
         else:
             self.video_searcher = vid_searcher
 

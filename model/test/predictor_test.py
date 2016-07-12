@@ -70,7 +70,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         
         response = AquilaResponse()
         response.valence.extend(features)
-        response.model_version = '20160707_test'
+        response.model_version = '20160707-test'
         self.mock_regress_call.side_effect = [response]
 
         score, vec, vers = yield self.predictor.predict(self.image,
@@ -78,7 +78,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
 
         self.assertIsNotNone(score)
         numpy.testing.assert_allclose(features, vec)
-        self.assertEquals(vers, '20160707_test')
+        self.assertEquals(vers, '20160707-test')
 
     @tornado.testing.gen_test
     def test_aquilav2_unknown_model(self):
@@ -86,7 +86,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         
         response = AquilaResponse()
         response.valence.extend(features)
-        response.model_version = '20160707_whoami'
+        response.model_version = '20160707-whoami'
         self.mock_regress_call.side_effect = [response]
 
         with self.assertLogExists(logging.WARNING, 'Unknown demographic'):
@@ -95,7 +95,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
 
         self.assertIsNone(score)
         numpy.testing.assert_allclose(features, vec)
-        self.assertEquals(vers, '20160707_whoami')
+        self.assertEquals(vers, '20160707-whoami')
 
     @tornado.testing.gen_test
     def test_aquilav2_unknown_demographic(self):
@@ -103,7 +103,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         
         response = AquilaResponse()
         response.valence.extend(features)
-        response.model_version = '20160707_test'
+        response.model_version = '20160707-test'
         self.mock_regress_call.side_effect = [response]
         self.predictor.gender = 'alien'
 
@@ -113,7 +113,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
 
         self.assertIsNone(score)
         numpy.testing.assert_allclose(features, vec)
-        self.assertEquals(vers, '20160707_test')
+        self.assertEquals(vers, '20160707-test')
 
     @tornado.testing.gen_test
     def test_aquilav2_different_demographics(self):
@@ -121,7 +121,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
 
         response = AquilaResponse()
         response.valence.extend(features)
-        response.model_version = '20160707_test'
+        response.model_version = '20160707-test'
         self.mock_regress_call.return_value = response
 
         score1, vec1, vers1 = yield self.predictor.predict(self.image,

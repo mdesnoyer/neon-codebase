@@ -751,8 +751,8 @@ class _Result(object):
         self.image = image
         self.score = score
         self.frameno = frameno
-        self.model_version = model_version
-        self.aq_feautres = aq_features # Feature vector representing the image
+        self.model_version = model_vers
+        self.aq_features = aq_features # Feature vector representing the image
 
         # Extra features that are useful when keeping track of the
         # best images found so far.
@@ -1319,6 +1319,9 @@ class LocalSearcher(object):
         # this, if necessary at all, will be set by update_processing_strategy
         self.analysis_crop = None
         # determine the generators to cache.
+        if feature_generators is None:
+            raise ValueError('Valid feature generators are required. '
+                             'Grab them from model.features')
         for f in feature_generators:
             gen_name = f.get_feat_name()
             self.generators[gen_name] = f
@@ -1551,10 +1554,10 @@ class LocalSearcher(object):
                                                     image=frame,
                                                     model_version=model_vers,
                                                     features=features))
-                results = sorted(results, key=lambda x: x.score, reversed=True)
+                results = sorted(results, key=lambda x: x.score, reverse=True)
             return results
             
-        _log.debug('%i thumbs found', len(raw_results))
+        _log.debug('%i thumbs found', len(result_objs))
         return [model.VideoThumbnail(x.image, x.score, x.frameno,
                                      x.model_version, x.aq_features) 
                                      for x in result_objs]
@@ -1603,7 +1606,7 @@ class LocalSearcher(object):
                     with self._act_lock:
                         self._active_samples -= 1
                 except Exception, e:
-                    _log.error('Problem sampling frame %i: %s', args, e.message)
+                    _log.exception('Problem sampling frame %i: %s', args, e.message)
                     statemon.state.increment('sampling_problem')
             elif req_type == 'srch':
                 try:
@@ -1726,7 +1729,7 @@ class LocalSearcher(object):
                 best_frame)
         except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
-            _log.warn('Problem obtaining score localsearch frame %s: %s',
+            _log.warn('Problem obtaining score localsearch frame %s: %s' %
                       (best_frameno, e))
             with self._proc_lock:
                 self.results.register_failure()
@@ -1765,10 +1768,11 @@ class LocalSearcher(object):
                 return
             frames = self._prep(frames)
         try:
-            frame_score = self.predictor.predict(frames[0])
+            frame_score, features, model_vers = self.predictor.predict(
+                frames[0])
         except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
-            _log.warn('Problem obtaining score for frame %s: %s',
+            _log.warn('Problem obtaining score for frame %s: %s' %
                       (frameno, e))
             with self._proc_lock:
                 self.results.register_failure()
