@@ -613,33 +613,26 @@ class VideoProcessor(object):
                   mov,
                   n=n_thumbs,
                   video_name=self.video_url)
-            results = sorted(results, key=lambda x:x[1], reverse=True)
+            results = sorted(results, key=lambda x:x.score, reverse=True)
         except model.errors.VideoReadError:
             msg = "Error using OpenCV to read video. %s" % self.video_url
             _log.error(msg)
             statemon.state.increment('video_read_error')
             raise BadVideoError(msg)
-
-        exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
-                                           for x in results])
+        
         rank=0
-        for (image, score, frame_no, timecode, attribute, model_version,
-             features) in results:
-            # Only return unfiltered images unless they are all
-            # filtered, in which case, return them all.
-            if not exists_unfiltered_images or (
-                    attribute is not None and attribute == ''):
-                meta = neondata.ThumbnailMetadata(
-                    None,
-                    ttype=neondata.ThumbnailType.NEON,
-                    model_score=score,
-                    model_version=model_version,
-                    features=features,
-                    frameno=frame_no,
-                    filtered=attribute,
-                    rank=rank)
-                self.thumbnails.append((meta, PILImageUtils.from_cv(image)))
-                rank += 1 
+        for result in results:
+            meta = neondata.ThumbnailMetadata(
+                None,
+                ttype=neondata.ThumbnailType.NEON,
+                model_score=result.score,
+                model_version=result.model_version,
+                features=result.features,
+                frameno=result.frameno,
+                rank=rank,
+                filtered=result.filtered_reason)
+            self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
+            rank += 1 
 
         # Get the baseline frames of the video
         yield self._get_center_frame(video_file)
@@ -669,7 +662,6 @@ class VideoProcessor(object):
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
             yield meta.score_image(self.model.predictor,
-                                   self.model_version,
                                    image=cv_image)
         except model.errors.PredictionError as e:
             _log.warn('Error predicting score for the center frame: %s' %
@@ -702,7 +694,6 @@ class VideoProcessor(object):
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
             yield meta.score_image(self.model.predictor,
-                                   self.model_version,
                                    image=cv_image)
         except model.errors.PredictionError as e:
             _log.warn('Error predicting score for the random frame: %s' %
@@ -897,7 +888,6 @@ class VideoProcessor(object):
                 # long process, not a big deal, but we might want to
                 # fix that
                 yield thumb.score_image(self.model.predictor,
-                                        self.model_version,
                                         save_object=True)
 
         except neondata.ThumbDownloadError, e:

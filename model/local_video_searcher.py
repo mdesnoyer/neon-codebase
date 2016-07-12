@@ -171,6 +171,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import cv2
+import model
 import model.errors
 import numpy as np
 from model.colorname import ColorName
@@ -746,19 +747,24 @@ class _Result(object):
                  feat_score_weight=None, feat_score_func=None,
                  combination_function=None, model_vers=None,
                  aq_features=None):
+        # Fields that are generally useful for the returned values
+        self.image = image
+        self.score = score
+        self.frameno = frameno
+        self.model_version = model_version
+        self.aq_feautres = aq_features # Feature vector representing the image
+
+        # Extra features that are useful when keeping track of the
+        # best images found so far.
         self._defined = False
         if score and frameno:
             self._defined = True
             _log.debug(('Instantiating result object at frame %i with'
                         ' score %.3f') % (frameno, score))
-        self.score = score
-        self.frameno = frameno
-        self.model_vers = model_vers
-        self.aq_features = aq_features
+
         self._feat_score = feat_score
         self._feat_score_func = feat_score_func
         self._hash = getrandbits(128)
-        self.image = image
         if combination_function is None:
             combination_function = lambda ms, fs, w: ms + fs * w
         self._combination_function = combination_function
@@ -1111,9 +1117,8 @@ class ResultsList(object):
                 res_obj = self.results[idx]
                 if not res_obj._defined:
                     continue
-                image = self._improve_raw_img(res_obj.image)
-                res.append([image, res_obj.score, res_obj.frameno,
-                            res_obj.model_vers, res_obj.aq_features])
+                self._improve_img(res_obj)
+                res.append(res_obj)
             return res
 
 
@@ -1524,10 +1529,9 @@ class LocalSearcher(object):
                    self.video_name)
             _log.error(msg)
             raise model.errors.PredictionError(msg)
-        raw_results = self.results.get_results()
+        result_objs = self.results.get_results()
         # format it into the expected format
-        results = []
-        if not len(raw_results):
+        if not len(result_objs):
             _log.debug('No suitable frames have been found for video %s!'
                       ' Will uniformly select frames', video_name)
             # increment the statemon
@@ -1537,21 +1541,23 @@ class LocalSearcher(object):
                                  int(self.num_frames * (1 - self.startend_clip)),
                                  self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
+            results = []
             for frame, frameno in zip(rframes, frames):
                 # TODO: get the scores of these frames more efficiently (async)
                 (score, features, model_vers) = self.predictor.predict(
                     frame)
-                formatted_result = (frame, score, frameno,
-                                    frameno / float(fps), 
-                                    '', model_vers, features)
-                results.append(formatted_result)
-        else:
-            _log.debug('%i thumbs found', len(raw_results))
-            for rr in raw_results:
-                formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
-                                    '', rr[3], rr[4])
-                results.append(formatted_result)
-        return results
+                results.append(model.VideoThumbnail(frameno=frameno,
+                                                    score=score,
+                                                    image=frame,
+                                                    model_version=model_vers,
+                                                    features=features))
+                results = sorted(results, key=lambda x: x.score, reversed=True)
+            return results
+            
+        _log.debug('%i thumbs found', len(raw_results))
+        return [model.VideoThumbnail(x.image, x.score, x.frameno,
+                                     x.model_version, x.aq_features) 
+                                     for x in result_objs]
 
     def _worker(self, workerno=None):
         '''

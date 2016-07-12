@@ -40,7 +40,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
     plt.figure(figsize=(16, 4), dpi=80)
     curThumb = 0
     #output_file = "basketball_%s.jpg"
-    for image, score, frame_no, timecode, attribute in thumbs:
+    for thumb in thumbs:
         # Output the image
         if output_file is not None:
             print 'Saving %s'%(output_file%curThumb)
@@ -51,7 +51,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
         frame.axes.get_xaxis().set_ticks([])
         frame.axes.get_yaxis().set_visible(False)
         plt.imshow(image[:,:,::-1])
-        plt.xlabel('s: %3.2f. f: %i' % (score, frame_no))
+        plt.xlabel('s: %3.2f. f: %i' % (thumb.score, thumb.frameno))
         curThumb += 1
 
     if not batch:

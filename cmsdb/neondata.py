@@ -5027,15 +5027,18 @@ class ThumbnailMetadata(StoredObject):
                 self.urls[-1], async=True)
             image = cvutils.imageutils.PILImageUtils.to_cv(pil_image)
 
-        (self.model_score, features, model_version) = \
+        (self.model_score, self.features, self.model_version) = \
           yield predictor.predict(image, async=True)
 
         if save_object:
             def _set_score(x):
                 x.model_score = self.model_score
-                x.model_version = model_version
-                x.features = features
-            yield ThumbnailMetadata.modify(self.key, _set_score, async=True)
+                x.model_version = self.model_version
+                x.features = self.features
+            new_thumb = yield ThumbnailMetadata.modify(self.key, _set_score,
+                                                       async=True)
+            if new_thumb:
+                self.__dict__ = new_thumb.__dict__
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
@@ -5759,7 +5762,11 @@ class AbstractJsonResponse(object):
         return self.__dict__
 
     def to_json(self):
-        return json.dumps(self, default=lambda o: o.__dict__)
+        def json_dumper(obj):
+            if isinstance(obj, numpy.ndarray):
+                return obj.tolist()
+            return obj.__dict__
+        return json.dumps(self, default=json_dumper)
 
     @classmethod
     def create_from_dict(cls, d):
