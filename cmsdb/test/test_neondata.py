@@ -2062,6 +2062,10 @@ class TestPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
 
 class BasePGNormalObject(object):
     @classmethod 
+    def _create_key(cls): 
+        return uuid.uuid1().hex
+ 
+    @classmethod 
     def _get_object_type(cls):
         raise NotImplementedError()
 
@@ -2162,7 +2166,7 @@ class BasePGNormalObject(object):
 
     @tornado.testing.gen_test
     def test_save_object(self):
-        obj_id = uuid.uuid1().hex 
+        obj_id = self._create_key() 
         obj_type = self._get_object_type()
         obj = obj_type(obj_id) 
         rv = yield obj.save(async=True)
@@ -2172,7 +2176,7 @@ class BasePGNormalObject(object):
 
     @tornado.testing.gen_test 
     def test_save_duplicate_objects(self):     
-        unique_id = uuid.uuid1().hex 
+        unique_id = self._create_key() 
         so1 = self._get_object_type()(unique_id, 'test1') 
         so2 = self._get_object_type()(unique_id, 'test1') 
         yield so1.save(async=True) 
@@ -2183,8 +2187,8 @@ class BasePGNormalObject(object):
     
     @tornado.testing.gen_test 
     def test_save_all_objects(self):    
-        key1 = uuid.uuid1().hex
-        key2 = uuid.uuid1().hex 
+        key1 = self._create_key()
+        key2 = self._create_key() 
         so1 = self._get_object_type()(key1, 'test1')
         so2 = self._get_object_type()(key2, 'test2')
         self._get_object_type().save_all([so1, so2])
@@ -2195,16 +2199,16 @@ class BasePGNormalObject(object):
      
     @tornado.testing.gen_test 
     def test_get_many_objects(self):     
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        so1 = self._get_object_type()(self._create_key(), 'test')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         yield self._get_object_type().save_all([so1, so2], async=True)
         results = yield self._run_get_many_function([so1,so2])
         self.assertEquals(len(results), 2)
 
     @tornado.testing.gen_test 
     def test_get_many_with_key_like_objects(self):    
-        key1 = uuid.uuid1().hex 
-        key2 = uuid.uuid1().hex
+        key1 = self._create_key() 
+        key2 = self._create_key()
         so1 = self._get_object_type()(key1, 'testabcdef')
         so2 = self._get_object_type()(key2, 'testfedcba')
         yield self._get_object_type().save_all([so1, so2], async=True)
@@ -2215,15 +2219,15 @@ class BasePGNormalObject(object):
 
     @tornado.testing.gen_test 
     def test_delete_object(self):  
-        so1 = self._get_object_type()(uuid.uuid1().hex) 
+        so1 = self._get_object_type()(self._create_key()) 
         yield self._get_delete_function(so1) 
         get1 = yield self._get_get_function(so1)
         self.assertEquals(None, get1)
 
     @tornado.testing.gen_test 
     def test_delete_many_objects(self): 
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        so1 = self._get_object_type()(self._create_key(), 'test1')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         yield so1.save(async=True)
         yield so2.save(async=True)
         yield self._run_delete_many_function([so1, so2]) 
@@ -2234,8 +2238,8 @@ class BasePGNormalObject(object):
 
     @tornado.testing.gen_test
     def test_delete_many_objects_key_dne(self): 
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        so1 = self._get_object_type()(self._create_key(), 'test1')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         so3 = self._get_object_type()('doesnotexist')
         yield so1.save(async=True)
         yield so2.save(async=True)
@@ -2248,7 +2252,7 @@ class BasePGNormalObject(object):
     @tornado.testing.gen_test
     def test_modify_object(self):
         modify_me = MagicMock()  
-        so = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        so = self._get_object_type()(self._create_key(), 'test1')
         yield so.save(async=True)
         yield self._run_modify_function(so, modify_me) 
         self.assertEquals(modify_me.call_args[0][0].key, so.key)
@@ -2257,8 +2261,8 @@ class BasePGNormalObject(object):
     @tornado.testing.gen_test 
     def test_modify_many_objects(self):     
         modify_me = MagicMock()  
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        so1 = self._get_object_type()(self._create_key(), 'test1')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         yield so1.save(async=True)
         yield so2.save(async=True)
         yield self._run_modify_many_function([so1,so2], modify_me) 
@@ -2269,6 +2273,48 @@ class BasePGNormalObject(object):
         self.assertTrue(so2.key in keys) 
         self.assertTrue(so1.key in keys) 
         self.assertEquals(modify_me.call_count, 1)
+
+class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')] 
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+    
+    @classmethod 
+    def _get_object_type(cls): 
+        return ThumbnailMetadata
+
+    @tornado.testing.gen_test 
+    def test_modify_many_objects_values(self):     
+        def modify_me(t):
+            for x in t.itervalues():
+                if x is not None:
+                    x.features = np.array([1.0,2.0,3.0,4.0])
+        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        yield so1.save(async=True)
+        yield so2.save(async=True)
+        rv = yield ThumbnailMetadata.modify_many(
+            [so1.key, so2.key], modify_me, async=True)
+        for x in rv.itervalues(): 
+            self.assertEquals(x.features[0], 1.0) 
+            self.assertEquals(x.features[1], 2.0) 
+            self.assertEquals(x.features[2], 3.0) 
+            self.assertEquals(x.features[3], 4.0) 
+        so1 = yield ThumbnailMetadata.get(so1.key, async=True)
+        self.assertEquals(so1.features[0], 1.0) 
 
 class TestVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
@@ -2579,14 +2625,14 @@ class TestNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         tid = i_vid + "_t1"
         yield ThumbnailMetadata(tid, i_vid).save(async=True)
         yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
-        since_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        video_one = yield VideoMetadata.get(i_vid, async=True)
         yield VideoMetadata(i_vid_two, [tid],'job2').save(async=True)
         video = yield VideoMetadata.get(i_vid_two, async=True)
         so = neondata.NeonUserAccount('key', api_key='key')
         yield so.save(async=True)
         video_ids = yield so.get_internal_video_ids(
             async=True, 
-            since=since_date)
+            since=video_one.created)
         self.assertEquals(len(video_ids), 1)
         self.assertEquals(video_ids[0], 'key_vid2')
 
@@ -2615,6 +2661,64 @@ class TestBrightcovePlayer(test_utils.neontest.AsyncTestCase, BasePGNormalObject
     @tornado.testing.gen_test
     def test_play_player_playing(self):
         self.assertEqual(True, True)
+
+class TestFeature(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_save_and_get(self): 
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key).save(async=True)
+        feature = yield neondata.Feature.get(key, async=True)
+        self.assertEquals(feature.index, 1) 
+        self.assertEquals(feature.name, 'unknown') 
+        self.assertEquals(feature.model_name, 'kfmodel')
+ 
+    @tornado.testing.gen_test 
+    def test_modify(self): 
+        def _modify(f): 
+            f.name = 'newname'         
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key).save(async=True)
+        feature = yield neondata.Feature.modify(key, _modify, async=True)
+        self.assertEquals(feature.index, 1) 
+        self.assertEquals(feature.name, 'newname') 
+        self.assertEquals(feature.model_name, 'kfmodel')
+
+    @tornado.testing.gen_test 
+    def test_delete(self): 
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key, name='oldname').save(async=True)
+        yield neondata.Feature.delete(key, async=True)
+        feature = yield neondata.Feature.get(key, async=True)
+        self.assertEquals(feature.name, 'unknown')
+ 
+    @tornado.testing.gen_test 
+    def test_get_by_model_name(self): 
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2) 
+        yield neondata.Feature(key).save(async=True)
+
+        fs = yield neondata.Feature.get_by_model_name('kfmodel', async=True)
+        f1 = fs[0]
+        f2 = fs[1] 
+        self.assertEquals(f1.index, 1)  
+        self.assertEquals(f2.index, 2)  
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

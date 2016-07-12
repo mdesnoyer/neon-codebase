@@ -15,8 +15,10 @@ import cv2
 import logging
 import matplotlib.pyplot as plt
 import model
+import model.predictor
 import numpy as np
 import time
+import utils.autoscale
 from utils import pycvutils
 from optparse import OptionParser
 
@@ -38,7 +40,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
     plt.figure(figsize=(16, 4), dpi=80)
     curThumb = 0
     #output_file = "basketball_%s.jpg"
-    for image, score, frame_no, timecode, attribute in thumbs:
+    for thumb in thumbs:
         # Output the image
         if output_file is not None:
             print 'Saving %s'%(output_file%curThumb)
@@ -49,7 +51,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
         frame.axes.get_xaxis().set_ticks([])
         frame.axes.get_yaxis().set_visible(False)
         plt.imshow(image[:,:,::-1])
-        plt.xlabel('s: %3.2f. f: %i' % (score, frame_no))
+        plt.xlabel('s: %3.2f. f: %i' % (thumb.score, thumb.frameno))
         curThumb += 1
 
     if not batch:
@@ -57,7 +59,12 @@ def run_one_video(mod, video_file, n, output_file, batch):
 
 def main(options):     
     _log.info('Loading model')
-    mod = model.load_model(options.model)
+    
+    conn = utils.autoscale.MultipleAutoScaleGroups(
+        options.autoscale_groups.split(','))
+    predictor = model.predictor.DeepnetPredictor(aquila_connection=conn)
+    
+    mod = model.generate_model(options.model, predictor)
 
     if options.video is not None:
         run_one_video(mod, options.video, options.n, options.output,
@@ -82,6 +89,9 @@ if __name__ == '__main__':
                       help='String template to output the thumbnails to. Eg. thumb_%i.jpg')
     parser.add_option('--batch', default=False, action='store_true',
                       help='If true, does not show images')
+    parser.add_option('--autoscale_groups', 
+                      default='AquilaOnDemandTest,AquilaSpotTest', 
+                      help='List of autoscale groups to connect to')
     
     options, args = parser.parse_args()
 

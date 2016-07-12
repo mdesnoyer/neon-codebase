@@ -583,6 +583,16 @@ class OVPIntegration(object):
         '''
         raise NotImplementedError()
 
+    @tornado.gen.coroutine
+    def lookup_videos(self, ovp_video_ids):
+        '''Looks up videos by id and returns a list of video object.
+
+        Videos that don't exist will not be returned.
+
+        Must be implemented by the subclass
+        '''
+        raise NotImplementedError()
+
     def get_video_callback_url(self, video):
         '''Find the video_callback_url in the video object
 

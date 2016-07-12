@@ -147,7 +147,7 @@ class OptionParser(object):
         if global_name in self._options:
             known_option = self._options[global_name]
             if (known_option.default == default and 
-                known_option.type == type and
+                (type is None or known_option.type == type) and
                 known_option.help == help):
                 # It's redefined exactly the same. Ignore silently.
                 return

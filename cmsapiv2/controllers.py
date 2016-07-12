@@ -1246,7 +1246,8 @@ class ThumbnailHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions']
+                'type', 'external_ref', 'created', 'updated', 'renditions',
+                'feature_ids']
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1255,7 +1256,6 @@ class ThumbnailHandler(APIV2Handler):
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
-
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
@@ -1270,6 +1270,8 @@ class ThumbnailHandler(APIV2Handler):
         elif field == 'renditions':
             urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
             retval = ThumbnailHelper.renditions_of(urls)
+        elif field == 'feature_ids': 
+            retval = ThumbnailHelper.get_feature_ids(obj) 
         else:
             raise BadRequestError('invalid field %s' % field)
 
@@ -1310,6 +1312,19 @@ class ThumbnailHelper(object):
             if not rv.get(tid):
                 rv[tid] = []
         raise tornado.gen.Return(rv)
+
+    @staticmethod 
+    def get_feature_ids(obj): 
+        # TODO order these by importance 
+        # load in pkl file, and multiply, order by index
+        if not obj.features: 
+            return None 
+        if not obj.model_version: 
+            return None
+        model_name = obj.model_version
+        rv = [ neondata.Feature.create_key(
+            model_name, i[0]) for i, x in np.ndenumerate(obj.features) ]
+        return rv 
 
     @staticmethod
     def renditions_of(urls_obj):
@@ -3030,7 +3045,24 @@ class EmailHandler(APIV2Handler):
             statemon.state.increment('mandrill_email_not_sent')
             raise BadRequestError('Unable to send email')  
         
-        self.success({'message' : 'Email sent to %s' % send_to_email }) 
+        self.success({'message' : 'Email sent to %s' % send_to_email })
+ 
+    @classmethod
+    def get_limits(self):
+        post_list = [{ 'left_arg': 'email_posts',
+                       'right_arg': 'max_email_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_email_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_email_posts',
+                           'timer_resets': [ ('email_posts', 0) ]
+                       },
+                       'values_to_increase': [ ('email_posts', 1) ],
+                       'values_to_decrease': []
+        }]
+        return {
+                   HTTPVerbs.POST: post_list
+               }
             
     @classmethod
     def get_access_levels(cls):
@@ -3039,12 +3071,65 @@ class EmailHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.POST] 
                }
 
+class FeatureHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self):
+        schema = Schema({
+            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+            'model_name' : All(Coerce(str), Length(min=1, max=512)), 
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+        })
+        args = self.parse_args()
+        schema(args)
+        model_name = args.get('model_name', None)
+        keys = args.get('key', None)
+
+        if (model_name is None) == (keys is None):
+            raise Invalid('Exactly one of model_name or key is required')
+
+        fields = args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
+        
+        # if keys is set
+        if keys: 
+            keys = set(keys.split(',')) 
+            features = yield neondata.Feature.get_many(keys, async=True)
+        else: 
+            features = yield neondata.Feature.get_by_model_name(
+                model_name, 
+                async=True)
+     
+        res_list = yield [self.db2api(f, fields=fields) for f in features] 
+        
+        rv = { 'features' : res_list, 
+               'feature_count' : len(res_list) }
+ 
+        self.success(rv)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['key', 'model_name', 'created', 'updated', 
+                'name', 'variance_explained', 'index'] 
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['key', 'model_name', 'created', 'updated', 
+                'name', 'variance_explained', 'index'] 
+
+    @classmethod
+    def get_access_levels(cls):
+        return {
+                 HTTPVerbs.GET : neondata.AccessLevels.NONE
+               }
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/batch/?$', BatchHandler),
+    (r'/api/v2/feature/?$', FeatureHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',

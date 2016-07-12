@@ -29,6 +29,7 @@ import cv2
 import dateutil.parser
 import ffvideo
 import hashlib
+import integrations
 import json
 import model
 import model.errors
@@ -77,6 +78,7 @@ statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
 statemon.define('video_download_error', int)
+statemon.define('integration_error', int)
 statemon.define('default_thumb_error', int)
 statemon.define('ffvideo_metadata_error', int)
 statemon.define('video_duration_30m', int)
@@ -453,6 +455,35 @@ class VideoProcessor(object):
                 youtube_dl.utils.ExtractorError, 
                 youtube_dl.utils.UnavailableVideoError,
                 socket.error) as e:
+            # If this video came from an integration, then try to
+            # refresh the url and re-download.
+            if (self.video_metadata.integration_id is not None and 
+                self.video_metadata.integration_id != '0'):
+                new_url = None
+                try:
+                    db_integration = yield neondata.AbstractIntegration.get(
+                        self.video_metadata.integration_id,
+                        async=True)
+                    integration = integrations.create_ovp_integration(
+                        self.job_params['api_key'], db_integration)
+                    video_info = yield integration.lookup_videos(
+                        [self.job_params['video_id']])
+                    if len(video_info) == 1:
+                        new_url = integration.get_video_url(video_info[0])
+                except Exception as integ_exception:
+                    _log.warn('Unable to build OVP integration %s: %s' %
+                              (self.video_metadata.integration_id,
+                               integ_exception))
+                    statemon.state.increment('integration_error')
+                if new_url is not None and new_url != self.video_url:
+                    _log.info('Video %s has moved to %s. '
+                              'Trying to download at its new location' % 
+                              (self.video_metadata.key, new_url))
+                    self.video_url = new_url
+                    self.video_metadata.url = new_url
+                    yield self.download_video_file()
+                    return
+
             msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
@@ -582,31 +613,26 @@ class VideoProcessor(object):
                   mov,
                   n=n_thumbs,
                   video_name=self.video_url)
-            results = sorted(results, key=lambda x:x[1], reverse=True)
+            results = sorted(results, key=lambda x:x.score, reverse=True)
         except model.errors.VideoReadError:
             msg = "Error using OpenCV to read video. %s" % self.video_url
             _log.error(msg)
             statemon.state.increment('video_read_error')
             raise BadVideoError(msg)
-
-        exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
-                                           for x in results])
+        
         rank=0
-        for image, score, frame_no, timecode, attribute in results:
-            # Only return unfiltered images unless they are all
-            # filtered, in which case, return them all.
-            if not exists_unfiltered_images or (
-                    attribute is not None and attribute == ''):
-                meta = neondata.ThumbnailMetadata(
-                    None,
-                    ttype=neondata.ThumbnailType.NEON,
-                    model_score=score,
-                    model_version=self.model_version,
-                    frameno=frame_no,
-                    filtered=attribute,
-                    rank=rank)
-                self.thumbnails.append((meta, PILImageUtils.from_cv(image)))
-                rank += 1 
+        for result in results:
+            meta = neondata.ThumbnailMetadata(
+                None,
+                ttype=neondata.ThumbnailType.NEON,
+                model_score=result.score,
+                model_version=result.model_version,
+                features=result.features,
+                frameno=result.frameno,
+                rank=rank,
+                filtered=result.filtered_reason)
+            self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
+            rank += 1 
 
         # Get the baseline frames of the video
         yield self._get_center_frame(video_file)
@@ -630,12 +656,12 @@ class VideoProcessor(object):
             cv_image = self._get_specific_frame(mov, int(nframes / 2))
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.CENTERFRAME,
                 frameno=int(nframes / 2),
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
             yield meta.score_image(self.model.predictor,
-                                   self.model_version,
                                    image=cv_image)
         except model.errors.PredictionError as e:
             _log.warn('Error predicting score for the center frame: %s' %
@@ -662,12 +688,12 @@ class VideoProcessor(object):
             cv_image = self._get_specific_frame(mov, frameno)
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.RANDOM,
                 frameno=frameno,
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
             yield meta.score_image(self.model.predictor,
-                                   self.model_version,
                                    image=cv_image)
         except model.errors.PredictionError as e:
             _log.warn('Error predicting score for the random frame: %s' %
@@ -797,6 +823,7 @@ class VideoProcessor(object):
                 old_thumb.phash = new_thumb.phash
                 old_thumb.frameno = new_thumb.frameno
                 old_thumb.filtered = new_thumb.filtered
+                old_thumb.features = new_thumb.features
         try:
             new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
                 [x[0].key for x in self.thumbnails],
@@ -861,7 +888,6 @@ class VideoProcessor(object):
                 # long process, not a big deal, but we might want to
                 # fix that
                 yield thumb.score_image(self.model.predictor,
-                                        self.model_version,
                                         save_object=True)
 
         except neondata.ThumbDownloadError, e:
