@@ -276,6 +276,7 @@ class Cluster():
             'avro.output.codec' : 'snappy',
             'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
             'mapreduce.task.timeout' : 1800000,
+            'mapreduce.map.speculative': 'false',
             'mapreduce.reduce.speculative': 'false',
             'io.file.buffer.size': 65536
         }
