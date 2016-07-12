@@ -27,6 +27,7 @@ import json
 import logging
 from mock import MagicMock, patch, ANY
 import model.errors
+import model
 import multiprocessing
 import numpy as np
 import os
@@ -72,6 +73,18 @@ import youtube_dl
 
 _log = logging.getLogger(__name__)
 
+def _get_good_model_return_value():
+    return [
+        model.VideoThumbnail(frameno=20, score=0.2,
+               image=PILImageUtils.to_cv(
+                   PILImageUtils.create_random_image(300,300)),
+               model_version='test_model', features=np.random.randn(1024)),
+        model.VideoThumbnail(frameno=42, score=0.3,
+               image=PILImageUtils.to_cv(
+                   PILImageUtils.create_random_image(300,300)),
+               model_version='test_model', features=np.random.randn(1024))
+            ]
+
 class TestVideoClient(test_utils.neontest.AsyncTestCase):
     ''' 
     Test Video Processing client
@@ -80,14 +93,12 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         super(TestVideoClient, self).setUp()
         
         #setup properties,model
-        self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
         self.model_version = "test" 
         self.model = MagicMock()
 
-        #Mock Model methods, use pkl to load captured outputs
-        ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = ct_output
-        self.model.score.return_value = 1, 2 
+        #Mock Model methods,
+        self.model.choose_thumbnails.return_value = \
+          _get_good_model_return_value()
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
                                 "test.mp4") 
         self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
@@ -97,7 +108,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.model.predictor = self.predictor_patcher.start()()
         self.predict_mock = self._future_wrap_mock(
             self.model.predictor.predict, require_async_kw=True)
-        self.predict_mock.return_value = 99
+        self.predict_mock.return_value = (99, None, 'model1')
         
         # Fill out database
         na = neondata.NeonUserAccount('acct1')
@@ -640,24 +651,24 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_process_all_filtered_video(self):
         '''Test processing a video where every frame is filtered.'''
-        self.model.choose_thumbnails.return_value = (
-            [(np.zeros((480, 640, 3), np.uint8), float('-inf'), 120, 4.0,
-              'black'),
-             (np.zeros((480, 640, 3), np.uint8), float('-inf'), 600, 20.0,
-              'black'),
-             (np.zeros((480, 640, 3), np.uint8), float('-inf'), 900, 30.0,
-              'black')])
+        self.model.choose_thumbnails.return_value = [
+            model.VideoThumbnail(np.zeros((480, 640, 3), np.uint8),
+                                 float('-inf'), 120,
+                                 filtered_reason='black'),
+            model.VideoThumbnail(np.zeros((480, 640, 3), np.uint8),
+                                 float('-inf'), 600,
+                                 filtered_reason='black')]
         vprocessor = self.setup_video_processor("neon")
-        yield vprocessor.process_video(self.test_video_file2, n_thumbs=3)
+        yield vprocessor.process_video(self.test_video_file2, n_thumbs=2)
 
         # Verify that all the frames were added to the data maps
         neon_thumbs = [x[0] for x in vprocessor.thumbnails if
                        x[0].type == neondata.ThumbnailType.NEON]
-        self.assertEquals(len(neon_thumbs), 3)
+        self.assertEquals(len(neon_thumbs), 2)
         self.assertEquals([x.model_score for x in neon_thumbs],
-                          [float('-inf'), float('-inf'), float('-inf')])
+                          [float('-inf'), float('-inf')])
         self.assertEquals([x.filtered for x in neon_thumbs],
-                          ['black', 'black', 'black'])
+                          ['black', 'black'])
 
     @tornado.testing.gen_test
     def test_get_center_frame(self):
@@ -681,7 +692,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertEqual(meta.type, neondata.ThumbnailType.CENTERFRAME)
         self.assertEqual(meta.rank, 0)
         self.assertEqual(meta.frameno, 66)
-        self.assertEqual(meta.model_version, 'test')
+        self.assertEqual(meta.model_version, 'model1')
         self.assertEqual(meta.model_score, 99)
 
         # Missing prediction doesn't throw an error
@@ -714,7 +725,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertTrue(isinstance(img1, Image.Image))
         self.assertEqual(meta1.type, neondata.ThumbnailType.RANDOM)
         self.assertEqual(meta1.rank, 0)
-        self.assertEqual(meta1.model_version, 'test')
+        self.assertEqual(meta1.model_version, 'model1')
         self.assertEqual(meta1.model_score, 99)
 
         yield vprocessor._get_random_frame(self.test_video_file)
@@ -927,7 +938,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.model_mock = MagicMock()
         self.predict_mock = self._future_wrap_mock(
             self.model_mock.predictor.predict, require_async_kw=True)
-        self.predict_mock.return_value = 99
+        self.predict_mock.return_value = (99, None, 'model1')
 
         # Mock out http callbacks
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
@@ -1087,7 +1098,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
             x for x in thumbs if x.type == neondata.ThumbnailType.BRIGHTCOVE]
         default_thumb = default_thumb[0]
         self.assertIsNotNone(default_thumb.key)
-        self.assertEquals(default_thumb.model_version, 'test_version')
+        self.assertEquals(default_thumb.model_version, 'model1')
         self.assertEquals(default_thumb.model_score, 99)
         rand_thumb = [
             x for x in thumbs if x.type == neondata.ThumbnailType.RANDOM]
@@ -1397,7 +1408,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertEquals(default_thumb.rank, 0)
         self.assertEquals(default_thumb.phash, thumb_meta.phash)
         self.assertEquals(default_thumb.model_score, 99)
-        self.assertEquals(default_thumb.model_version, 'test_version')
+        self.assertEquals(default_thumb.model_version, 'model1')
 
     @tornado.testing.gen_test
     def test_no_thumbnails_found(self):
@@ -1702,13 +1713,14 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.model = MagicMock()
         load_model_mock = self.model_patcher.start()
         load_model_mock.return_value = self.model
-        ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = ct_output
+        self.model.choose_thumbnails.return_value = \
+          _get_good_model_return_value()
         self.predictor_patcher = patch(
             'video_processor.client.model.predictor.DeepnetPredictor')
         self.model.predictor = self.predictor_patcher.start()()
         self.predict_mock = self._future_wrap_mock(
             self.model.predictor.predict, require_async_kw=True)
+        self.predict_mock.return_value = (99, None, 'model1')
 
         # Mock out the image download
         self.im_download_mocker = patch(

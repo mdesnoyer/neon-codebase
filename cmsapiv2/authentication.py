@@ -8,8 +8,6 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 from datetime import datetime, timedelta
-import emails.verify
-import emails.forgot
 from passlib.hash import sha256_crypt
 from voluptuous import RequiredFieldInvalid
 
@@ -204,10 +202,16 @@ class RefreshTokenHandler(APIV2Handler):
 
             username = payload['username'].lower()
             user = yield neondata.User.get(username, async=True)
+            if not user:
+                raise NotFoundError('No user found for this username')
+
             account_ids = yield user.get_associated_account_ids(async=True)
+            if not account_ids:
+                raise HTTPError('User has no associated account')
 
             access_token = JWTHelper.generate_token(
-                {'username': username},
+                {'username': username,
+                 'account_id': account_ids[0]},
                 token_type=TokenTypes.ACCESS_TOKEN)
 
             def _update_user(u):
@@ -508,27 +512,18 @@ class AccountHelper(object):
         If the email is sent successfully, it returns True.
         If something goes wrong, it logs and raises an exception.
         """
-        kwargs = {}
+        temp_args = {}
         url = '%s/account/confirm?token=%s' % (origin, token)
-        kwargs['to_addresses'] = account.email
-        subject, body = emails.verify.template()
-        kwargs['subject'] = subject
-        kwargs['body'] = body.format(
-            first_name=user.first_name,
-            url=url,
-            username=user.username)
-        kwargs['source'] = 'Neon Account Creation <noreply@neon-lab.com>'
-        kwargs['reply_addresses'] = 'noreply@neon-lab.com'
-        kwargs['format'] = 'html'
-        ses = boto.connect_ses()
-        try:
-            # Yield on this external call.
-            yield executor.submit(ses.send_email, **kwargs)
-        except Exception as e:
-            _log.error('Failed to Verification Send email to %s exc_info %s' %
-                (user.username, e))
-            raise Exception('unable to send verification email')
-        raise tornado.gen.Return()
+        temp_args['url'] = url 
+        temp_args['first_name'] = user.first_name
+        temp_args['username'] = user.username      
+   
+        yield MandrillEmailSender.send_mandrill_email(
+            account.email, 
+            'verify-account', 
+            template_args=temp_args)
+
+        raise tornado.gen.Return(True)
 
     @staticmethod
     def get_auth_tokens(payload):
@@ -858,10 +853,11 @@ class ForgotPasswordHandler(APIV2Handler):
             async=True)
 
         if email_address:
-            self._send_email(email_address, user)
+            yield self._send_email(email_address, user)
             msg = 'Reset Password email sent to %s' % email_address
             self.success({'message' : msg})
-
+    
+    @tornado.gen.coroutine
     def _send_email(self,
                     email_address,
                     user):
@@ -870,31 +866,22 @@ class ForgotPasswordHandler(APIV2Handler):
             if the email is sent successfully, it returns True
             if something goes wrong it logs, and raises an exception
         """
-        kwargs = {}
         click_me_url = '%s/user/reset/token/%s/username/%s/' % (
             self.origin,
             user.reset_password_token,
             user.username)
-        kwargs['to_addresses'] = email_address
 
-        subject, body = emails.forgot.template()
-        kwargs['subject'] = subject
-        kwargs['body'] = body.format(
-            first_name=user.first_name,
-            url=click_me_url,
-            username=user.username)
-        kwargs['source'] = 'Neon Forgot Your Password <noreply@neon-lab.com>'
-        kwargs['reply_addresses'] = 'noreply@neon-lab.com'
-        kwargs['format'] = 'html'
-        ses = boto.connect_ses()
-        try:
-            ses.send_email(**kwargs)
-        except Exception as e:
-            _log.error('Failed to Send Reset Password email to %s exc_info %s' %
-                (email_address, e))
-            raise Exception('unable to send reset password email')
+        temp_args = {}
+        temp_args['url'] = click_me_url 
+        temp_args['first_name'] = user.first_name
+        temp_args['username'] = user.username      
+   
+        yield MandrillEmailSender.send_mandrill_email(
+            email_address, 
+            'reset-password', 
+            template_args=temp_args)
 
-        return True
+        raise tornado.gen.Return(True) 
 
     @classmethod
     def get_access_levels(self):

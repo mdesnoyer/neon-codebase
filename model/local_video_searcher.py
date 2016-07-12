@@ -171,6 +171,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import cv2
+import model
 import model.errors
 import numpy as np
 from model.colorname import ColorName
@@ -744,18 +745,26 @@ class _Result(object):
     def __init__(self, frameno=None, score=-np.inf, image=None,
                  feat_score=None, meta=None,
                  feat_score_weight=None, feat_score_func=None,
-                 combination_function=None):
+                 combination_function=None, model_vers=None,
+                 aq_features=None):
+        # Fields that are generally useful for the returned values
+        self.image = image
+        self.score = score
+        self.frameno = frameno
+        self.model_version = model_vers
+        self.aq_features = aq_features # Feature vector representing the image
+
+        # Extra features that are useful when keeping track of the
+        # best images found so far.
         self._defined = False
         if score and frameno:
             self._defined = True
             _log.debug(('Instantiating result object at frame %i with'
                         ' score %.3f') % (frameno, score))
-        self.score = score
-        self.frameno = frameno
+
         self._feat_score = feat_score
         self._feat_score_func = feat_score_func
         self._hash = getrandbits(128)
-        self.image = image
         if combination_function is None:
             combination_function = lambda ms, fs, w: ms + fs * w
         self._combination_function = combination_function
@@ -929,7 +938,8 @@ class ResultsList(object):
             self.dists[entry_idx, idx] = dst
 
     def accept_replace(self, frameno, score, image=None, feat_score=None,
-                       meta=None, feat_score_func=None):
+                       meta=None, feat_score_func=None, model_vers=None,
+                       aq_features=None):
         '''
         Attempts to insert a result into the results list. If it does not
         qualify, it returns False, otherwise returns True
@@ -939,7 +949,9 @@ class ResultsList(object):
                           feat_score=feat_score, meta=meta,
                           feat_score_weight=self._feat_score_weight,
                           feat_score_func=feat_score_func,
-                          combination_function=self._combination_function)
+                          combination_function=self._combination_function,
+                          model_vers=model_vers,
+                          aq_features=aq_features)
             self._considered_thumbs += 1
             if score < self.min:
                 _log.debug('Frame %i [%.3f] rejected due to score' % (frameno,
@@ -1095,7 +1107,7 @@ class ResultsList(object):
     def get_results(self):
         '''
         Returns the results in sorted order, sorted by score. Returns them
-        as (image, score, frameno)
+        as (image, score, frameno, model_vers, aq_features)
         '''
         with self._lock:
             _log.debug('Dumping results')
@@ -1105,8 +1117,8 @@ class ResultsList(object):
                 res_obj = self.results[idx]
                 if not res_obj._defined:
                     continue
-                image = self._improve_raw_img(res_obj.image)
-                res.append([image, res_obj.score, res_obj.frameno])
+                self._improve_img(res_obj)
+                res.append(res_obj)
             return res
 
 
@@ -1307,6 +1319,9 @@ class LocalSearcher(object):
         # this, if necessary at all, will be set by update_processing_strategy
         self.analysis_crop = None
         # determine the generators to cache.
+        if feature_generators is None:
+            raise ValueError('Valid feature generators are required. '
+                             'Grab them from model.features')
         for f in feature_generators:
             gen_name = f.get_feat_name()
             self.generators[gen_name] = f
@@ -1387,7 +1402,7 @@ class LocalSearcher(object):
     def min_score(self):
         return self.results.min
 
-    def choose_thumbnails(self, video, n=None, video_name='',):
+    def choose_thumbnails(self, video, n=None, video_name=''):
         self._reset()
         if n is None:
             n = self.n_thumbs
@@ -1517,10 +1532,9 @@ class LocalSearcher(object):
                    self.video_name)
             _log.error(msg)
             raise model.errors.PredictionError(msg)
-        raw_results = self.results.get_results()
+        result_objs = self.results.get_results()
         # format it into the expected format
-        results = []
-        if not len(raw_results):
+        if not len(result_objs):
             _log.debug('No suitable frames have been found for video %s!'
                       ' Will uniformly select frames', video_name)
             # increment the statemon
@@ -1530,19 +1544,23 @@ class LocalSearcher(object):
                                  int(self.num_frames * (1 - self.startend_clip)),
                                  self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
+            results = []
             for frame, frameno in zip(rframes, frames):
                 # TODO: get the scores of these frames more efficiently (async)
-                score = self.predictor.predict(frame)
-                formatted_result = (frame, score, frameno,
-                                    frameno / float(fps), '')
-                results.append(formatted_result)
-        else:
-            _log.debug('%i thumbs found', len(raw_results))
-            for rr in raw_results:
-                formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
-                                    '')
-                results.append(formatted_result)
-        return results
+                (score, features, model_vers) = self.predictor.predict(
+                    frame)
+                results.append(model.VideoThumbnail(frameno=frameno,
+                                                    score=score,
+                                                    image=frame,
+                                                    model_version=model_vers,
+                                                    features=features))
+                results = sorted(results, key=lambda x: x.score, reverse=True)
+            return results
+            
+        _log.debug('%i thumbs found', len(result_objs))
+        return [model.VideoThumbnail(x.image, x.score, x.frameno,
+                                     x.model_version, x.aq_features) 
+                                     for x in result_objs]
 
     def _worker(self, workerno=None):
         '''
@@ -1588,7 +1606,7 @@ class LocalSearcher(object):
                     with self._act_lock:
                         self._active_samples -= 1
                 except Exception, e:
-                    _log.error('Problem sampling frame %i: %s', args, e.message)
+                    _log.exception('Problem sampling frame %i: %s', args, e.message)
                     statemon.state.increment('sampling_problem')
             elif req_type == 'srch':
                 try:
@@ -1707,10 +1725,11 @@ class LocalSearcher(object):
             else:
                 meta = None
         try:
-            indi_framescore = self.predictor.predict(best_frame)
+            (indi_framescore, features, model_vers) = self.predictor.predict(
+                best_frame)
         except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
-            _log.warn('Problem obtaining score localsearch frame %s: %s',
+            _log.warn('Problem obtaining score localsearch frame %s: %s' %
                       (best_frameno, e))
             with self._proc_lock:
                 self.results.register_failure()
@@ -1727,7 +1746,8 @@ class LocalSearcher(object):
                                    start_score, end_frame, end_score, best_frameno,
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
-                np.max(comb), meta=meta, feat_score_func=feat_score_func)
+                np.max(comb), meta=meta, feat_score_func=feat_score_func,
+                model_vers=model_vers, aq_features=features)
 
     def _take_sample(self, frameno):
         '''
@@ -1748,10 +1768,11 @@ class LocalSearcher(object):
                 return
             frames = self._prep(frames)
         try:
-            frame_score = self.predictor.predict(frames[0])
+            frame_score, features, model_vers = self.predictor.predict(
+                frames[0])
         except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
-            _log.warn('Problem obtaining score for frame %s: %s',
+            _log.warn('Problem obtaining score for frame %s: %s' %
                       (frameno, e))
             with self._proc_lock:
                 self.results.register_failure()
