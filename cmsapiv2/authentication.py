@@ -514,7 +514,7 @@ class AccountHelper(object):
    
         yield MandrillEmailSender.send_mandrill_email(
             account.email, 
-            'add-account', 
+            'verify-account', 
             template_args=temp_args)
 
         raise tornado.gen.Return(True)
