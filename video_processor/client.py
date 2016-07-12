@@ -1008,14 +1008,13 @@ class VideoProcessor(object):
             if response.error: 
                 statemon.state.increment('failed_to_send_result_email')
                 _log.error('Failed to send email to %s due to %s' % 
-                    to_email, 
-                    response.error)
+                    (to_email, response.error))
                 rv = False  
         except AttributeError: 
             pass 
         except Exception as e:
             rv = False  
-            _log.error('Unexcepted error %s when sending email')  
+            _log.error('Unexcepted error %s when sending email', e)  
         finally: 
             raise tornado.gen.Return(rv) 
         
