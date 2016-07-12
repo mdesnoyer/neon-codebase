@@ -824,10 +824,7 @@ class MandrillEmailSender(object):
             method="GET",
             request_timeout=8.0)
 
-        response = yield tornado.gen.Task(
-            utils.http.send_request, 
-            request, 
-            async=True)
+        response = yield utils.http.send_request(request, async=True)
 
         if response.code != ResponseCode.HTTP_OK:
             statemon.state.increment('mandrill_template_not_found')
@@ -887,10 +884,7 @@ class MandrillEmailSender(object):
             headers = {"Content-Type" : "application/json"},
             request_timeout=20.0)
  
-        response = yield tornado.gen.Task(
-            utils.http.send_request, 
-            request, 
-            async=True)
+        response = yield utils.http.send_request(request, async=True)
 
         resp_body = json.loads(response.body)  
         if response.code != ResponseCode.HTTP_OK or \
