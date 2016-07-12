@@ -23,7 +23,7 @@ def full_object_str(obj, exclude=[]):
         else:
             s = '%s: %s' % (name, val)
         field_strs.append(s)
-    return '<%s> {%s}' % (obj.__class__.__name__, ','.join(field_strs))
+    return '<%s> {%s}' % (obj.__class__.__name__, ', '.join(field_strs))
 
 class KeyedSingleton(type):
     '''A Singleton metaclass that is keyed by type and a key that is passed in.

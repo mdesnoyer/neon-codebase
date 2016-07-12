@@ -5014,18 +5014,15 @@ class ThumbnailMetadata(StoredObject):
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
     @tornado.gen.coroutine
-    def score_image(self, predictor, model_version, image=None,
-                    save_object=False):
+    def score_image(self, predictor, image=None, save_object=False):
         '''Adds the model score to the image.
 
         Inputs:
         predictor - a model.predictor.Predictor object used to get the score
-        model_version - name of the model being used
         image - OpenCV image data. If not provided, image will be downloaded
         save_object - If true, the score is saved to the database
         '''
-        if (self.model_version == model_version and 
-            self.model_score is not None):
+        if (self.model_score is not None or self.features is not None):
             # No need to compute the score, it's there
             return
 
@@ -5034,14 +5031,18 @@ class ThumbnailMetadata(StoredObject):
                 self.urls[-1], async=True)
             image = cvutils.imageutils.PILImageUtils.to_cv(pil_image)
 
-        self.model_score = yield predictor.predict(image, async=True)
-        self.model_version = model_version
+        (self.model_score, self.features, self.model_version) = \
+          yield predictor.predict(image, async=True)
 
         if save_object:
             def _set_score(x):
                 x.model_score = self.model_score
                 x.model_version = self.model_version
-            yield ThumbnailMetadata.modify(self.key, _set_score, async=True)
+                x.features = self.features
+            new_thumb = yield ThumbnailMetadata.modify(self.key, _set_score,
+                                                       async=True)
+            if new_thumb:
+                self.__dict__ = new_thumb.__dict__
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
@@ -5796,7 +5797,11 @@ class AbstractJsonResponse(object):
         return self.__dict__
 
     def to_json(self):
-        return json.dumps(self, default=lambda o: o.__dict__)
+        def json_dumper(obj):
+            if isinstance(obj, numpy.ndarray):
+                return obj.tolist()
+            return obj.__dict__
+        return json.dumps(self, default=json_dumper)
 
     @classmethod
     def create_from_dict(cls, d):
