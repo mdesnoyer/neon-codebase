@@ -5290,10 +5290,10 @@ class VideoMetadata(StoredObject):
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
                  publish_date=None, hidden=None, share_token=None,
-                 bad_tids=[]):
+                 bad_tids=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
-        self.bad_thumbnail_ids = bad_tids = []
+        self.bad_thumbnail_ids = bad_tids or []
         self.url = video_url 
         self.duration = duration # in seconds
         self.video_valence = vid_valence 
@@ -5420,10 +5420,7 @@ class VideoMetadata(StoredObject):
                 raise IOError("Could not save thumbnail")
 
             def _modify(v):
-                if append_to_good:
-                    v.thumbnail_ids.append(thumb.key)
-                else:
-                    v.bad_thumbnail_ids.append(thumb.key)
+                target.append(thumb.key)
 
             updated_video = yield self.modify(
                     self.key,

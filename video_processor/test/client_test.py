@@ -606,6 +606,18 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                  x[0].type == neondata.ThumbnailType.CENTERFRAME]))
         self.assertNotIn(float('-inf'), [x[0].model_score for x in vprocessor.thumbnails])
 
+        # Assert scores are reasonable: sorted by score.
+        self.assertTrue(all(a[0].model_score > b[0].model_score) for a, b in zip(
+            vprocessor.thumbnails,
+            vprocessor.thumbnails[1:]))
+        self.assertTrue(all(a[0].model_score < b[0].model_score) for a, b in zip(
+            vprocessor.bad_thumbnails,
+            vprocessor.bad_thumbnails[1:]))
+        # The best bad is worse than the worst good.
+        self.assertTrue(
+            max([t[0].model_score for t in vprocessor.bad_thumbnails]) <
+            min([t[0].model_score for t in vprocessor.thumbnails]))
+
     @tornado.testing.gen_test
     def test_somebody_else_processed_first(self):
         # Try when somebody else was sucessful

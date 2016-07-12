@@ -185,7 +185,7 @@ class VideoProcessor(object):
                 self.job_params['job_id']
 
         self.n_thumbs = int(self.job_params.get('topn', None) or
-                            self.job_params.get('api_param', None) or 5)
+                            self.job_params.get('api_param', None) or 6)
         self.n_thumbs = max(self.n_thumbs, 1)
         self.m_thumbs = int(self.job_params.get('botm', None) or 6)
         self.m_thumbs = max(self.m_thumbs, 1)
@@ -859,13 +859,11 @@ class VideoProcessor(object):
                 async=True)
             if len(self.thumbnails) + len(self.bad_thumbnails) > 0 and len(new_thumb_dict) == 0:
                 raise DBError("Couldn't change some thumbs")
-            #_log.info(self.thumbnails)
-            #_log.info(self.bad_thumbnails)
-            #_log.info(new_thumb_dict)
         except Exception, e:
             _log.error("Error writing thumbnail data to database: %s" % e)
             statemon.state.increment('save_tmdata_error')
             raise DBError("Error writing thumbnail data to database")
+        print(new_thumb_dict)
 
         @tornado.gen.coroutine
         def _merge_video_data(video_obj):

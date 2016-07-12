@@ -1635,7 +1635,7 @@ class LocalSearcher(object):
                     with self._act_lock:
                         self._active_samples -= 1
                 except Exception, e:
-                    _log.exception('Problem sampling frame %i: %s', args, e.message)
+                    _log.error('Problem sampling frame %i: %s', args, e.message)
                     statemon.state.increment('sampling_problem')
             elif req_type == 'srch':
                 try:
@@ -1647,7 +1647,7 @@ class LocalSearcher(object):
                 except Exception, e:
                     start = args[0]
                     stop = args[2]
-                    _log.exception('Problem local searching %i <---> %i: %s',
+                    _log.error('Problem local searching %i <---> %i: %s',
                         start, stop, e.message)
                     statemon.state.increment('searching_problem')
 
@@ -1808,20 +1808,19 @@ class LocalSearcher(object):
             return
         with self._proc_lock:
 
-            res = _Result(
+            # Keep a small heap of the worst frames.
+            _res = _Result(
                 frameno=frameno,
                 score=frame_score,
                 image=frames[0],
                 model_vers=model_vers,
                 aq_features=features)
-
-            # Keep a small heap of the worst frames.
-            item = (-frame_score, res)
-            #try:
+            # Invert score for sorting.
+            _item = (-frame_score, _res)
             if len(self.worst_results) < self.m_thumbs:
-                self.worst_results.append(item)
+                heapq.heappush(self.worst_results, _item)
             elif -frame_score > self.worst_results[0][0]:
-                heapq.heapreplace(self.worst_results, item)
+                heapq.heapreplace(self.worst_results, _item)
 
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
