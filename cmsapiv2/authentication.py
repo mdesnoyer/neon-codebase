@@ -204,7 +204,12 @@ class RefreshTokenHandler(APIV2Handler):
 
             username = payload['username'].lower()
             user = yield neondata.User.get(username, async=True)
+            if not user:
+                raise NotFoundError('No user found for this username')
+
             account_ids = yield user.get_associated_account_ids(async=True)
+            if not account_ids:
+                raise Error('User has no associated account')
 
             access_token = JWTHelper.generate_token(
                 {'username': username,
