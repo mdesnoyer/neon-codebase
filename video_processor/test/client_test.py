@@ -84,8 +84,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.model = MagicMock()
 
         #Mock Model methods, use pkl to load captured outputs
-        ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = (ct_output, [])
+        ct_output = pickle.load(open(self.model_file)) 
+
+        self.model.choose_thumbnails.return_value = ct_output
         self.model.score.return_value = 1, 2 
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
                                 "test.mp4") 
@@ -557,13 +558,13 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         '''Verify execution of the process_all call in ProcessVideo'''
 
         vprocessor = self.setup_video_processor("neon", url='http://video.com')
-        yield vprocessor.process_video(self.test_video_file, n_thumbs=5, m_thumbs=6)
+        yield vprocessor.process_video(self.test_video_file, n_thumbs=6, m_thumbs=6)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
         cargs, kwargs = self.model.choose_thumbnails.call_args
         self.assertEquals(kwargs, {
-            'n': 5,
+            'n': 6,
             'm': 6,
             'video_name': 'http://video.com'})
         self.assertEquals(len(cargs), 1)
@@ -571,19 +572,17 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         #verify video metadata has been populated
         self.assertEqual(vprocessor.video_metadata.duration, 8.8)
         self.assertEqual(vprocessor.video_metadata.frame_size, (400, 264))
-       
+
         #verify that the thumbnails were populated
-        self.assertGreater(len(vprocessor.thumbnails), 0)
-        self.assertGreater(len([x for x in vprocessor.thumbnails if 
-                                x[0].type == neondata.ThumbnailType.NEON]), 0)
-        self.assertEquals(len([x for x in vprocessor.thumbnails if 
-                               x[0].type == neondata.ThumbnailType.RANDOM]), 1)
-        self.assertEquals(
-            len([x for x in vprocessor.thumbnails if 
-                 x[0].type == neondata.ThumbnailType.CENTERFRAME]), 1)
-        self.assertNotIn(float('-inf'), 
-                         [x[0].model_score for x in vprocessor.thumbnails])
-    
+        self.assertEqual(8, len(vprocessor.thumbnails))
+        self.assertEqual(6, len(vprocessor.bad_thumbnails))
+        self.assertEqual(6, len([x for x in vprocessor.thumbnails if
+                                 x[0].type == neondata.ThumbnailType.NEON]))
+        self.assertEqual(1, len([x for x in vprocessor.thumbnails if
+                                 x[0].type == neondata.ThumbnailType.RANDOM]))
+        self.assertEqual(1, len([x for x in vprocessor.thumbnails if
+                                 x[0].type == neondata.ThumbnailType.CENTERFRAME]))
+        self.assertNotIn(float('-inf'), [x[0].model_score for x in vprocessor.thumbnails])
 
     @tornado.testing.gen_test
     def test_somebody_else_processed_first(self):
@@ -619,7 +618,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                 yield vprocessor.process_video(
                     'a_garbage_video_thats_gone.mov')
 
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test
     def test_duration_too_long(self): 
         vprocessor = self.setup_video_processor('neon')
         al = neondata.AccountLimits(
@@ -636,7 +635,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             async=True)
         self.assertEquals(api_request.fail_count,
                           options.get('video_processor.client.max_fail_count'))
-        
+
     @tornado.testing.gen_test
     def test_process_all_filtered_video(self):
         '''Test processing a video where every frame is filtered.'''
@@ -1703,8 +1702,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.model = MagicMock()
         load_model_mock = self.model_patcher.start()
         load_model_mock.return_value = self.model
-        ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = (ct_output, [])
+        ct_output = pickle.load(open(self.model_file)) 
+        self.model.choose_thumbnails.return_value = ct_output
         self.predictor_patcher = patch(
             'video_processor.client.model.predictor.DeepnetPredictor')
         self.model.predictor = self.predictor_patcher.start()()
@@ -1793,7 +1792,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test(timeout=10)
     def test_smoke_test(self):
         utf8key = 'L\xc3\xb6rick_video.mp4'.decode('utf-8')
-        
+
         self._run_job({
             'api_key': self.api_key,
             'video_id' : 'vid1',
@@ -1802,11 +1801,12 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'callback_url': 'http://callback.com',
             'video_url' : 's3://my-videos/%s' % utf8key
             })
-                    
+
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
-        self.assertEquals(api_request.state,
-                          neondata.RequestState.FINISHED)
+        self.assertEqual(
+            api_request.state,
+            neondata.RequestState.FINISHED)
 
         # Check the video data
         video_meta = neondata.VideoMetadata.get(self.video_id)
@@ -1818,16 +1818,16 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             video_meta.thumbnail_ids)
         self.assertNotIn(None, thumbs)
         self.assertGreater(
-            len([x for x in thumbs if 
+            len([x for x in thumbs if
                  x.type == neondata.ThumbnailType.NEON]), 0)
         self.assertEquals(
-            len([x for x in thumbs if 
+            len([x for x in thumbs if
                  x.type == neondata.ThumbnailType.OOYALA]), 1)
         self.assertEquals(
-            len([x for x in thumbs if 
+            len([x for x in thumbs if
                  x.type == neondata.ThumbnailType.RANDOM]), 1)
         self.assertEquals(
-            len([x for x in thumbs if 
+            len([x for x in thumbs if
                  x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
 
     @tornado.testing.gen_test

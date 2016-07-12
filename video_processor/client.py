@@ -627,7 +627,6 @@ class VideoProcessor(object):
             statemon.state.increment('video_read_error')
             raise BadVideoError(msg)
 
-
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in top_results])
         rank=0
