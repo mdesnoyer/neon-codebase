@@ -21,18 +21,6 @@ _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
-define("send_mandrill_emails", 
-    default=1, 
-    help="should we actually send the email", 
-    type=str) 
-define("mandrill_api_key", 
-    default='Y7N4ELi5hMDp_RbTQH9OqQ', 
-    help="key from mandrillapp.com used to make api calls", 
-    type=str)
-define("mandrill_base_url", 
-    default='https://mandrillapp.com/api/1.0', 
-    help="mandrill base api url", 
-    type=str)
 
 statemon.define('put_account_oks', int)
 statemon.define('get_account_oks', int)
@@ -57,9 +45,6 @@ statemon.define('post_video_oks', int)
 statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
-
-statemon.define('mandrill_template_not_found', int)
-statemon.define('mandrill_email_not_sent', int)
 
 '''*****************************************************************
 AccountHandler
@@ -1616,6 +1601,13 @@ class VideoHelper(object):
             if field == 'thumbnails':
                 new_video['thumbnails'] = yield \
                   VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
+            elif field == 'bad_thumbnails':
+                if video.bad_thumbnail_ids:
+                    new_video['bad_thumbnails'] = yield \
+                        VideoHelper.get_thumbnails_from_ids(video.bad_thumbnail_ids)
+                else:
+                    new_video['bad_thumbnails'] = []
+
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -2970,68 +2962,12 @@ class EmailHandler(APIV2Handler):
                 self.success({'message' : 'user does not want emails'})
         else:  
             raise NotFoundError('Email address is required.')
-
-        url = '{base_url}/templates/info.json?key={api_key}&name={slug}'.format(
-            base_url=options.mandrill_base_url, 
-            api_key=options.mandrill_api_key, 
-            slug=template_slug) 
-            
-        request = tornado.httpclient.HTTPRequest(
-            url=url,
-            method="GET",
-            request_timeout=8.0)
-
-        response = yield tornado.gen.Task(utils.http.send_request, request)
-        if response.code != ResponseCode.HTTP_OK:
-            statemon.state.increment('mandrill_template_not_found')
-            raise BadRequestError('Mandrill template unable to be loaded.')
         
-        template_obj = json.loads(response.body) 
-        template_string = template_obj['code'] 
-
-        if template_args: 
-            email_html = template_string.format(**template_args)
-        else: 
-            email_html = template_string
+        yield MandrillEmailSender.send_mandrill_email(
+            send_to_email, 
+            template_slug, 
+            template_args=template_args)
  
-        # send email via mandrill
-        headers_dict = { 
-            'Reply-To' : args.get('reply_to', 'no-reply@neonlabs.com') 
-        }
-        to_list = [{ 
-            'email' : send_to_email, 
-            'type' : 'to'     
-        }]   
-        message_dict = { 
-            'html' : email_html, 
-            'subject' : args.get('subject', 'Neon Labs'),
-            'from_email' : args.get('from_email_address', 
-                'admin@neon-lab.com'),  
-            'from_name' : args.get('from_name', 'Neon Labs'),
-            'headers' : headers_dict, 
-            'to' : to_list  
-        }
-        json_body = { 
-            'key' : options.mandrill_api_key, 
-            'message' : message_dict  
-        }
- 
-        url = '{base_url}/messages/send.json'.format(
-            base_url=options.mandrill_base_url) 
-        
-        request = tornado.httpclient.HTTPRequest( 
-            url=url, 
-            body=json.dumps(json_body),
-            method='POST', 
-            headers = {"Content-Type" : "application/json"},
-            request_timeout=20.0)
- 
-        response = yield tornado.gen.Task(utils.http.send_request, request)
-
-        if response.code != ResponseCode.HTTP_OK:
-            statemon.state.increment('mandrill_email_not_sent')
-            raise BadRequestError('Unable to send email')  
-        
         self.success({'message' : 'Email sent to %s' % send_to_email })
  
     @classmethod

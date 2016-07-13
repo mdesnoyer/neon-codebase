@@ -52,7 +52,8 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
         self.send_email_mock.return_value = True
         self.send_email_mocker_two = patch(
             'cmsapiv2.authentication.ForgotPasswordHandler._send_email')
-        self.send_email_mock_two = self.send_email_mocker_two.start()
+        self.send_email_mock_two = self._future_wrap_mock(
+            self.send_email_mocker_two.start()) 
         self.send_email_mock_two.return_value = True
         super(TestBase, self).setUp()
 
@@ -518,30 +519,6 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                          method='POST',
                                          headers=header)
         self.assertEquals(e.exception.code, 500)
-
-    @tornado.testing.gen_test
-    def test_create_account_send_email_ses_exception(self):
-        self.send_email_mocker.stop()
-        ses_mocker = patch('boto.ses.connection.SESConnection.send_email')
-        ses_mock = ses_mocker.start()
-        ses_mock.side_effect = Exception('random exception')
-        params = json.dumps({'customer_name': 'meisnew',
-                             'email': 'a@a.bc.invalid',
-                             'admin_user_username':'a@a.invalid',
-                             'admin_user_password':'testacpas'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(self.get_url(url),
-                                         body=params,
-                                         method='POST',
-                                         headers=header)
-        rjson = json.loads(e.exception.response.body)
-        self.assertEquals(e.exception.code, 500)
-        self.assertRegexpMatches(rjson['error']['data'],
-                                 'Unable to send verification')
-        ses_mocker.stop()
-        self.send_email_mocker.start()
 
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
@@ -4748,7 +4725,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(self.url, body=params, method='POST',
                                          headers=self.headers)
-        self.assertEqual(500, e.exception.code)
+        self.assertEqual(404, e.exception.code)
 
     @tornado.testing.gen_test
     def test_user_has_no_account(self):
