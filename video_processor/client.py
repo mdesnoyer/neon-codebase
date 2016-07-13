@@ -843,6 +843,14 @@ class VideoProcessor(object):
                                              image=PILImageUtils.to_cv(image))
                 video_result.thumbnail_ids.append(thumb_meta.key)
 
+        for thumb_meta, image in self.bad_thumbnails:
+            yield bad_thumbnails.add_image_data(image, self.video_metadata,
+                                                cdn_metadata,
+                                                async=True)
+            yield thumb_meta.score_image(self.model.predictor,
+                                         image=PILImageUtils.to_cv(image))
+            video_result.bad_thumbnail_ids.append(thumb_meta.key)
+
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
@@ -888,13 +896,14 @@ class VideoProcessor(object):
             tidset = set(keep_thumbs + self.video_metadata.thumbnail_ids)
                          video_result.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
-            video_obj.bad_thumbnail_ids = [t[0].key for t in self.bad_thumbnails]
             # Update the job results
             found_result = False
             for result in video_obj.job_results:
                 if (result.age == video_result.age and 
                     result.gender == video_result.gender):
+                    # Replace the last run with these parameters
                     result.thumbnail_ids = video_result.thumbnail_ids
+                    result.bad_thumbnail_ids = video_result.bad_thumbnail_ids
                     result.model_version = video_result.model_version
                     found_result = True
             if not found_result:

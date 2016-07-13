@@ -5291,9 +5291,11 @@ class BillingPlans(StoredObject):
 class VideoJobThumbnailList(UnsaveableStoredObject):
     '''Represents the list of thumbnails from a video processing job.'''
     def __init__(self, age=None, gender=None, thumbnail_ids=None,
+                 bad_thumbnail_ids=None,
                  model_version=None):
         self.model_version = model_version
         self.thumbnail_ids = thumbnail_ids or []
+        self.bad_thumbnail_ids = bad_thumbnail_ids or []
         
         # WARNING: If anything is added here, make sure to update
         # _merge_video_data in video_processor/client.py
@@ -5324,6 +5326,7 @@ class VideoMetadata(StoredObject):
         # contain the thumbs from the most recent job only.
         self.thumbnail_ids = tids or [] 
         self.bad_thumbnail_ids = bad_tids or []
+        
         # A list of VideoJobThumbnailList objects representing the
         # thumbnails extracted for each processing step.
         self.job_results = job_results or []
@@ -5423,30 +5426,8 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=cdn_metadata,
-                                       save_objects=save_objects, video=video,
-                                       append_to_good=True, async=True)
-        raise tornado.gen.Return(rv)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def add_bad_thumbnail(self, thumb, image, cdn_metadata=None,
-                      save_objects=False, video=None):
-        '''Add a bad thumbnail to the video. Reference above.'''
-        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=cdn_metadata,
-                                       save_objects=save_objects, video=video,
-                                       append_to_good=False, async=True)
-        raise tornado.gen.Return(rv)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def _add_thumbnail(self, thumb, image, cdn_metadata=None,
-                      save_objects=False, video=None, append_to_good=True):
-
         thumb.video_id = self.key
         yield thumb.add_image_data(image, self, cdn_metadata, async=True)
-
-        target = self.thumbnail_ids if append_to_good else self.bad_thumbnail_ids
 
         def _add_thumb_to_video_object(video_obj):
             video_obj.thumbnail_ids.append(thumb.key)
@@ -5460,16 +5441,9 @@ class VideoMetadata(StoredObject):
             if not sucess:
                 raise IOError("Could not save thumbnail")
 
-            def _modify(v):
-                if append_to_good:
-                    v.thumbnail_ids.append(thumb.key)
-                else:
-                    v.bad_thumbnail_ids.append(thumb.key)
-
             updated_video = yield self.modify(
                     self.key,
-                lambda x: _add_thumb_to_video_object(x))
-                    _modify,:# Fix this manually
+                    _add_thumb_to_video_object,
                     async=True)
 
             if updated_video is None:

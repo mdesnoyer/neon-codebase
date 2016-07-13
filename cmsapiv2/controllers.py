@@ -1105,8 +1105,7 @@ class ThumbnailHandler(APIV2Handler):
                 async=True,
                 save_objects=True)
         else:
-            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn,
-                                            async=True)
+            yield self.thumb.add_image_data(self.image, async=True)
             yield self.thumb.save(async=True)
 
     @tornado.gen.coroutine
@@ -1227,14 +1226,14 @@ class ThumbnailHandler(APIV2Handler):
 
     @classmethod
     @tornado.gen.coroutine
-    def _convert_special_field(cls, obj, field):
+    def _convert_special_field(cls, obj, field, age=None, gender=None):
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
         elif field == 'thumbnail_id':
             retval = obj.key
         elif field == 'neon_score':
-            retval = obj.get_neon_score()
+            retval = obj.get_neon_score(age=age, gender=gender)
         elif field == 'url':
             retval = obj.urls[0] or []
         elif field == 'external_ref':
@@ -1363,6 +1362,8 @@ class VideoHelper(object):
         request.publish_date = args.get('publish_date', None)
         request.api_param = int(args.get('n_thumbs', 5))
         request.callback_email = args.get('callback_email', None) 
+        request.age = args.get('age', None)
+        request.gender = args.get('gender', None)
         yield request.save(async=True)
 
         if request:
@@ -1434,10 +1435,20 @@ class VideoHelper(object):
             if reprocess:
                 # Flag the request to be reprocessed
                 def _flag_reprocess(x):
+                    if x.state in [neondata.RequestState.SUBMIT,
+                                   neondata.RequestState.REPROCESS,
+                                   neondata.RequestState.REQUEUED,
+                                   neondata.RequestState.PROCESSING,
+                                   neondata.RequestState.FINALIZING]:
+                        raise AlreadyExists(
+                            'A job for this video is currently underway. '
+                            'Please try again later')
                     x.state = neondata.RequestState.REPROCESS
                     x.fail_count = 0
                     x.try_count = 0
                     x.response = {}
+                    x.age = args.get('age', None)
+                    x.gender = args.get('gender', None)
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
                     account_id_api_key,
@@ -1460,10 +1471,12 @@ class VideoHelper(object):
         """
         thumbnails = []
         if tids:
+            tids = set(tids)
             thumbnails = yield tornado.gen.Task(
                 neondata.ThumbnailMetadata.get_many,
                 tids)
-            thumbnails = yield [ThumbnailHandler.db2api(x, gender=gender, age=age) for
+            thumbnails = yield [ThumbnailHandler.db2api(x, gender=gender,
+                                                        age=age) for
                                 x in thumbnails]
             renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
             for thumbnail in thumbnails:
@@ -1600,13 +1613,32 @@ class VideoHelper(object):
         for field in fields:
             if field == 'thumbnails':
                 new_video['thumbnails'] = yield \
-                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
+                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids +
+                                                      video.non_job_thumb_ids)
+            elif field == 'demographic_thumbnails':
+                new_video['demographic_thumbnails'] = []
+                for video_result in video.job_results:
+                    cur_thumbs = yield VideoHelper.get_thumbnails_from_ids(
+                        (video_result.thumbnail_ids + video.non_job_thumb_ids),
+                        age=video_result.age,
+                        gender=video_result.gender)
+                    cur_entry = {
+                        'gender' : video_result.gender
+                        'age' : video_result.age
+                        'thumbnails' : cur_thumbs}
+                    if 'bad_thumbnails' in fields:
+                        cur_entry['bad_thumbnails'] = yield \
+                          VideoHelper.get_thumbnails_from_ids(
+                              (video_result.bad_thumbnail_ids +
+                               video.non_job_thumb_ids),
+                               age=video_result.age,
+                               gender=video_result.gender)
+                    new_video['demographic_thumbnails'].append(cur_entry)
+
             elif field == 'bad_thumbnails':
-                if video.bad_thumbnail_ids:
-                    new_video['bad_thumbnails'] = yield \
-                        VideoHelper.get_thumbnails_from_ids(video.bad_thumbnail_ids)
-                else:
-                    new_video['bad_thumbnails'] = []
+                # demographic_thumbnails are also required here and
+                # are handled in that section.
+                pass
 
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
@@ -1673,7 +1705,9 @@ class VideoHandler(ShareableContentHandler):
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
           'callback_email': All(Coerce(str), Length(min=1, max=2048)),
-          'n_thumbs': All(Coerce(int), Range(min=1, max=32))
+          'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
+          'gender': In(['M', 'F', None]),
+          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])
         })
 
         args = self.parse_args()
