@@ -1571,7 +1571,7 @@ class LocalSearcher(object):
                                                     image=frame,
                                                     model_version=model_vers,
                                                     features=features))
-                best = sorted(results, key=lambda x: x.score, reverse=True)
+                best = sorted(result_objs, key=lambda x: x.score, reverse=True)
         else:
             _log.debug('%i thumbs found', len(result_objs))
             best = [model.VideoThumbnail(x.image, x.score, x.frameno,
@@ -1580,11 +1580,11 @@ class LocalSearcher(object):
 
         # Sort worst-to-best in worst.
         worst = [model.VideoThumbnail(
-            x.image,
-            x.score,
-            x.frameno,
-            x.model_version,
-            x.aq_features)
+            x[1].image,
+            x[1].score,
+            x[1].frameno,
+            x[1].model_version,
+            x[1].aq_features)
             for x in sorted(self.worst_results)]
 
         return best, worst
