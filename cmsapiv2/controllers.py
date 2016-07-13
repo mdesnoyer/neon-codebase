@@ -3059,6 +3059,41 @@ class FeatureHandler(APIV2Handler):
                  HTTPVerbs.GET : neondata.AccessLevels.NONE
                }
 
+
+class EmailSupportHandler(APIV2Handler):
+    '''Allow visitor to send email to Neon without an account.'''
+
+    SUPPORT_ADDRESS = 'support@neon-lab.com'
+    # Reference: https://mandrillapp.com/templates/code?id=support-email-admin
+    SUPPORT_TEMPLATE_SLUG = 'support-email-admin'
+
+    @tornado.gen.coroutine
+    def post(self):
+        '''Send the content of "message" as an email to Neon support.'''
+        schema = Schema({
+            Required('from_email'): All(Coerce(
+                CustomVoluptuousTypes.Email()), Length(min=1, max=1024)),
+            Required('from_name') : All(Coerce(str), Length(min=1, max=1024)),
+            Required('message') : All(Coerce(str), Length(min=1, max=4096))
+        })
+
+        args = self.parse_args()
+        args = schema(args)
+
+        yield MandrillEmailSender.send_mandrill_email(
+            self.SUPPORT_ADDRESS,
+            self.SUPPORT_TEMPLATE_SLUG,
+            template_args=args,
+            from_email=args['from_email'],
+            from_name=args['from_name'])
+
+        self.success({'message' : 'Email sent to %s' % self.SUPPORT_ADDRESS})
+
+    @classmethod
+    def get_access_levels(cls):
+        return {HTTPVerbs.POST: neondata.AccessLevels.NONE}
+
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
@@ -3066,6 +3101,7 @@ application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/batch/?$', BatchHandler),
     (r'/api/v2/feature/?$', FeatureHandler),
+    (r'/api/v2/email/support/?$', EmailSupportHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
