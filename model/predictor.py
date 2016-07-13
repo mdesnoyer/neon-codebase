@@ -150,10 +150,10 @@ class DemographicSignatures(object):
         # Load up the file
         weights_fn = os.path.join(os.path.dirname(__file__),
                                   'demographics',
-                                  '%s-weight' % model_name)
+                                  '%s-weight.pkl' % model_name)
         bias_fn = os.path.join(os.path.dirname(__file__),
                                   'demographics',
-                                  '%s-bias' % model_name)
+                                  '%s-bias.pkl' % model_name)
         try:
             self.weights = pandas.read_pickle(weights_fn)
         except IOError as e:
