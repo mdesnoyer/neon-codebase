@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+import dateutil.parser
 import numpy as np
 import PIL.Image
 import io
@@ -1593,6 +1594,19 @@ class VideoHelper(object):
         return next_page_url
 
     @staticmethod
+    def get_estimated_remaining(video):
+        if int(video.duration) <= 0: 
+            return 0.0  
+
+        est_process_time = 2.5 * video.duration
+        updated_ts = dateutil.parser.parse(
+            video.updated)
+        utc_now = datetime.utcnow()
+        diff = (utc_now - updated_ts).total_seconds()
+ 
+        return float(est_process_time - diff)
+
+    @staticmethod
     @tornado.gen.coroutine
     def db2api(video, request, fields=None):
         """Converts a database video metadata object to a video
@@ -1607,7 +1621,7 @@ class VideoHelper(object):
         """
         if fields is None:
             fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled', 'job_id']
+                      'testing_enabled', 'job_id', 'estimated_time_remaining']
 
         new_video = {}
         for field in fields:
@@ -1649,6 +1663,12 @@ class VideoHelper(object):
                 new_video[field] = video.updated
             elif field == 'url':
                 new_video[field] = video.url
+            elif field == 'estimated_time_remaining':
+                if request.state == neondata.RequestState.PROCESSING:  
+                    new_video[field] = VideoHelper.get_estimated_remaining(
+                        video)
+                else: 
+                    new_video[field] = None 
             else:
                 raise BadRequestError('invalid field %s' % field)
 
