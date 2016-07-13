@@ -7253,7 +7253,7 @@ class TestEmailSupportHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_arg_is_missing(self):
-        from_email = 'emailgmail.com'
+        from_email = 'email@gmail.com'
         message = 'I am contacting you in respect of a family treasure' \
                   'of Gold deposited in my name'
         body = json.dumps({
@@ -7268,7 +7268,7 @@ class TestEmailSupportHandler(TestControllersBase):
                 body=body)
         self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
 
-        from_email = 'emailgmail.com'
+        from_email = 'email@gmail.com'
         from_name = 'Joe Coolguy'
         message = ''
         body = json.dumps({
