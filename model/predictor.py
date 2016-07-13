@@ -42,6 +42,9 @@ statemon.define('good_deepnet_connection', int)
 statemon.define('prediction_error', int)
 statemon.define('unknown_demographic', int)
 
+MEAN_CHANNEL_VALS = [[[92.366, 85.133, 81.674]]]
+MEAN_CHANNEL_VALS = np.array(MEAN_CHANNEL_VALS).round().astype(np.uint8)
+
 def _resize_to(img, w=None, h=None):
   '''
   Resizes the image to a desired width and height. If either is undefined,
@@ -64,7 +67,7 @@ def _resize_to(img, w=None, h=None):
     w = int(h * asp)
   elif h is None:
     h = int(w / asp)
-  return img.resize((w, h), Image.BILINEAR)
+  return img.resize((w, h), Image.ANTIALIAS)
 
 
 def _center_crop_to(img, w, h):
@@ -111,7 +114,9 @@ def _pad_to_asp(img, asp):
     newsize = (ow, nh)
   else:
     return img
-  nimg = Image.new(img.mode, newsize)
+  nimg = np.zeros((newsize[1], newsize[0], 3)).astype(np.uint8)
+  nimg += MEAN_CHANNEL_VALS
+  nimg = Image.fromarray(nimg)
   nimg.paste(img, box=(left, upper))
   return nimg
 
@@ -129,8 +134,7 @@ def _aquila_prep(image):
     img = Image.fromarray(image[:,:,::-1])
     img = _pad_to_asp(img, 16./9)
     # resize the image to 299 x 299
-    img = _resize_to(img, w=314, h=314)
-    img = _center_crop_to(img, w=299, h=299)
+    img = _resize_to(img, w=299, h=299)
     return np.array(img).astype(np.uint8)
 
 class DemographicSignatures(object):
@@ -144,26 +148,52 @@ class DemographicSignatures(object):
 
     def __init__(self, model_name):
         # Load up the file
-        fn = os.path.join(os.path.dirname(__file__),
-                          'demographics',
-                          '%s.pkl' % model_name)
+        weights_fn = os.path.join(os.path.dirname(__file__),
+                                  'demographics',
+                                  '%s-weight' % model_name)
+        bias_fn = os.path.join(os.path.dirname(__file__),
+                                  'demographics',
+                                  '%s-bias' % model_name)
         try:
-            self.mat = pandas.read_pickle(fn)
+            self.weights = pandas.read_pickle(weights_fn)
         except IOError as e:
-            _log.error('Could not read a valid model file at %s: %s' % (fn, e))
+            _log.error('Could not read a valid model weights file at %s: %s' % 
+                       (weights_fn, e))
+            raise KeyError(model_name)
+        try:
+            self.bias = pandas.read_pickle(bias_fn)
+        except IOError as e:
+            _log.error('Could not read a valid model bias file at %s: %s' % 
+                       (bias_fn, e))
             raise KeyError(model_name)
 
     def get_signature(self, gender=None, age=None):
-        '''Returns a signature vector for a given demographic group.
+        '''Returns a function that accepts the output from Aquila and returns
+        the scores for the requested demographic.
 
-        dot this vector with your image signature and you get the
-        model score for that image for that demographic.
+        The ouput from aquila must be an N x F(eatures) numpy array, N >= 1
         '''
         if gender is None:
             gender = 'None'
         if age is None:
             age = 'None'
-        return self.mat[gender][age]
+        try:
+            W = self.weights[gender][age]
+        except KeyError as e:
+            _log.error('Invalid key(s) for weights file:', gender, age)
+            raise KeyError(e)
+        try:
+            b = self.bias[gender][age]
+            b = b.reshape(1, -1)
+        except KeyEror as e:
+            _log.error('Invalid key(s) for bias file:', gender, age)
+            raise KeyError(e)
+        def apply_signature(X):
+            assert X.ndim <= 2, 'X must be 2- or 1-dimensional.'
+            if X.ndim == 1:
+                X = X[None, :]
+            return X.dot(W) + b
+
 
 class Predictor(object):
     '''An abstract valence predictor.
@@ -472,7 +502,7 @@ class DeepnetPredictor(Predictor):
                 signatures = DemographicSignatures(response.model_version)
                 target_signature = signatures.get_signature(gender=self.gender,
                                                             age=self.age)
-                score = target_signature.dot(features)
+                score = target_signature(features)
             except KeyError as e:
                 # Could not get a demographic to match, so keep score as None
                 _log.warn_n('Unknown demographic. model: %s age: %s gender %s'
