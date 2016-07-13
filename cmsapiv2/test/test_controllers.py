@@ -2303,7 +2303,7 @@ class TestVideoHandler(TestControllersBase):
                 allow_nonstandard_methods=True)
 
         rjson = json.loads(e.exception.response.body)
-        self.assertEquals(e.exception.code,400)
+        self.assertEquals(e.exception.code, 400)
         self.assertEquals(rjson['error']['message'],
                           'failed to download thumbnail')
 
@@ -2573,7 +2573,7 @@ class TestVideoHandler(TestControllersBase):
 
         self.assertEquals(e.exception.response.code, 409)
         rjson = json.loads(e.exception.response.body)
-        data = rjson['error']['data']
+        data = rjson['error']['message']
         self.assertTrue(first_job_id in data)
 
     @tornado.testing.gen_test
@@ -2606,6 +2606,7 @@ class TestVideoHandler(TestControllersBase):
             x.fail_count = 1
             x.try_count = 1
             x.response = {'error': 'Ooops'}
+            x.state = neondata.RequestState.INT_ERROR
         neondata.NeonApiRequest.modify(first_job_id, self.account_id_api_key,
                                        _mod)
 
@@ -2633,6 +2634,7 @@ class TestVideoHandler(TestControllersBase):
                                           self.account_id_api_key)
         self.assertEquals(job.try_count, 0)
         self.assertEquals(job.fail_count, 0)
+        self.assertEquals(job.state, neondata.RequestState.REPROCESS)
 
     @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess_fail(self):
@@ -2655,17 +2657,16 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&reprocess=1' % (self.account_id_api_key,
                   self.test_i_id)
-        with self.assertLogExists(logging.ERROR, 'Unable to submit job'):
-            with self.assertRaises(tornado.httpclient.HTTPError) as e:
-                yield self.http_client.fetch(self.get_url(url),
-                                             body='',
-                                             method='POST',
-                                             allow_nonstandard_methods=True)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(self.get_url(url),
+                                         body='',
+                                         method='POST',
+                                         allow_nonstandard_methods=True)
         response = e.exception.response
-        self.assertEquals(e.exception.response.code, 500)
+        self.assertEquals(response.code, 409)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Internal Server Error')
+                                 'A job for this video is currently underway')
 
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
@@ -2924,13 +2925,17 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(rjson['video_count'], 1)
 
         thumbnail_array = rjson['videos'][0]['thumbnails']
-        thumbnail_one = thumbnail_array[0]
-        thumbnail_two = thumbnail_array[1]
         self.assertEquals(len(thumbnail_array), 2)
+        self.assertItemsEqual([x['thumbnail_id'] for x in thumbnail_array],
+                              tids)
+        if thumbnail_array[0]['thumbnail_id'] == 'testing_vtid_one':
+            thumbnail_one = thumbnail_array[0]
+            thumbnail_two = thumbnail_array[1]
+        else:
+            thumbnail_one = thumbnail_array[1]
+            thumbnail_two = thumbnail_array[0]
         self.assertEquals(thumbnail_one['width'], 500)
-        self.assertEquals(thumbnail_one['thumbnail_id'], 'testing_vtid_one')
         self.assertEquals(thumbnail_two['width'], 500)
-        self.assertEquals(thumbnail_two['thumbnail_id'], 'testing_vtid_two')
         self.assertEqual(3, len(thumbnail_two['renditions']))
         rendition = {
             u'aspect_ratio': u'16x9',
@@ -3404,7 +3409,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(response.code, 202)
 
         _video_id = neondata.InternalVideoID.generate(
-            self.account_id_api_key,'tn_test_vid1')
+            self.account_id_api_key, 'tn_test_vid1')
         video = neondata.VideoMetadata.get(_video_id)
         self.assertEquals(len(video.thumbnail_ids), 1)
         thumbnail = yield neondata.ThumbnailMetadata.get(
@@ -3412,6 +3417,8 @@ class TestThumbnailHandler(TestControllersBase):
            async=True)
         self.assertEquals(thumbnail.external_id, 'kevin')
         self.assertEquals(thumbnail.video_id, _video_id)
+        self.assertEquals(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
+        self.assertEquals(thumbnail.rank, 1)
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body_no_video(self):
@@ -3618,8 +3625,50 @@ class TestThumbnailHandler(TestControllersBase):
                                                 method='PUT',
                                                 allow_nonstandard_methods=True)
         new_tn = json.loads(response.body)
-        self.assertEquals(new_tn['enabled'],True)
+        self.assertEquals(new_tn['enabled'], True)
 
+    @tornado.testing.gen_test
+    def test_score_from_feature_vector(self):
+        features = np.random.rand(1024)
+        neondata.ThumbnailMetadata(
+            'featandscore',
+            urls=['http://asdf.com/1.jpg'],
+            model_score='-1e-3',
+            model_version='20160707-test',
+            features=features
+        ).save()
+        url = '/api/v2/%s/thumbnails?thumbnail_id=featandscore' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertGreater(rjson['neon_score'], 0)
+
+        neondata.ThumbnailMetadata(
+            'featonly',
+            urls=['http://asdf.com/1.jpg'],
+            model_score=None,
+            model_version='20160707-test',
+            features=features
+        ).save()
+        url = '/api/v2/%s/thumbnails?thumbnail_id=featonly' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertGreater(rjson['neon_score'], 0)
+
+        neondata.ThumbnailMetadata(
+            'scoreonly',
+            urls=['http://asdf.com/1.jpg'],
+            model_score='-1e-3',
+            model_version='20160707-test',
+            features=None
+        ).save()
+        url = '/api/v2/%s/thumbnails?thumbnail_id=scoreonly' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['neon_score'], 0)
+        
     @tornado.testing.gen_test
     def test_thumbnail_update_no_params(self):
         url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (

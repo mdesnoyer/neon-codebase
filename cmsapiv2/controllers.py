@@ -1096,16 +1096,25 @@ class ThumbnailHandler(APIV2Handler):
         # Set the image from url or body form data.
         yield self._set_image()
 
+        # Get CDN store.
+        cdn = yield neondata.CDNHostingMetadataList.get(
+            neondata.CDNHostingMetadataList.create_key(
+                self.account_id,
+                integration_id),
+            async=True)
+
         # If the thumbnail is tied to a video, set that association.
         if self.video:
             self.thumb = yield self.video.download_and_add_thumbnail(
                 self.thumb,
                 image=self.image,
                 image_url=self.args.get('url'),
+                cdn_metadata=cdn,
                 async=True,
                 save_objects=True)
         else:
-            yield self.thumb.add_image_data(self.image, async=True)
+            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn,
+                                            async=True)
             yield self.thumb.save(async=True)
 
     @tornado.gen.coroutine
@@ -1413,7 +1422,6 @@ class VideoHelper(object):
             if default_thumbnail_url:
                 # save the default thumbnail
                 thumb = yield video.download_and_add_thumbnail(
-                    image=image,
                     image_url=default_thumbnail_url,
                     external_thumbnail_id=args.get('thumbnail_ref', None),
                     async=True)
@@ -1457,7 +1465,7 @@ class VideoHelper(object):
 
                 raise tornado.gen.Return((video, api_request))
             else:
-                raise AlreadyExists('job_id=%s' % (video.job_id))
+                raise AlreadyExists('This item already exists: job_id=%s' % (video.job_id))
 
     @staticmethod
     @tornado.gen.coroutine
@@ -1623,8 +1631,8 @@ class VideoHelper(object):
                         age=video_result.age,
                         gender=video_result.gender)
                     cur_entry = {
-                        'gender' : video_result.gender
-                        'age' : video_result.age
+                        'gender' : video_result.gender,
+                        'age' : video_result.age,
                         'thumbnails' : cur_thumbs}
                     if 'bad_thumbnails' in fields:
                         cur_entry['bad_thumbnails'] = yield \

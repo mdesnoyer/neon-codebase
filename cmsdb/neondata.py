@@ -4877,10 +4877,11 @@ class ThumbnailMetadata(StoredObject):
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
        
-        # This is a full feature vector. It stores a numpy array of floats. 
-        # Each index is dependent on the model used. Human readable versions of 
-        # this exist in the Features table. 
-        self.features = features  
+        # This is a full feature vector. It stores a numpy array of
+        # floats.  Each index is dependent on the model used. Human
+        # readable versions of this exist in the Features table.
+        self.features = features 
+         
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
@@ -5108,13 +5109,13 @@ class ThumbnailMetadata(StoredObject):
             try:
                 sig = model.predictor.DemographicSignatures(
                     self.model_version).get_signature(gender, age)
-                model_score = np.dot(sig, self.features)
+                model_score = numpy.dot(sig, self.features)
             except KeyError as e:
                 # We don't know about this model, gender, age combo
                 pass
             
         if model_score:
-            return model.scores.lookup(self.model_version, self.model_score)
+            return model.scores.lookup(self.model_version, model_score)
         return None
 
 class ThumbnailStatus(DefaultedStoredObject):

@@ -672,7 +672,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             self.set_status(ResponseCode.HTTP_CONFLICT)
             statemon.state.increment(ref=_already_exists_errors_ref,
                                      safe=False)
-            self.error('this item already exists', extra_data=get_exc_message(exception))
+            self.error(get_exc_message(exception))
 
         elif isinstance(exception, neondata.ThumbDownloadError):
             self.set_status(ResponseCode.HTTP_BAD_REQUEST)
