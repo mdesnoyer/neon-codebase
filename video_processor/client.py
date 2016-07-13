@@ -863,7 +863,6 @@ class VideoProcessor(object):
             _log.error("Error writing thumbnail data to database: %s" % e)
             statemon.state.increment('save_tmdata_error')
             raise DBError("Error writing thumbnail data to database")
-        print(new_thumb_dict)
 
         @tornado.gen.coroutine
         def _merge_video_data(video_obj):

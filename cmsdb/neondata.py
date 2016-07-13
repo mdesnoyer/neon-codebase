@@ -5410,7 +5410,6 @@ class VideoMetadata(StoredObject):
 
         target = self.thumbnail_ids if append_to_good else self.bad_thumbnail_ids
 
-
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
         # data and then update the video metadata.
@@ -5420,7 +5419,10 @@ class VideoMetadata(StoredObject):
                 raise IOError("Could not save thumbnail")
 
             def _modify(v):
-                target.append(thumb.key)
+                if append_to_good:
+                    v.thumbnail_ids.append(thumb.key)
+                else:
+                    v.bad_thumbnail_ids.append(thumb.key)
 
             updated_video = yield self.modify(
                     self.key,

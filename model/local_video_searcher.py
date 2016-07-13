@@ -1578,9 +1578,7 @@ class LocalSearcher(object):
                                          x.model_version, x.aq_features)
                                          for x in result_objs]
 
-        # Sort the worst, then invert the score of each. This
-        # gives the best-of-the-worst in order down to the worst, with
-        # the score oriented so more positive means better.
+        # Sort worst-to-best in worst.
         worst = [model.VideoThumbnail(
             x.image,
             x.score,
