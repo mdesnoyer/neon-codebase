@@ -1786,20 +1786,20 @@ class VideoHandler(ShareableContentHandler):
             Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
             'testing_enabled': Boolean(),
             'title': Any(str, unicode, Length(min=1, max=1024)),
-            'hidden': Boolean(),
+            'callback_email': CustomVoluptuousTypes.Email(),
+            'hidden': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
-
-        title = args.get('title', None)
 
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key,
             args['video_id'])
 
         def _update_video(v):
-            v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
+            v.testing_enabled =  Boolean()(
+                args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
         video = yield neondata.VideoMetadata.modify(
@@ -1814,9 +1814,10 @@ class VideoHandler(ShareableContentHandler):
         # we may need to update the request object as well
         db2api_fields = ['testing_enabled', 'video_id']
         api_request = None
-        if title is not None and video.job_id is not None:
+        if video.job_id is not None:
             def _update_request(r):
-                r.video_title = title
+                r.video_title = args.get('title', r.video_title)
+                r.callback_email = args.get('callback_email', r.callback_email)
 
             api_request = yield neondata.NeonApiRequest.modify(
                 video.job_id,
