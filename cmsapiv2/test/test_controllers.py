@@ -3012,6 +3012,35 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(request.video_title, 'vidkevinnew')
 
     @tornado.testing.gen_test
+    def test_update_video_cb_email(self):
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=vid1'\
+              '&title=kevinsvid&url=some_url' % (
+                  self.account_id_api_key,
+                  self.test_i_id)
+
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            method='POST',
+            allow_nonstandard_methods=True)
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id']
+        url = '/api/v2/%s/videos?video_id=vid1&callback_email=a@a.com' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            method='PUT',
+            allow_nonstandard_methods=True)
+
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        request = yield neondata.NeonApiRequest.get(
+            job_id,
+            self.account_id_api_key,
+            async=True)
+        self.assertEquals(request.callback_email, 'a@a.com')
+
+    @tornado.testing.gen_test
     def test_post_video_sub_required_active(self):
         pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
