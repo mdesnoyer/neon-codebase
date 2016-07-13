@@ -1117,11 +1117,11 @@ class ThumbnailHandler(APIV2Handler):
                 self.thumb,
                 image=self.image,
                 image_url=self.args.get('url'),
-                cdn_metadata=cdn,
                 async=True,
                 save_objects=True)
         else:
-            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
+            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn,
+                                            async=True)
             yield self.thumb.save(async=True)
 
     @tornado.gen.coroutine
@@ -1147,7 +1147,8 @@ class ThumbnailHandler(APIV2Handler):
             pass
 
         if not self.image:
-            raise BadRequestError('Image not available', ResponseCode.HTTP_BAD_REQUEST)
+            raise BadRequestError('Image not available',
+                                  ResponseCode.HTTP_BAD_REQUEST)
 
     @staticmethod
     def _get_image_from_httpfile(httpfile):
@@ -1425,8 +1426,6 @@ class VideoHelper(object):
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
                 # save the default thumbnail
-                image = yield neondata.ThumbnailMetadata.download_image_from_url(
-                    default_thumbnail_url, async=True)
                 thumb = yield video.download_and_add_thumbnail(
                     image=image,
                     image_url=default_thumbnail_url,
@@ -1466,18 +1465,20 @@ class VideoHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def get_thumbnails_from_ids(tids):
+    def get_thumbnails_from_ids(tids, gender=None, age=None):
         """gets thumbnailmetadata objects
 
         Keyword arguments:
         tids -- a list of tids that needs to be retrieved
+        gender - A gender to get the thumbnail data for 
+        age - An age group to get the thumbnail data for
         """
         thumbnails = []
         if tids:
             thumbnails = yield tornado.gen.Task(
                 neondata.ThumbnailMetadata.get_many,
                 tids)
-            thumbnails = yield [ThumbnailHandler.db2api(x) for
+            thumbnails = yield [ThumbnailHandler.db2api(x, gender=gender, age=age) for
                                 x in thumbnails]
             renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
             for thumbnail in thumbnails:

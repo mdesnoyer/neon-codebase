@@ -878,6 +878,7 @@ class VideoProcessor(object):
                     result.gender == video_result.gender):
                     result.thumbnail_ids = video_result.thumbnail_ids
                     result.model_version = video_result.model_version
+                    found_result = True
             if not found_result:
                 video_obj.job_results.append(video_result)
             

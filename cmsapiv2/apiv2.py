@@ -707,7 +707,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
     @classmethod
     @tornado.gen.coroutine
-    def db2api(cls, obj, fields=None):
+    def db2api(cls, obj, fields=None, **kwargs):
         """Converts a database object to a response dictionary
 
         Keyword arguments:
@@ -725,7 +725,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 if field in passthrough_fields:
                     retval[field] = getattr(obj, field)
                 else:
-                    retval[field] = yield cls._convert_special_field(obj, field)
+                    retval[field] = yield cls._convert_special_field(
+                        obj, field, **kwargs)
             except AttributeError:
                 pass
         raise tornado.gen.Return(retval)

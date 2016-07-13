@@ -5092,12 +5092,24 @@ class ThumbnailMetadata(StoredObject):
         yield ThumbnailServingURLs.delete(key, async=True)
         yield ThumbnailMetadata.delete(key, async=True) 
 
-    def get_neon_score(self):
+    def get_neon_score(self, gender=None, age=None):
         """Get a value in [1..99] that the Neon score maps to.
 
         Uses a mapping dictionary according to the name of the
-        scoring model."""
-        if self.model_score:
+        scoring model.
+        """
+        model_score = self.model_score
+        if self.features is not None:
+            # We can calculate the underlying score for a demographic
+            try:
+                sig = model.predictor.DemographicSignatures(
+                    self.model_version).get_signature(gender, age)
+                model_score = np.dot(sig, self.features)
+            except KeyError as e:
+                # We don't know about this model, gender, age combo
+                pass
+            
+        if model_score:
             return model.scores.lookup(self.model_version, self.model_score)
         return None
 
