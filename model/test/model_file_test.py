@@ -12,6 +12,8 @@ import test_utils.neontest
 import unittest
 import utils.neon
 
+from glob import glob
+
 _log = logging.getLogger(__name__)
 
 class TestAllModelFiles(test_utils.neontest.TestCase):
@@ -20,33 +22,53 @@ class TestAllModelFiles(test_utils.neontest.TestCase):
     def _get_model_dir(self):
         return os.path.join(os.path.dirname(__file__), '..', 'demographics')
 
+    def _test_pandas_array(self, fn, exp_size):
+        """All the files have a uniform format, but variable data size.
+        This is a generic test for them, given a filename and a size.
+        - fn is the filename
+        - exp_size is the expected size of a complete index"""
+        _log.info('Checking %s' % fn.split('/')[-1])
+        mat = pd.read_pickle(fn)
+        self.assertEquals(mat.columns.names, ['gender', 'age'])
+
+        # Makes sure that we get a vector when indexing by gender and age
+        self.assertEquals(mat['M']['None'].shape, exp_size)
+
+        # Makes sure that there are None (i.e. generic) entries
+        mat['None']['None']
+
+        with self.assertRaises(KeyError):
+            mat['Alien']
+
+        with self.assertRaises(KeyError):
+            mat['M']['babies']
+
     def test_filenames(self):
-        # Checks that all the files are of the form YYYYMMDD-<tag>.pkl
+        # Checks that all the files are of the form YYYYMMDD-<tag>
         for fn in os.listdir(self._get_model_dir()):
-            self.assertRegexpMatches(fn, '20[0-9]{6}-[a-zA-Z0-9]+\.pkl')
+            self.assertRegexpMatches(
+                fn, '20[0-9]{6}-[a-zA-Z0-9]-[a-zA-Z0-9]+\.pkl')
 
     def test_pandas_array(self):
         model_dir = self._get_model_dir()
-        for fn in os.listdir(model_dir):
-            _log.info('Checking %s' % fn)
-            mat = pd.read_pickle(os.path.join(model_dir, fn))
+        mtype = 'weight.pkl'
+        exp_size = (1024,)
+        _log.info('Checking %s type files' % mtype)
+        for fn in glob(os.path.join(model_dir, '*%s' % mtype)):
+            self._test_pandas_array(fn, exp_size)
 
-            self.assertEquals(mat.columns.names, ['gender', 'age'])
+        mtype = 'score.pkl'
+        exp_size = (100,)
+        _log.info('Checking %s type files' % mtype)
+        for fn in glob(os.path.join(model_dir, '*%s' % mtype)):
+            self._test_pandas_array(fn, exp_size)
 
-            # Makes sure that we get a vector when indexing by gender and age
-            self.assertEquals(mat['M']['None'].shape, (1024,))
+        mtype = 'bias.pkl'
+        exp_size = (1,)
+        _log.info('Checking %s type files' % mtype)
+        for fn in glob(os.path.join(model_dir, '*%s' % mtype)):
+            self._test_pandas_array(fn, exp_size)
 
-            # Makes sure that there are None (i.e. generic) entries
-            mat['None']['None']
-
-            # Makes sure that each vector is normalized to 1
-            self.assertTrue(((mat.sum() - 1.0).abs() < 1e-10).all())
-
-            with self.assertRaises(KeyError):
-                mat['Alien']
-
-            with self.assertRaises(KeyError):
-                mat['M']['babies']
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
