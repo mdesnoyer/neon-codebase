@@ -1614,6 +1614,13 @@ class VideoHelper(object):
             if field == 'thumbnails':
                 new_video['thumbnails'] = yield \
                   VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
+            elif field == 'bad_thumbnails':
+                if video.bad_thumbnail_ids:
+                    new_video['bad_thumbnails'] = yield \
+                        VideoHelper.get_thumbnails_from_ids(video.bad_thumbnail_ids)
+                else:
+                    new_video['bad_thumbnails'] = []
+
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
