@@ -7012,11 +7012,10 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
                 200, 
-                buffer=StringIO('{"code": "Hello There you fool"}')))
+                buffer=StringIO('{"code": "Hello There you fool"}'))
         limit = neondata.AccountLimits(self.account_id)
         yield limit.save(async=True)
 
@@ -7036,11 +7035,10 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
                 200, 
-                buffer=StringIO('{"code": "Hello There you fool"}')))
+                buffer=StringIO('{"code": "Hello There you fool"}'))
         limit = neondata.AccountLimits(
             self.account_id, 
             max_email_posts=0, 
@@ -7058,11 +7056,10 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
                 200, 
-                buffer=StringIO('{"code": "Hello There you fool"}')))
+                buffer=StringIO('{"code": "Hello There you fool"}'))
         limit = neondata.AccountLimits(
             self.account_id, 
             email_posts=2, 
@@ -7084,10 +7081,9 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
-                400)) 
+                400) 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             response = yield self._send_authed_request(url, body) 
 	    self.assertEquals(e.exception.code, 400)
