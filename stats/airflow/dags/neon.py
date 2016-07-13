@@ -713,31 +713,32 @@ clicklogs = DAG('clicklogs', schedule_interval=timedelta(hours=options.clicklog_
 # TODO(mdesnoyer): Delete this because a separate process should
 # handle bringing the cluster back up.
 
-# # Start the EMR cluster if it isn't running
-# check_cluster = PythonOperator(
-#     task_id='check_cluster',
-#     dag=clicklogs,
-#     python_callable=_cluster_status,
-#     execution_timeout=timedelta(hours=1))
-# # Use for alarming on failure
-# # on_failure_callback=
+# Start the EMR cluster if it isn't running
+check_cluster = PythonOperator(
+    task_id='check_cluster',
+    dag=clicklogs,
+    python_callable=_cluster_status,
+    execution_timeout=timedelta(hours=1))
+# Use for alarming on failure
+# on_failure_callback=
 
-# # Create Cloudwatch Alarms for the cluster
-# cloudwatch_metrics = DummyOperator(
-#     task_id='cloudwatch_metrics',
-#     dag=clicklogs)
-# cloudwatch_metrics.set_upstream(check_cluster)
+# Create Cloudwatch Alarms for the cluster
+cloudwatch_metrics = DummyOperator(
+    task_id='cloudwatch_metrics',
+    dag=clicklogs)
+cloudwatch_metrics.set_upstream(check_cluster)
 
 # Wait a while after the execution date interval has passed before
 # processing to allow Trackserver/Flume to transmit log files to be to
 # S3.
-# quiet_period = PythonOperator(
-#     task_id='quiet_period',
-#     dag=clicklogs,
-#     python_callable=_quiet_period,
-#     provide_context=True,
-#     op_kwargs=dict(quiet_period=timedelta(minutes=options.quiet_period)))
-# quiet_period.set_upstream(check_cluster)
+quiet_period = PythonOperator(
+    task_id='quiet_period',
+    dag=clicklogs,
+    python_callable=_quiet_period,
+    provide_context=True,
+    #op_kwargs=dict(quiet_period=timedelta(minutes=options.quiet_period)))
+    op_kwargs=dict(quiet_period=timedelta(seconds=1)))
+quiet_period.set_upstream(check_cluster)
 
 # Determine if the execution date has input files
 has_input_files = BranchPythonOperator(
