@@ -893,7 +893,7 @@ class VideoProcessor(object):
                 neondata.ThumbnailType.NEON,
                 neondata.ThumbnailType.CENTERFRAME,
                 neondata.ThumbnailType.RANDOM]]
-            tidset = set(keep_thumbs + self.video_metadata.thumbnail_ids)
+            tidset = set(keep_thumbs +
                          video_result.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
             # Update the job results
