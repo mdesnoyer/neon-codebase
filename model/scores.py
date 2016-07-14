@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
+import re
 
 def lookup(model, score, gender=None, age=None):
     """Maps the valence score to a neon score, 
