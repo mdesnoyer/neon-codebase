@@ -5096,35 +5096,41 @@ class ThumbnailMetadata(StoredObject):
         yield ThumbnailServingURLs.delete(key, async=True)
         yield ThumbnailMetadata.delete(key, async=True) 
 
-    def get_neon_score(self, gender=None, age=None):
-        """Get a value in [1..99] that the Neon score maps to.
-
-        Uses a mapping dictionary according to the name of the
-        scoring model.
-        """
+    def get_score(self, gender=None, age=None):
+        """Computes the raw valence score for this image."""
         model_score = self.model_score
         if self.features is not None:
             # We can calculate the underlying score for a demographic
             try:
                 sig = model.predictor.DemographicSignatures(
-                    self.model_version).get_signature(gender, age)
-                model_score = numpy.dot(sig, self.features)
+                        self.model_version)
+                model_score = sig(self.features, gender, age)
             except KeyError as e:
                 # We don't know about this model, gender, age combo
                 pass
-            
+        return model_score
+
+    def get_neon_score(self, gender=None, age=None):
+        """Get a value in [1..99] that the Neon score maps to.
+
+        Uses a mapping dictionary according to the name of the
+        scoring model.
+        """ 
+        model_score = self.get_score(gender=gender, age=age)
         if model_score:
-            return model.scores.lookup(self.model_version, model_score)
+            return model.scores.lookup(self.model_version, model_score,
+                                       gender, age)
         return None
 
     def get_estimated_lift(self, other_thumb): 
         """ returns the estimated lift of this object vs another 
             thumbnail""" 
-        ot_score = other_thumb.get_neon_score() 
-        score = self.get_neon_score() 
-        if ot_score is None or ot_score <= 0 or score is None: 
-            return None 
-        return round(score / float(ot_score) - 1, 3)
+        ot_score = other_thumb.get_score() 
+        score = self.get_score() 
+        if ot_score is None or score is None:
+            return None
+        return round(numpy.exp(score) / numpy.exp(ot_score) - 1, 3)
+        
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
