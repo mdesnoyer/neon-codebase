@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+import dateutil.parser
 import numpy as np
 import PIL.Image
 import io
@@ -1600,6 +1601,19 @@ class VideoHelper(object):
         return next_page_url
 
     @staticmethod
+    def get_estimated_remaining(video):
+        if int(video.duration) <= 0: 
+            return 0.0  
+
+        est_process_time = 2.5 * video.duration
+        updated_ts = dateutil.parser.parse(
+            video.updated)
+        utc_now = datetime.utcnow()
+        diff = (utc_now - updated_ts).total_seconds()
+ 
+        return float(est_process_time - diff)
+
+    @staticmethod
     @tornado.gen.coroutine
     def db2api(video, request, fields=None):
         """Converts a database video metadata object to a video
@@ -1614,7 +1628,7 @@ class VideoHelper(object):
         """
         if fields is None:
             fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled', 'job_id']
+                      'testing_enabled', 'job_id', 'estimated_time_remaining']
 
         new_video = {}
         for field in fields:
@@ -1700,6 +1714,12 @@ class VideoHelper(object):
                 new_video[field] = video.updated
             elif field == 'url':
                 new_video[field] = video.url
+            elif field == 'estimated_time_remaining':
+                if request.state == neondata.RequestState.PROCESSING:  
+                    new_video[field] = VideoHelper.get_estimated_remaining(
+                        video)
+                else: 
+                    new_video[field] = None 
             else:
                 raise BadRequestError('invalid field %s' % field)
 
@@ -1839,20 +1859,20 @@ class VideoHandler(ShareableContentHandler):
             Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
             'testing_enabled': Boolean(),
             'title': Any(str, unicode, Length(min=1, max=1024)),
-            'hidden': Boolean(),
+            'callback_email': CustomVoluptuousTypes.Email(),
+            'hidden': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
-
-        title = args.get('title', None)
 
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key,
             args['video_id'])
 
         def _update_video(v):
-            v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
+            v.testing_enabled =  Boolean()(
+                args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
         video = yield neondata.VideoMetadata.modify(
@@ -1867,9 +1887,10 @@ class VideoHandler(ShareableContentHandler):
         # we may need to update the request object as well
         db2api_fields = ['testing_enabled', 'video_id']
         api_request = None
-        if title is not None and video.job_id is not None:
+        if video.job_id is not None:
             def _update_request(r):
-                r.video_title = title
+                r.video_title = args.get('title', r.video_title)
+                r.callback_email = args.get('callback_email', r.callback_email)
 
             api_request = yield neondata.NeonApiRequest.modify(
                 video.job_id,
@@ -3112,6 +3133,41 @@ class FeatureHandler(APIV2Handler):
                  HTTPVerbs.GET : neondata.AccessLevels.NONE
                }
 
+
+class EmailSupportHandler(APIV2Handler):
+    '''Allow visitor to send email to Neon without an account.'''
+
+    SUPPORT_ADDRESS = 'support@neon-lab.com'
+    # Reference: https://mandrillapp.com/templates/code?id=support-email-admin
+    SUPPORT_TEMPLATE_SLUG = 'support-email-admin'
+
+    @tornado.gen.coroutine
+    def post(self):
+        '''Send the content of "message" as an email to Neon support.'''
+        schema = Schema({
+            Required('from_email'): All(Coerce(
+                CustomVoluptuousTypes.Email()), Length(min=1, max=1024)),
+            Required('from_name') : All(Coerce(str), Length(min=1, max=1024)),
+            Required('message') : All(Coerce(str), Length(min=1, max=4096))
+        })
+
+        args = self.parse_args()
+        args = schema(args)
+
+        yield MandrillEmailSender.send_mandrill_email(
+            self.SUPPORT_ADDRESS,
+            self.SUPPORT_TEMPLATE_SLUG,
+            template_args=args,
+            from_email=args['from_email'],
+            from_name=args['from_name'])
+
+        self.success({'message' : 'Email sent to %s' % self.SUPPORT_ADDRESS})
+
+    @classmethod
+    def get_access_levels(cls):
+        return {HTTPVerbs.POST: neondata.AccessLevels.NONE}
+
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
@@ -3119,6 +3175,7 @@ application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/batch/?$', BatchHandler),
     (r'/api/v2/feature/?$', FeatureHandler),
+    (r'/api/v2/email/support/?$', EmailSupportHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',

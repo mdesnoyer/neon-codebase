@@ -1573,7 +1573,7 @@ class LocalSearcher(object):
                                                     image=frame,
                                                     model_version=model_vers,
                                                     features=features))
-                best = sorted(results, key=lambda x: x.score, reverse=True)
+                best = sorted(result_objs, key=lambda x: x.score, reverse=True)
         else:
             _log.debug('%i thumbs found', len(result_objs))
             best = [model.VideoThumbnail(x.image, x.score, x.frameno,
