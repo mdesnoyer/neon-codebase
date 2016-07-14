@@ -37,7 +37,7 @@ from utils.http import ResponseCode, HTTPVerbs
 import utils.sync
 from utils.options import define, options
 import uuid
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url, ALLOW_EXTRA
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url, In, ALLOW_EXTRA
 
 _log = logging.getLogger(__name__)
 
@@ -672,7 +672,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             self.set_status(ResponseCode.HTTP_CONFLICT)
             statemon.state.increment(ref=_already_exists_errors_ref,
                                      safe=False)
-            self.error('this item already exists', extra_data=get_exc_message(exception))
+            self.error(get_exc_message(exception))
 
         elif isinstance(exception, neondata.ThumbDownloadError):
             self.set_status(ResponseCode.HTTP_BAD_REQUEST)
@@ -715,7 +715,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
     @classmethod
     @tornado.gen.coroutine
-    def db2api(cls, obj, fields=None):
+    def db2api(cls, obj, fields=None, **kwargs):
         """Converts a database object to a response dictionary
 
         Keyword arguments:
@@ -733,7 +733,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 if field in passthrough_fields:
                     retval[field] = getattr(obj, field)
                 else:
-                    retval[field] = yield cls._convert_special_field(obj, field)
+                    retval[field] = yield cls._convert_special_field(
+                        obj, field, **kwargs)
             except AttributeError:
                 pass
         raise tornado.gen.Return(retval)

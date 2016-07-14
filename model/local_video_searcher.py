@@ -762,6 +762,8 @@ class _Result(object):
             _log.debug(('Instantiating result object at frame %i with'
                         ' score %.3f') % (frameno, score))
 
+        self.model_vers = model_vers
+        self.aq_feautres = aq_features
         self._feat_score = feat_score
         self._feat_score_func = feat_score_func
         self._hash = getrandbits(128)
@@ -1571,7 +1573,7 @@ class LocalSearcher(object):
                                                     image=frame,
                                                     model_version=model_vers,
                                                     features=features))
-                best = sorted(results, key=lambda x: x.score, reverse=True)
+                best = sorted(result_objs, key=lambda x: x.score, reverse=True)
         else:
             _log.debug('%i thumbs found', len(result_objs))
             best = [model.VideoThumbnail(x.image, x.score, x.frameno,
@@ -1585,7 +1587,7 @@ class LocalSearcher(object):
             x.frameno,
             x.model_version,
             x.aq_features)
-            for x in sorted(self.worst_results)]
+            for _, x in sorted(self.worst_results)]
 
         return best, worst
 

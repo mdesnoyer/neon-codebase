@@ -1064,14 +1064,6 @@ class ThumbnailHandler(APIV2Handler):
 
         # Save the image file and thumbnail data object.
         yield self._set_thumb(rank)
-
-        # Update video's thumbnail list.
-        video = yield neondata.VideoMetadata.modify(
-            _video_id,
-            lambda x: x.thumbnail_ids.append(self.thumb.key),
-            async=True)
-        if not video:
-            raise SaveError("Can't save thumbnail to video {}".format(_video_id))
         statemon.state.increment('post_thumbnail_oks')
         yield self._respond_with_thumb()
 
@@ -1119,10 +1111,12 @@ class ThumbnailHandler(APIV2Handler):
                 image=self.image,
                 image_url=self.args.get('url'),
                 cdn_metadata=cdn,
-                async=True)
+                async=True,
+                save_objects=True)
         else:
-            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
-        yield self.thumb.save(async=True)
+            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn,
+                                            async=True)
+            yield self.thumb.save(async=True)
 
     @tornado.gen.coroutine
     def _set_image(self):
@@ -1147,7 +1141,8 @@ class ThumbnailHandler(APIV2Handler):
             pass
 
         if not self.image:
-            raise BadRequestError('Image not available', ResponseCode.HTTP_BAD_REQUEST)
+            raise BadRequestError('Image not available',
+                                  ResponseCode.HTTP_BAD_REQUEST)
 
     @staticmethod
     def _get_image_from_httpfile(httpfile):
@@ -1232,8 +1227,7 @@ class ThumbnailHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions',
-                'feature_ids']
+                'type', 'external_ref', 'created', 'updated', 'renditions']
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1241,14 +1235,14 @@ class ThumbnailHandler(APIV2Handler):
 
     @classmethod
     @tornado.gen.coroutine
-    def _convert_special_field(cls, obj, field):
+    def _convert_special_field(cls, obj, field, age=None, gender=None):
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
         elif field == 'thumbnail_id':
             retval = obj.key
         elif field == 'neon_score':
-            retval = obj.get_neon_score()
+            retval = obj.get_neon_score(age=age, gender=gender)
         elif field == 'url':
             retval = obj.urls[0] or []
         elif field == 'external_ref':
@@ -1377,6 +1371,8 @@ class VideoHelper(object):
         request.publish_date = args.get('publish_date', None)
         request.api_param = int(args.get('n_thumbs', 5))
         request.callback_email = args.get('callback_email', None) 
+        request.age = args.get('age', None)
+        request.gender = args.get('gender', None)
         yield request.save(async=True)
 
         if request:
@@ -1425,10 +1421,7 @@ class VideoHelper(object):
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
                 # save the default thumbnail
-                image = yield neondata.ThumbnailMetadata.download_image_from_url(
-                    default_thumbnail_url, async=True)
                 thumb = yield video.download_and_add_thumbnail(
-                    image=image,
                     image_url=default_thumbnail_url,
                     external_thumbnail_id=args.get('thumbnail_ref', None),
                     async=True)
@@ -1450,10 +1443,20 @@ class VideoHelper(object):
             if reprocess:
                 # Flag the request to be reprocessed
                 def _flag_reprocess(x):
+                    if x.state in [neondata.RequestState.SUBMIT,
+                                   neondata.RequestState.REPROCESS,
+                                   neondata.RequestState.REQUEUED,
+                                   neondata.RequestState.PROCESSING,
+                                   neondata.RequestState.FINALIZING]:
+                        raise AlreadyExists(
+                            'A job for this video is currently underway. '
+                            'Please try again later')
                     x.state = neondata.RequestState.REPROCESS
                     x.fail_count = 0
                     x.try_count = 0
                     x.response = {}
+                    x.age = args.get('age', None)
+                    x.gender = args.get('gender', None)
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
                     account_id_api_key,
@@ -1462,22 +1465,26 @@ class VideoHelper(object):
 
                 raise tornado.gen.Return((video, api_request))
             else:
-                raise AlreadyExists('job_id=%s' % (video.job_id))
+                raise AlreadyExists('This item already exists: job_id=%s' % (video.job_id))
 
     @staticmethod
     @tornado.gen.coroutine
-    def get_thumbnails_from_ids(tids):
+    def get_thumbnails_from_ids(tids, gender=None, age=None):
         """gets thumbnailmetadata objects
 
         Keyword arguments:
         tids -- a list of tids that needs to be retrieved
+        gender - A gender to get the thumbnail data for 
+        age - An age group to get the thumbnail data for
         """
         thumbnails = []
         if tids:
+            tids = set(tids)
             thumbnails = yield tornado.gen.Task(
                 neondata.ThumbnailMetadata.get_many,
                 tids)
-            thumbnails = yield [ThumbnailHandler.db2api(x) for
+            thumbnails = yield [ThumbnailHandler.db2api(x, gender=gender,
+                                                        age=age) for
                                 x in thumbnails]
             renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
             for thumbnail in thumbnails:
@@ -1594,17 +1601,17 @@ class VideoHelper(object):
         return next_page_url
 
     @staticmethod
-    def get_estimated_remaining(video):
-        if int(video.duration) <= 0: 
+    def get_estimated_remaining(video, request):
+        if not video.duration or int(video.duration) <= 0: 
             return 0.0  
 
         est_process_time = 2.5 * video.duration
         updated_ts = dateutil.parser.parse(
-            video.updated)
+            request.updated)
         utc_now = datetime.utcnow()
         diff = (utc_now - updated_ts).total_seconds()
  
-        return float(est_process_time - diff)
+        return max(float(est_process_time - diff), 60.0)
 
     @staticmethod
     @tornado.gen.coroutine
@@ -1626,14 +1633,58 @@ class VideoHelper(object):
         new_video = {}
         for field in fields:
             if field == 'thumbnails':
+                # Get the main thumbnails to return. Start with
+                # thumbnail_ids being present, then fallback to
+                # job_results default run
+                main_tids = video.thumbnail_ids
+                if not main_tids:
+                    for video_result in video.job_results:
+                        if (video_result.age is None and 
+                            video_result.gender is None):
+                            main_tids = video_result.thumbnail_ids
+                            break
+                    if not main_tids and len(video.job_results) > 0:
+                        main_tids = video.job_results[0].thumbnail_ids
                 new_video['thumbnails'] = yield \
-                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
+                  VideoHelper.get_thumbnails_from_ids(main_tids +
+                                                      video.non_job_thumb_ids)
+            elif field == 'demographic_thumbnails':
+                new_video['demographic_thumbnails'] = []
+                for video_result in video.job_results:
+                    cur_thumbs = yield VideoHelper.get_thumbnails_from_ids(
+                        (video_result.thumbnail_ids + video.non_job_thumb_ids),
+                        age=video_result.age,
+                        gender=video_result.gender)
+                    cur_entry = {
+                        'gender' : video_result.gender,
+                        'age' : video_result.age,
+                        'thumbnails' : cur_thumbs}
+                    if 'bad_thumbnails' in fields:
+                        cur_entry['bad_thumbnails'] = yield \
+                          VideoHelper.get_thumbnails_from_ids(
+                              video_result.bad_thumbnail_ids,
+                              age=video_result.age,
+                              gender=video_result.gender)
+                    new_video['demographic_thumbnails'].append(cur_entry)
+                if (len(video.job_results) == 0 and 
+                    len(video.thumbnail_ids) > 0):
+                    # For backwards compability create a demographic
+                    # thumbnail entry that's generic demographics if
+                    # the video is done processing.
+                    cur_thumbs = yield VideoHelper.get_thumbnails_from_ids(
+                        video.thumbnail_ids)
+                    if (neondata.ThumbnailType.NEON in 
+                        [x['type'] for x in cur_thumbs]):
+                        new_video['demographic_thumbnails'].append({
+                            'gender' : None,
+                            'age' : None,
+                            'thumbnails' : cur_thumbs})
+                    
+
             elif field == 'bad_thumbnails':
-                if video.bad_thumbnail_ids:
-                    new_video['bad_thumbnails'] = yield \
-                        VideoHelper.get_thumbnails_from_ids(video.bad_thumbnail_ids)
-                else:
-                    new_video['bad_thumbnails'] = []
+                # demographic_thumbnails are also required here and
+                # are handled in that section.
+                pass
 
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
@@ -1666,7 +1717,7 @@ class VideoHelper(object):
             elif field == 'estimated_time_remaining':
                 if request.state == neondata.RequestState.PROCESSING:  
                     new_video[field] = VideoHelper.get_estimated_remaining(
-                        video)
+                        video, request)
                 else: 
                     new_video[field] = None 
             else:
@@ -1706,7 +1757,9 @@ class VideoHandler(ShareableContentHandler):
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
           'callback_email': All(Coerce(str), Length(min=1, max=2048)),
-          'n_thumbs': All(Coerce(int), Range(min=1, max=32))
+          'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
+          'gender': In(['M', 'F', None]),
+          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])
         })
 
         args = self.parse_args()
@@ -2092,8 +2145,10 @@ class LiftStatsHandler(APIV2Handler):
                 return None
             return round(score / float(default_neon_score) - 1, 3)
 
-        lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t) if t else None}
+        lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
+            base_thumb) if t else None}
                 for k, t in thumbs.items()]
+
 
         # Check thumbnail exists.
         rv = {
