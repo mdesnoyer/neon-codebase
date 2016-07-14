@@ -1602,7 +1602,7 @@ class VideoHelper(object):
 
     @staticmethod
     def get_estimated_remaining(video, request):
-        if int(video.duration) <= 0: 
+        if not video.duration or int(video.duration) <= 0: 
             return 0.0  
 
         est_process_time = 2.5 * video.duration
@@ -2133,16 +2133,11 @@ class LiftStatsHandler(APIV2Handler):
             async=True,
             as_dict=True)
 
-        default_neon_score = base_thumb.get_neon_score()
-        def _get_estimated_lift(thumb):
-            # The ratio of a thumbnail's Neon score to the default's.
-            score = thumb.get_neon_score()
-            if default_neon_score is None or score is None:
-                return None
-            return round(score / float(default_neon_score) - 1, 3)
 
-        lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t) if t else None}
+        lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
+            base_thumb) if t else None}
                 for k, t in thumbs.items()]
+
 
         # Check thumbnail exists.
         rv = {

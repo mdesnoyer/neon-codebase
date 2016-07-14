@@ -137,7 +137,7 @@ def _aquila_prep(image):
 class DemographicSignatures(object):
     '''Object that manages all the signatures for different demographics.
 
-git rebase    dot this vector with your image signature and you get the model
+    dot this vector with your image signature and you get the model
     score for that image for that demographic.
     
     '''

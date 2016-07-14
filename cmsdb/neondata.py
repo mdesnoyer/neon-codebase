@@ -5091,9 +5091,6 @@ class ThumbnailMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete_related_data(cls, key):
-        #yield tornado.gen.Task(ThumbnailStatus.delete, key)
-        #yield tornado.gen.Task(ThumbnailServingURLs.delete, key)
-        #yield tornado.gen.Task(ThumbnailMetadata.delete, key)
         yield ThumbnailStatus.delete(key, async=True) 
         yield ThumbnailServingURLs.delete(key, async=True)
         yield ThumbnailMetadata.delete(key, async=True) 
@@ -5118,6 +5115,15 @@ class ThumbnailMetadata(StoredObject):
         if model_score:
             return model.scores.lookup(self.model_version, model_score)
         return None
+
+    def get_estimated_lift(self, other_thumb): 
+        """ returns the estimated lift of this object vs another 
+            thumbnail""" 
+        ot_score = other_thumb.get_neon_score() 
+        score = self.get_neon_score() 
+        if ot_score is None or ot_score <= 0 or score is None: 
+            return None 
+        return round(score / float(ot_score) - 1, 3)
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
