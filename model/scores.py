@@ -21,7 +21,7 @@ def lookup(model, score, gender=None, age=None):
     else:
         model = '20160000-prevmodel-score'
     try:
-        score_map = pandas.read_pickle(get_file(model))
+        score_map = pd.read_pickle(get_file(model))
     except IOError as e:
         _log.warn('Could not read a valid model score file at %s: %s' % 
                   (get_file(model), e))
