@@ -677,8 +677,8 @@ for event in __EVENTS:
         task_id='create_table_%s' % event,
         dag=clicklogs,
         python_callable=_create_tables,
-        op_kwargs=dict(event=event),
-        retry_delay=timedelta(minutes=5))
+        op_kwargs=dict(event=event))
+    create_op.set_upstream(mr_cleaning_job)
 
     # Load the data into the impala table
     op = PythonOperator(
