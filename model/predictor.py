@@ -151,7 +151,7 @@ class DemographicSignatures(object):
     __metaclass__ = utils.obj.KeyedSingleton
 
     def __init__(self, model_name):
-        # Load up the file
+        # Load up the files
         weights_fn = os.path.join(os.path.dirname(__file__),
                                   'demographics',
                                   '%s-weight.pkl' % model_name)
@@ -169,12 +169,13 @@ class DemographicSignatures(object):
         except IOError as e:
             _log.error('Could not read a valid model bias file at %s: %s' % 
                        (bias_fn, e))
-            raise KeyError(model_name)
+            raise KeyError(model_name)  
 
     def compute_score_for_demo(self, X, gender=None, age=None):
         '''Returns the score for gender `gender` and age `age` derived from
         feature vector X (a numpy array)
         '''
+        X = np.array(X)
         X = X.reshape(1, -1)
         if gender is None:
             gender = 'None'
@@ -191,22 +192,22 @@ class DemographicSignatures(object):
             _log.error('Invalid key(s) for bias file:', gender, age)
             raise KeyError(e)
         try:
-            X_prime = X.dot(W) + b
+            score = X.dot(W) + b
         except ValueError as e:
             _log.error('Improper feature vector size:', e.message)
             raise ValueError(e)
-        return X_prime
+        return score
 
     def get_scores_for_all_demos(self, X):
         '''Returns the scores for all demographics given feature vector
         X as a pandas multiindex'''
         X = X.reshape(1, -1)
         try:
-            X_prime = X.dot(self.weights) + self.bias
+            scores = X.dot(self.weights) + self.bias
         except ValueError as e:
             _log.error('Improper feature vector size:', e.message)
             raise ValueError(e)
-        return X_prime
+        return scores
 
 
 class Predictor(object):

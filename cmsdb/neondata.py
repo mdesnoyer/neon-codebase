@@ -5027,7 +5027,6 @@ class ThumbnailMetadata(StoredObject):
         image - OpenCV image data. If not provided, image will be downloaded
         save_object - If true, the score is saved to the database
         '''
-        # TODO (Nick): Get the correct score with the demographic information
         if (self.model_score is not None or self.features is not None):
             # No need to compute the score, it's there
             return
@@ -5104,7 +5103,8 @@ class ThumbnailMetadata(StoredObject):
             try:
                 sig = model.predictor.DemographicSignatures(
                         self.model_version)
-                model_score = sig(self.features, gender, age)
+                model_score = sig.compute_score_for_demo(
+                    self.features, gender, age)
             except KeyError as e:
                 # We don't know about this model, gender, age combo
                 pass
@@ -5129,8 +5129,16 @@ class ThumbnailMetadata(StoredObject):
         score = self.get_score() 
         if ot_score is None or score is None:
             return None
-        return round(numpy.exp(score) / numpy.exp(ot_score) - 1, 3)
-        
+        # determine the model
+        if re.match('20[0-9]{6}-[a-zA-Z0-9]+-[a-zA-Z0-9]+', 
+                    self.model_version):
+            # aquila v2
+            return round(numpy.exp(score) / numpy.exp(ot_score) - 1, 3)
+        elif ot_score > 0:
+            # it's an older model
+            return round(float(score) / float(ot_score) - 1, 3)
+        else return None
+
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''

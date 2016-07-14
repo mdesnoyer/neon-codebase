@@ -47,7 +47,7 @@ class TestAllModelFiles(test_utils.neontest.TestCase):
         # Checks that all the files are of the form YYYYMMDD-<tag>
         for fn in os.listdir(self._get_model_dir()):
             self.assertRegexpMatches(
-                fn, '20[0-9]{6}-[a-zA-Z0-9]-[a-zA-Z0-9]+\.pkl')
+                fn, '20[0-9]{6}-[a-zA-Z0-9]+-[a-zA-Z0-9]+\.pkl')
 
     def test_pandas_array(self):
         model_dir = self._get_model_dir()
