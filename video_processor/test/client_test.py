@@ -1026,7 +1026,36 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         api_request.callback_email = 'basetest@invalid.xxx' 
         yield api_request.save(async=True)
-        rv = yield self.vprocessor.send_notification_email(api_request)
+        self.vprocessor.video_metadata.save()
+        video_data = yield neondata.VideoMetadata.get(
+            self.video_id, 
+            async=True)
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_one',
+            urls=['second_best'], 
+            model_score=0.4).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_two',
+            urls=['best'], 
+            model_score=0.5).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_three',
+            model_score=0.3,
+            urls=['third_best']).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_four',
+            urls=['fourth_best']).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_five',
+            urls=['default'], 
+            model_score=0.3, 
+            ttype=neondata.ThumbnailType.DEFAULT).save(async=True) 
+        video_data.thumbnail_ids = ['testing_vtid_one','testing_vtid_two',
+            'testing_vtid_three','testing_vtid_four','testing_vtid_five']
+        yield video_data.save(async=True) 
+        rv = yield self.vprocessor.send_notification_email(
+            api_request, 
+            video_data)
         body_json = json.loads(self.submit_mock.call_args[0][0].body)
         self.assertEquals('/api/v2/%s/email' % api_request.api_key, 
             self.submit_mock.call_args[0][0].url) 
@@ -1034,6 +1063,12 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertEquals(body_json['template_slug'], 'video-results') 
         self.assertEquals(body_json['subject'], 'Your Neon Images Are Here!')
         self.assertEquals(body_json['to_email_address'], 'basetest@invalid.xxx')
+        tas = body_json['template_args'] 
+        self.assertEquals(tas['top_thumbnail'], 'best')  
+        self.assertEquals(tas['thumbnail_one'], 'second_best')  
+        self.assertEquals(tas['thumbnail_two'], 'third_best')  
+        self.assertEquals(tas['thumbnail_three'], 'fourth_best')  
+        self.assertEquals(tas['lift'], 2.167) 
         self.assertEquals(rv, True)
  
     @tornado.testing.gen_test 
@@ -1044,9 +1079,11 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 400, error=Exception('blah'))
-        
+
+        self.vprocessor._get_email_template_args = MagicMock()
+        self.vprocessor._get_email_template_args.side_effect = iter([{}])
         with self.assertLogExists(logging.ERROR, 'Failed to send'):
-            rv = yield self.vprocessor.send_notification_email(api_request)
+            rv = yield self.vprocessor.send_notification_email(api_request, None)
             self.assertTrue(self.submit_mock.called)
             self.assertEquals(rv, False)
             self.assertEquals(
@@ -1068,6 +1105,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     def test_default_process(self):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         api_request.callback_email = 'test@invalid.xxx' 
+        self.vprocessor._get_email_template_args = MagicMock()
+        self.vprocessor._get_email_template_args.side_effect = iter([{}])
         yield api_request.save(async=True)
         yield self.vprocessor.finalize_response()
 
@@ -1602,6 +1641,73 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
             self.assertEquals(
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 neondata.RequestState.FINISHED)
+
+    @tornado.testing.gen_test
+    def test_get_template_args_base(self):
+        self.vprocessor.video_metadata.save()
+        video_data = yield neondata.VideoMetadata.get(self.video_id, async=True)
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_one',
+            urls=['second_best'], 
+            model_score=0.4).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_two',
+            urls=['best'], 
+            model_score=0.5).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_three',
+            model_score=0.3,
+            urls=['third_best']).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_four',
+            urls=['fourth_best']).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_five',
+            urls=['default'], 
+            model_score=0.3, 
+            ttype=neondata.ThumbnailType.DEFAULT).save(async=True) 
+
+        video_data.thumbnail_ids = ['testing_vtid_one','testing_vtid_two',
+            'testing_vtid_three','testing_vtid_four','testing_vtid_five']
+ 
+        yield video_data.save(async=True) 
+        tas = yield self.vprocessor._get_email_template_args(video_data)
+        self.assertEquals(tas['top_thumbnail'], 'best')  
+        self.assertEquals(tas['thumbnail_one'], 'second_best')  
+        self.assertEquals(tas['thumbnail_two'], 'third_best')  
+        self.assertEquals(tas['thumbnail_three'], 'fourth_best')  
+        self.assertEquals(tas['lift'], 2.167) 
+ 
+    @tornado.testing.gen_test
+    def test_get_template_args_no_tn_exception(self):
+        self.vprocessor.video_metadata.save()
+        video_data = yield neondata.VideoMetadata.get(
+            self.video_id, 
+            async=True)
+        with self.assertRaises(Exception): 
+            tas = yield self.vprocessor._get_email_template_args(video_data)
+
+    @tornado.testing.gen_test
+    def test_get_template_args_no_dtn_exception(self):
+        self.vprocessor.video_metadata.save()
+        video_data = yield neondata.VideoMetadata.get(self.video_id, async=True)
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_one',
+            urls=['second_best'], 
+            model_score=0.4).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_two',
+            urls=['best'], 
+            model_score=0.5).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_three',
+            model_score=0.3,
+            urls=['third_best']).save(async=True) 
+        yield neondata.ThumbnailMetadata(
+            'testing_vtid_four',
+            urls=['fourth_best']).save(async=True) 
+        with self.assertRaises(Exception): 
+            tas = yield self.vprocessor._get_email_template_args(video_data)
         
 class SmokeTest(test_utils.neontest.AsyncTestCase):
     ''' 
