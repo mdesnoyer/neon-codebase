@@ -56,6 +56,10 @@ class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
                 'availability-zone' : 'us-east-1c'
                 }
             }]
+
+        # The monitoring thread can mess up these tests
+        utils.autoscale.AutoScaleGroup('group1').stop_monitoring_group()
+        utils.autoscale.AutoScaleGroup('group2').stop_monitoring_group()
         super(TestAutoScaleGroup, self).setUp()
 
     def tearDown(self):

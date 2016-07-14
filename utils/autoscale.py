@@ -103,7 +103,9 @@ class AutoScaleGroup(object):
         RefresherThread().add_group_to_monitor(name)
 
     def __del__(self):
-        # Stop monitoring this group
+        self.stop_monitoring_group()
+
+    def stop_monitoring_group(self):
         RefresherThread().stop_monitoring_group(self.name)
 
     @tornado.gen.coroutine
