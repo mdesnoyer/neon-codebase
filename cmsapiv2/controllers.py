@@ -1595,7 +1595,7 @@ class VideoHelper(object):
 
     @staticmethod
     def get_estimated_remaining(video):
-        if int(video.duration) <= 0: 
+        if not video.duration or int(video.duration) <= 0: 
             return 0.0  
 
         est_process_time = 2.5 * video.duration
