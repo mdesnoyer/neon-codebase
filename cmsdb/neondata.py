@@ -805,15 +805,16 @@ class StoredObject(object):
 
             override this if you need something custom to get _data
         '''
-        def _json_fixer(obj): 
-            for key, value in obj.items():
+        def _json_fixer(obj):
+            cur_data = obj
+            for key, value in cur_data.items():
                 try:  
                     if value == float('-inf'):
-                        obj[key] = PythonNaNStrings.NEGINF
+                        cur_data[key] = PythonNaNStrings.NEGINF
                     if value == float('inf'):
-                        obj[key] = PythonNaNStrings.INF
+                        cur_data[key] = PythonNaNStrings.INF
                     if value == float('nan'):
-                        obj[key] = PythonNaNStrings.NAN
+                        cur_data[key] = PythonNaNStrings.NAN
                 except ValueError: 
                     pass 
             # we want to remove these extras from the _data object 
@@ -821,15 +822,18 @@ class StoredObject(object):
             addcs = self._additional_columns() 
             for c in addcs:
                 try:  
-                    del obj[c.column_name]
+                    del cur_data[c.column_name]
                 except KeyError: 
                     pass 
             return obj
-        obj = _json_fixer(copy.copy(self.to_dict()['_data'])) 
+        obj = _json_fixer(copy.deepcopy(self.to_dict()['_data'])) 
         def json_serial(obj):
             if isinstance(obj, datetime.datetime):
                 serial = obj.isoformat()
                 return serial
+            elif isinstance(obj, StoredObject):
+                return obj.to_dict()
+            return obj.__dict__
         return json.dumps(obj, default=json_serial)
 
     @utils.sync.optional_sync
@@ -2985,9 +2989,6 @@ class CDNHostingMetadataList(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return CDNHostingMetadataList.__name__
-    
-    def get_json_data(self):
-        return json.dumps(json.loads(self.to_json())['_data'])
 
 class CDNHostingMetadata(UnsaveableStoredObject):
     '''

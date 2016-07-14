@@ -1226,8 +1226,7 @@ class ThumbnailHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions',
-                'feature_ids']
+                'type', 'external_ref', 'created', 'updated', 'renditions']
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1620,8 +1619,20 @@ class VideoHelper(object):
         new_video = {}
         for field in fields:
             if field == 'thumbnails':
+                # Get the main thumbnails to return. Start with
+                # thumbnail_ids being present, then fallback to
+                # job_results default run
+                main_tids = video.thumbnail_ids
+                if not main_tids:
+                    for video_result in video.job_results:
+                        if (video_result.age is None and 
+                            video_result.gender is None):
+                            main_tids = video_result.thumbnail_ids
+                            break
+                    if not main_tids and len(video.job_results) > 0:
+                        main_tids = video.job_results[0].thumbnail_ids
                 new_video['thumbnails'] = yield \
-                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids +
+                  VideoHelper.get_thumbnails_from_ids(main_tids +
                                                       video.non_job_thumb_ids)
             elif field == 'demographic_thumbnails':
                 new_video['demographic_thumbnails'] = []
@@ -1637,11 +1648,24 @@ class VideoHelper(object):
                     if 'bad_thumbnails' in fields:
                         cur_entry['bad_thumbnails'] = yield \
                           VideoHelper.get_thumbnails_from_ids(
-                              (video_result.bad_thumbnail_ids +
-                               video.non_job_thumb_ids),
-                               age=video_result.age,
-                               gender=video_result.gender)
+                              video_result.bad_thumbnail_ids,
+                              age=video_result.age,
+                              gender=video_result.gender)
                     new_video['demographic_thumbnails'].append(cur_entry)
+                if (len(video.job_results) == 0 and 
+                    len(video.thumbnail_ids) > 0):
+                    # For backwards compability create a demographic
+                    # thumbnail entry that's generic demographics if
+                    # the video is done processing.
+                    cur_thumbs = yield VideoHelper.get_thumbnails_from_ids(
+                        video.thumbnail_ids)
+                    if (neondata.ThumbnailType.NEON in 
+                        [x['type'] for x in cur_thumbs]):
+                        new_video['demographic_thumbnails'].append({
+                            'gender' : None,
+                            'age' : None,
+                            'thumbnails' : cur_thumbs})
+                    
 
             elif field == 'bad_thumbnails':
                 # demographic_thumbnails are also required here and

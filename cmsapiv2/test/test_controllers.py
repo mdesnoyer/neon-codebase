@@ -15,6 +15,7 @@ from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
 import numpy as np
+import random
 from requests_toolbelt import MultipartEncoder
 import stripe
 import tornado.gen
@@ -421,7 +422,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         # fails with a conflict
         self.assertEquals(e.exception.code, 409)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['data'],
+        self.assertRegexpMatches(rjson['error']['message'],
                                  'user with that email already exists')
 
     @tornado.testing.gen_test
@@ -2034,6 +2035,9 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
 
 class TestVideoHandler(TestControllersBase):
     def setUp(self):
+        random.seed(1324689)
+        np.random.seed(1348)
+        
         user = neondata.NeonUserAccount(
             uuid.uuid1().hex,
             name='testingme',
@@ -2042,9 +2046,27 @@ class TestVideoHandler(TestControllersBase):
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
         neondata.ThumbnailMetadata('testing_vtid_one', width=500,
-                                   urls=['s']).save()
+                                   urls=['s'],
+                                   ttype='neon',
+                                   model_score=0.32,
+                                   model_version='aqv1').save()
         neondata.ThumbnailMetadata('testing_vtid_two', width=500,
-                                   urls=['d']).save()
+                                   urls=['d'],
+                                   ttype='neon',
+                                   features=np.random.rand(1024),
+                                   model_version='20160707-test').save()
+        neondata.ThumbnailMetadata('testing_vtid_bad', width=500,
+                                   urls=['bad'],
+                                   features=np.random.rand(1024),
+                                   model_version='20160707-test').save()
+        neondata.ThumbnailMetadata('testing_vtid_rand', 
+                                   ttype='random',
+                                   urls=['rand.jpg']).save()
+        neondata.ThumbnailMetadata('testing_vtid_default',
+                                   ttype='default',
+                                   urls=['default.jpg'],
+                                   features=np.random.rand(1024),
+                                   model_version='20160707-test').save()
         neondata.NeonApiRequest('job1', self.account_id_api_key).save()
         defop = neondata.BrightcoveIntegration.modify(self.test_i_id,
             lambda x: x,
@@ -2109,6 +2131,133 @@ class TestVideoHandler(TestControllersBase):
         self.assertDictContainsSubset(json.loads(cargs[1]), job.__dict__)
         self.assertEquals(cargs[2], 16)
         self.assertEquals(job.api_param, 5)
+        self.assertIsNone(job.age)
+        self.assertIsNone(job.gender)
+
+    @tornado.testing.gen_test
+    def test_post_demographic(self):        
+        body = {
+                'external_video_ref': '1234ascs33',
+                'url': 'some_url',
+                'title': 'my_demo_video',
+                'gender': 'M',
+                'age': '50+'
+            }
+        header = {"Content-Type": "application/json"}
+        url = '/api/v2/%s/videos' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=json.dumps(body),
+            method='POST',
+            headers=header)
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id']
+        self.assertEquals(response.code, 202)
+        video = yield neondata.VideoMetadata.get('%s_%s' % (
+            self.account_id_api_key, '1234ascs33'), async=True)
+        self.assertEquals(video.url, 'some_url')
+
+        request = neondata.NeonApiRequest.get(job_id, self.account_id_api_key)
+        self.assertEquals(request.gender, 'M')
+        self.assertEquals(request.age, '50+')
+
+        # Check the submitted job
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        job = json.loads(cargs[1])
+        self.assertEquals(job['gender'], 'M')
+        self.assertEquals(job['age'], '50+')
+
+    @tornado.testing.gen_test
+    def test_post_bad_demographic(self):
+        url = '/api/v2/%s/videos?external_video_ref=1234ascs&url=some_url&gender={}&age={}' % (self.account_id_api_key)
+
+        for demo_combos in [('alien', '18-19'),
+                            ('M', '0-18'),
+                            ('F', 56)]:
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                yield self.http_client.fetch(
+                    self.get_url(url.format(*demo_combos)),
+                    body='',
+                    method='POST',
+                    allow_nonstandard_methods=True)
+
+            self.assertEquals(e.exception.code, 400)
+            rjson = json.loads(e.exception.response.body)
+            self.assertRegexpMatches(rjson['error']['message'],
+                                     'not allowed for .*(gender|age)')
+
+    @tornado.testing.gen_test
+    def test_post_reprocess_demographic(self):        
+        body = {
+                'external_video_ref': '1234ascs33',
+                'url': 'some_url',
+                'title': 'my_demo_video',
+                'gender': 'M',
+                'age': '50+'
+            }
+        header = {"Content-Type": "application/json"}
+        url = '/api/v2/%s/videos' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=json.dumps(body),
+            method='POST',
+            headers=header)
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id']
+        self.assertEquals(response.code, 202)
+        video = yield neondata.VideoMetadata.get('%s_%s' % (
+            self.account_id_api_key, '1234ascs33'), async=True)
+        self.assertEquals(video.url, 'some_url')
+
+        request = neondata.NeonApiRequest.get(job_id, self.account_id_api_key)
+        self.assertEquals(request.gender, 'M')
+        self.assertEquals(request.age, '50+')
+        self.assertEquals(request.state, neondata.RequestState.SUBMIT)
+
+        # Check the submitted job
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        job = json.loads(cargs[1])
+        self.assertEquals(job['gender'], 'M')
+        self.assertEquals(job['age'], '50+')
+        self.job_write_mock.reset_mock()
+        self.job_write_mock.side_effect = ['message']
+
+        # Try to reprocess, but the last job didn't finish
+        body['reprocess'] = True
+        body['gender'] = 'F'
+        body['url'] = None
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=json.dumps(body),
+                method='POST',
+                headers=header)
+        self.assertEquals(e.exception.code, 409)
+        self.assertEquals(self.job_write_mock.call_count, 0)
+
+        # Finish the job and try reprocessing
+        request = neondata.NeonApiRequest.get(job_id, self.account_id_api_key)
+        request.state = neondata.RequestState.FINISHED
+        request.save()
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=json.dumps(body),
+            method='POST',
+            headers=header)
+        self.assertEquals(response.code, 202)
+        request = neondata.NeonApiRequest.get(job_id, self.account_id_api_key)
+        self.assertEquals(request.gender, 'F')
+        self.assertEquals(request.age, '50+')
+        self.assertEquals(request.state, neondata.RequestState.REPROCESS)
+
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        job = json.loads(cargs[1])
+        self.assertEquals(job['gender'], 'F')
+        self.assertEquals(job['age'], '50+')
+        self.job_write_mock.reset_mock()        
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
@@ -2742,7 +2891,8 @@ class TestVideoHandler(TestControllersBase):
         url = '/api/v2/%s/videos?video_id=vid1'\
               '&fields=state,integration_id,testing_enabled,'\
               'job_id,title,video_id,serving_url,publish_date,'\
-              'thumbnails,duration,custom_data' % (self.account_id_api_key)
+              'thumbnails,duration,custom_data,demographic_thumbnails' % (
+                  self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
 
@@ -2969,6 +3119,142 @@ class TestVideoHandler(TestControllersBase):
         thumbnail_array = rjson['videos'][0]['thumbnails']
         self.assertEquals(len(rjson['videos']), 1)
         self.assertEquals(len(thumbnail_array), 0)
+
+    @tornado.testing.gen_test
+    def test_demographic_thumbnails_available(self):
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(
+                self.account_id_api_key, 'vid1'),
+            tids=[],
+            non_job_thumb_ids=['testing_vtid_default','testing_vtid_rand'],
+            job_results=[
+                neondata.VideoJobThumbnailList(
+                    thumbnail_ids=['testing_vtid_one'],
+                    model_version='localsearch'),
+                neondata.VideoJobThumbnailList(
+                    gender='F',
+                    age='20-29',
+                    thumbnail_ids=['testing_vtid_two'],
+                    bad_thumbnail_ids=['testing_vtid_bad'],
+                    model_version='localsearch')],
+            request_id='job1')
+        vm.save()
+
+        # Check that the demographic thumbnails are returned as expected
+        url = ('/api/v2/%s/videos?video_id=vid1&fields=demographic_thumbnails'
+               %(self.account_id_api_key))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(len(rjson['videos'][0]['demographic_thumbnails']), 2)
+        
+        self.assertNotIn('bad_thumbnails',
+                         rjson['videos'][0]['demographic_thumbnails'][0])
+        self.assertNotIn('bad_thumbnails',
+                         rjson['videos'][0]['demographic_thumbnails'][1])
+
+        # Each demographic response should include the non_job_thumb_ids list
+        demos = dict([((x['gender'], x['age']), x['thumbnails']) 
+                      for x in rjson['videos'][0]['demographic_thumbnails']])
+        self.assertItemsEqual([x['thumbnail_id'] for x in demos[(None, None)]],
+                              ['testing_vtid_default', 'testing_vtid_rand',
+                               'testing_vtid_one'])
+        self.assertItemsEqual([x['thumbnail_id'] for x in 
+                               demos[('F', '20-29')]],
+                              ['testing_vtid_default', 'testing_vtid_rand',
+                               'testing_vtid_two'])
+        # Make sure that the scores are different for the default
+        # thumb for the different demographics
+        female_default = [x for x in demos[('F', '20-29')] 
+                          if x['thumbnail_id'] == 'testing_vtid_default'][0]
+        general_default = [x for x in demos[(None, None)] 
+                          if x['thumbnail_id'] == 'testing_vtid_default'][0]
+        self.assertNotEqual(female_default['neon_score'],
+                            general_default['neon_score'])
+
+        # Now, ask for bad thumbnails too
+        url = ('/api/v2/%s/videos?video_id=vid1&fields=%s'
+               % (self.account_id_api_key,
+                  'demographic_thumbnails,bad_thumbnails'))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(len(rjson['videos'][0]['demographic_thumbnails']), 2)
+        
+        thumbs = dict([((x['gender'], x['age']), x['thumbnails']) 
+                       for x in rjson['videos'][0]['demographic_thumbnails']])
+        bad_thumbs = dict([((x['gender'], x['age']), x['bad_thumbnails']) 
+                       for x in rjson['videos'][0]['demographic_thumbnails']])
+        self.assertEquals(bad_thumbs[(None, None)], [])
+        self.assertEquals(len(bad_thumbs[('F', '20-29')]), 1)
+        self.assertEquals(bad_thumbs[('F', '20-29')][0]['thumbnail_id'],
+                          'testing_vtid_bad')
+        self.assertGreater(bad_thumbs[('F', '20-29')][0]['neon_score'],
+                           0)
+
+        # Ask for the thumbnails and they should return the result
+        # from the (None, None) demographic response
+        url = ('/api/v2/%s/videos?video_id=vid1&fields=%s'
+               % (self.account_id_api_key, 'thumbnails'))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertItemsEqual(
+            [x['thumbnail_id'] for x in rjson['videos'][0]['thumbnails']],
+            ['testing_vtid_default', 'testing_vtid_rand', 'testing_vtid_one'])
+
+    @tornado.testing.gen_test
+    def test_demographic_thumbnails_not_available(self):
+        # When these is no job list, but the demographic thumbs are asked for
+        # This is for backwards compatilibity
+
+        # Start with the default being available (in processing)
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(
+                self.account_id_api_key, 'vid1'),
+            tids=['testing_vtid_default'],
+            request_id='job1')
+        vm.save()
+
+        url = ('/api/v2/%s/videos?video_id=vid1&fields=%s'
+               % (self.account_id_api_key,
+                  'demographic_thumbnails,thumbnails'))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(len(rjson['videos'][0]['demographic_thumbnails']), 0)
+        self.assertEquals(len(rjson['videos'][0]['thumbnails']), 1)
+        self.assertEquals(rjson['videos'][0]['thumbnails'][0]['thumbnail_id'],
+                          'testing_vtid_default')
+
+        # Now, after the job is done, more thumbs will appear
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(
+                self.account_id_api_key, 'vid1'),
+            tids=['testing_vtid_default', 'testing_vtid_rand',
+                  'testing_vtid_one'],
+            request_id='job1')
+        vm.save()
+
+        url = ('/api/v2/%s/videos?video_id=vid1&fields=%s'
+               % (self.account_id_api_key,
+                  'demographic_thumbnails,thumbnails'))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(len(rjson['videos'][0]['demographic_thumbnails']), 1)
+
+        demo = rjson['videos'][0]['demographic_thumbnails'][0]
+        self.assertIsNone(demo['gender'])
+        self.assertIsNone(demo['age'])
+        self.assertItemsEqual([x['thumbnail_id'] for x in demo['thumbnails']],
+                              ['testing_vtid_default', 'testing_vtid_rand',
+                               'testing_vtid_one'])
+        
+        self.assertItemsEqual([x['thumbnail_id'] for x in 
+                               rjson['videos'][0]['thumbnails']],
+                              ['testing_vtid_default', 'testing_vtid_rand',
+                               'testing_vtid_one'])
 
     @tornado.testing.gen_test
     def test_update_video_does_not_exist(self):
@@ -3528,8 +3814,8 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
-            self.account_id_api_key)
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&fields=%s' % (
+            self.account_id_api_key, 'thumbnail_id,width,feature_ids')
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
         self.assertEquals('kfmodel_0', rjson['feature_ids'][0])
