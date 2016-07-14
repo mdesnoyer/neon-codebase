@@ -1601,17 +1601,17 @@ class VideoHelper(object):
         return next_page_url
 
     @staticmethod
-    def get_estimated_remaining(video):
+    def get_estimated_remaining(video, request):
         if int(video.duration) <= 0: 
             return 0.0  
 
         est_process_time = 2.5 * video.duration
         updated_ts = dateutil.parser.parse(
-            video.updated)
+            request.updated)
         utc_now = datetime.utcnow()
         diff = (utc_now - updated_ts).total_seconds()
  
-        return float(est_process_time - diff)
+        return max(float(est_process_time - diff), 60.0)
 
     @staticmethod
     @tornado.gen.coroutine
@@ -1717,7 +1717,7 @@ class VideoHelper(object):
             elif field == 'estimated_time_remaining':
                 if request.state == neondata.RequestState.PROCESSING:  
                     new_video[field] = VideoHelper.get_estimated_remaining(
-                        video)
+                        video, request)
                 else: 
                     new_video[field] = None 
             else:
