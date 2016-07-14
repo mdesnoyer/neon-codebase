@@ -131,6 +131,7 @@ define('max_attempt_count', default=5,
 
 define("cmsapi_user", default=None, help='User to make api requests with')
 define("cmsapi_pass", default=None, help='Password for the cmsapi user')
+define("front_end_base_url", default='https://app.neon-lab.com/', help='The base url for the frontend')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -1020,7 +1021,7 @@ class VideoProcessor(object):
                 options.cmsapi_pass)
             
             template_args = yield self._get_email_template_args(video)
-            
+               
             # build up the body of the request
             body_params = { 
                 'template_slug' : 'video-results',
