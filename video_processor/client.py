@@ -96,6 +96,7 @@ statemon.define('randomframe_extraction_error', int)
 statemon.define('youtube_video_not_found', int) 
 statemon.define('failed_to_send_result_email', int)
 statemon.define('too_long_of_video', int)
+statemon.define('unable_to_send_email', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -130,6 +131,7 @@ define('max_attempt_count', default=5,
 
 define("cmsapi_user", default=None, help='User to make api requests with')
 define("cmsapi_pass", default=None, help='Password for the cmsapi user')
+define("frontend_base_url", default='https://app.neon-lab.com', help='The base url for the frontend')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -961,7 +963,7 @@ class VideoProcessor(object):
 
         # Send the notifications
         yield self.send_notifiction_response(api_request)
-        yield self.send_notification_email(api_request)
+        yield self.send_notification_email(api_request, new_video_metadata)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
@@ -988,7 +990,7 @@ class VideoProcessor(object):
         return cresp.to_dict()
 
     @tornado.gen.coroutine 
-    def send_notification_email(self, api_request): 
+    def send_notification_email(self, api_request, video): 
         """ 
             sends email to the email that is on the 
             api_request 
@@ -1001,6 +1003,9 @@ class VideoProcessor(object):
         try: 
             # check for user that created the request 
             to_email = api_request.callback_email
+            if not to_email: 
+                raise tornado.gen.Return(True)  
+                     
             user = yield neondata.User.get(
                 to_email,
                 log_missing=False,  
@@ -1010,15 +1015,17 @@ class VideoProcessor(object):
             if user: 
                 if not user.send_emails: 
                     raise tornado.gen.Return(True)  
-
             # create a new apiv2 client
             client = cmsapiv2.client.Client(
                 options.cmsapi_user,
                 options.cmsapi_pass)
-
+            
+            template_args = yield self._get_email_template_args(video)
+               
             # build up the body of the request
             body_params = { 
-                'template_slug' : 'video-results', 
+                'template_slug' : 'video-results',
+                'template_args' : template_args,  
                 'subject' : 'Your Neon Images Are Here!', 
                 'from_name' : 'Neon Video Results', 
                 'to_email_address' : to_email 
@@ -1036,15 +1043,53 @@ class VideoProcessor(object):
                 statemon.state.increment('failed_to_send_result_email')
                 _log.error('Failed to send email to %s due to %s' % 
                     (to_email, response.error))
-                rv = False  
+                rv = False
+             
         except AttributeError: 
             pass 
         except Exception as e:
             rv = False  
+            statemon.state.increment('unable_to_send_email')
             _log.error('Unexcepted error %s when sending email', e)  
         finally: 
             raise tornado.gen.Return(rv) 
+
+    @tornado.gen.coroutine    
+    def _get_email_template_args(self, video):
+        tas = {}  
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            video.thumbnail_ids,
+            async=True)
+
+        dt = filter(lambda t: t.type == neondata.ThumbnailType.DEFAULT,
+            thumbs)
+        rt = filter(lambda t: t.type != neondata.ThumbnailType.DEFAULT, 
+            thumbs)
+
+        if len(dt) == 0 or len(rt) < 4:
+            raise Exception('Not enough thumbnails to process.')
+         
+        tas['collection_url'] = \
+           "{base_url}/share/video/{vid}/account/{aid}/token/{token}/".format(
+               base_url=options.frontend_base_url, 
+               vid=neondata.InternalVideoID.to_external(video.key), 
+               aid=video.get_account_id(), 
+               token=video.share_token) 
         
+        th_info = sorted(
+            [(t.urls[0], t.get_estimated_lift(dt[0])) for t in rt], 
+            key=lambda x: x[1], 
+            reverse=True)
+
+        tas['top_thumbnail'] = th_info[0][0]
+        tas['lift'] = th_info[0][1]
+  
+        tas['thumbnail_one'] = th_info[1][0]
+        tas['thumbnail_two'] = th_info[2][0] 
+        tas['thumbnail_three'] = th_info[3][0]
+
+        raise tornado.gen.Return(tas)
+         
     @tornado.gen.coroutine
     def send_notifiction_response(self, api_request):
         '''
