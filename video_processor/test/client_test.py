@@ -1321,6 +1321,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         api_request.save()
         self.vprocessor.job_params['gender'] = 'M'
         self.vprocessor.reprocess = True
+        self.vprocessor.thumb_model_version='model1'
 
         yield self.vprocessor.finalize_response()
 

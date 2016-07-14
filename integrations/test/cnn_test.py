@@ -488,3 +488,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(one_vid_mock.call_count, 2)
 
         one_vid_mocker.stop()
+
+if __name__ == '__main__':
+    utils.neon.InitNeon()
+    unittest.main()
