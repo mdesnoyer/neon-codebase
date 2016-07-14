@@ -70,7 +70,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         
         response = AquilaResponse()
         response.valence.extend(features)
-        response.model_version = '20160707-test'
+        response.model_version = '20160713-test'
         self.mock_regress_call.side_effect = [response]
 
         score, vec, vers = yield self.predictor.predict(self.image,
@@ -89,7 +89,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         response.model_version = '20160707-whoami'
         self.mock_regress_call.side_effect = [response]
 
-        with self.assertLogExists(logging.WARNING, 'Unknown demographic'):
+        with self.assertLogExists(logging.WARNING, 'Unknown model'):
             score, vec, vers = yield self.predictor.predict(self.image,
                                                             async=True)
 
