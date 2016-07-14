@@ -24,6 +24,9 @@ import utils.neon
 
 _log = logging.getLogger(__name__)
 
+def GetAutoScaleGroup(name):
+    return utils.autoscale.AutoScaleGroup(name, False)
+
 class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         self.autoscale_mock = MagicMock()
@@ -57,12 +60,9 @@ class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
                 }
             }]
 
-        # The monitoring thread can mess up these tests
-        utils.autoscale.AutoScaleGroup('group1').stop_monitoring_group()
-        utils.autoscale.AutoScaleGroup('group2').stop_monitoring_group()
         super(TestAutoScaleGroup, self).setUp()
 
-    def tearDown(self):
+    def tearDown(self):            
         # Clear the singletons
         utils.autoscale.AutoScaleGroup._clear_singletons()
         utils.aws.InstanceMetadata._clear_singletons()
@@ -74,7 +74,7 @@ class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
 
 
     def test_get_ip(self):
-        group = utils.autoscale.AutoScaleGroup('group1')
+        group = GetAutoScaleGroup('group1')
         self.assertEquals(group.get_ip(), '10.0.1.1')
         self.autoscale_mock.get_all_groups.assert_called_with(names=['group1'])
         self.ec2_mock.get_only_instances.assert_called_with(
@@ -88,20 +88,20 @@ class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
         self.instance_info.lifecycle_state = 'Pending'
 
         with self.assertRaises(utils.autoscale.NoValidHostsError):
-            utils.autoscale.AutoScaleGroup('group1').get_ip()
+            GetAutoScaleGroup('group1').get_ip()
 
         for state in ['Terminating', 'Standby', 'Detached', 'Terminated']:
             self.instance_info.lifecycle_state = state
 
             with self.assertRaises(utils.autoscale.NoValidHostsError):
-                utils.autoscale.AutoScaleGroup('group1').get_ip(True)
+                GetAutoScaleGroup('group1').get_ip(True)
 
         self.instance_info.lifecycle_state = 'InService'
         with self.assertRaises(utils.autoscale.NoValidHostsError):
-            utils.autoscale.AutoScaleGroup('group1').get_ip(False)
+            GetAutoScaleGroup('group1').get_ip(False)
 
         self.assertEquals(
-            utils.autoscale.AutoScaleGroup('group1').get_ip(True),
+            GetAutoScaleGroup('group1').get_ip(True),
             '10.0.1.1')
         
 
@@ -129,7 +129,7 @@ class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
             }]
 
         self.assertEquals(
-            utils.autoscale.AutoScaleGroup('group1').get_ip(),
+            GetAutoScaleGroup('group1').get_ip(),
             '10.0.1.2')
         
         self.autoscale_mock.get_all_groups.assert_called_with(names=['group1'])
@@ -143,10 +143,10 @@ class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
                 'availability-zone' : 'us-east-1d'
                 }
             }]
-        self.assertEquals(utils.autoscale.AutoScaleGroup('group1').get_ip(),
+        self.assertEquals(GetAutoScaleGroup('group1').get_ip(),
                           '10.0.1.1')
 
-        ip_list = yield utils.autoscale.AutoScaleGroup('group1')._get_ip_list(
+        ip_list = yield GetAutoScaleGroup('group1')._get_ip_list(
             True)
         self.assertEquals(ip_list, [])
 
@@ -156,7 +156,7 @@ class TestAutoScaleGroup(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Could not refresh autoscale data'):
             with self.assertRaises(utils.autoscale.NoValidHostsError):
-                utils.autoscale.AutoScaleGroup('group1').get_ip()
+                GetAutoScaleGroup('group1').get_ip()
 
     def test_multiple_groups(self):
         self.assertEquals(

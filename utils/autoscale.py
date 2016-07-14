@@ -89,7 +89,7 @@ class AutoScaleGroup(object):
     '''Class that watches an autoscaling group.'''
     __metaclass__ = utils.obj.KeyedSingleton
 
-    def __init__(self, name):
+    def __init__(self, name, monitor=True):
         self.name = name # The autoscaling group name
         # List of dictionaries with instance info. will have
         # 'zone' and 'ip'
@@ -100,7 +100,8 @@ class AutoScaleGroup(object):
         self._executor = concurrent.futures.ThreadPoolExecutor(5)
 
         # Start monitoring this group
-        RefresherThread().add_group_to_monitor(name)
+        if monitor:
+            RefresherThread().add_group_to_monitor(name)
 
     def __del__(self):
         self.stop_monitoring_group()
