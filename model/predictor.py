@@ -42,7 +42,7 @@ statemon.define('unable_to_connect', int)  # could not connect to server in the 
 statemon.define('good_deepnet_connection', int)
 statemon.define('prediction_error', int)
 statemon.define('unknown_demographic', int)
-statemon.define('unknown_model')
+statemon.define('unknown_model', int)
 # MEAN_CHANNEL_VALS are the mean pixel value, per channel, of all of our
 # training images. This will remain constant: it's a mean over millions of
 # images so is unlikely to change significantly. We won't be recomputing it.
