@@ -152,6 +152,8 @@ def _create_tables(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
+    _log.info("Airflow start date is %s" % clicklogs.default_args['start_date'].strftime("%Y/%m/%d"))
+
     builder = stats.impala_table.ImpalaTableBuilder(cluster, event)
     builder.run()
 
