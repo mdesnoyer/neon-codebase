@@ -4478,7 +4478,7 @@ class TestLiftStatsHandler(TestControllersBase):
         self.assertNotIn('a', [i['thumbnail_id'] for i in lift])
         [self.assertIsNone(i['lift']) for i in lift
             if i['thumbnail_id'] in ['b', 'd']]
-        [self.assertEqual(i['lift'], 0.583) for i in lift
+        [self.assertEqual(i['lift'], 0.25) for i in lift
             if i['thumbnail_id'] == 'c']
 
 
