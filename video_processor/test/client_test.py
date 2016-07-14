@@ -1282,6 +1282,39 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(default_thumb.features)
 
     @tornado.testing.gen_test
+    def test_error_scoring_bad_images(self):
+        self.predict_mock.side_effect = [
+            (99, None, 'model1'), # Score the random frame
+            model.errors.PredictionError('oops'), # Fail on the bad thumb
+            (99, None, 'model1')] # Suceed on the default
+
+        self.vprocessor.bad_thumbnails = [
+            (neondata.ThumbnailMetadata(None,
+                                        internal_vid=self.video_id,
+                                        ttype=neondata.ThumbnailType.BAD_NEON,
+                                        model_version='model1',
+                                        frameno=8,
+                                        filtered=''),
+             imageutils.PILImageUtils.create_random_image(480, 640))]
+
+        # No exception should be raised because we dont' really care
+        # about the score on the random thumb.
+        yield self.vprocessor.finalize_response()
+
+
+        # Find the default thumb but it should have a score
+        video_data = neondata.VideoMetadata.get(self.video_id)
+        thumbs = neondata.ThumbnailMetadata.get_many(
+            video_data.thumbnail_ids)
+        default_thumb = [
+            x for x in thumbs if x.type == neondata.ThumbnailType.DEFAULT]
+        default_thumb = default_thumb[0]
+        self.assertIsNotNone(default_thumb.key)
+        self.assertEquals(default_thumb.model_score, 99)
+        self.assertEquals(default_thumb.model_version, 'model1')
+        self.assertIsNone(default_thumb.features)
+
+    @tornado.testing.gen_test
     def test_reprocess_no_joblist_run(self):
         # Add the results from the previous run to the database
         thumbs = [
