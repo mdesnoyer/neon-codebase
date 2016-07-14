@@ -511,7 +511,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*15)
 
-        vid_meta = neondata.VideoMetadata.get(vprocess.video_metadata.key)
+        vid_meta = neondata.VideoMetadata.get(vprocessor.video_metadata.key)
         self.assertEquals(vid_meta.duration, 15.0)
 
     @tornado.testing.gen_test
