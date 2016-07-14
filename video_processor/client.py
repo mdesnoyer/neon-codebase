@@ -804,10 +804,10 @@ class VideoProcessor(object):
                                                        async=True)
         if known_video:
             known_tids = reduce(
-                lambda x,y: x & y,
+                lambda x,y: x | y,
                 [set(x.thumbnail_ids) for x in known_video.job_results],
                 set())
-            known_tids &= set(known_video.thumbnail_ids)
+            known_tids |= set(known_video.thumbnail_ids)
 
             known_thumbs = yield neondata.ThumbnailMetadata.get_many(
                 known_tids, async=True)
@@ -911,7 +911,7 @@ class VideoProcessor(object):
                     neondata.ThumbnailType.NEON,
                     neondata.ThumbnailType.CENTERFRAME,
                     neondata.ThumbnailType.RANDOM]]
-                if len(prev_thumbs) > 0:
+                if len(prev_thumbs) > 0 and len(video_obj.job_results) == 0:
                     video_obj.job_results.append(
                         neondata.VideoJobThumbnailList(
                             thumbnail_ids = prev_thumbs,

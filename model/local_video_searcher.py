@@ -1587,7 +1587,7 @@ class LocalSearcher(object):
             x.frameno,
             x.model_version,
             x.aq_features)
-            for x in sorted(self.worst_results)]
+            for _, x in sorted(self.worst_results)]
 
         return best, worst
 

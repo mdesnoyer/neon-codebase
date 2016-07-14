@@ -1279,7 +1279,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(default_thumb.features)
 
     @tornado.testing.gen_test
-    def test_reprocess(self):
+    def test_reprocess_no_joblist_run(self):
         # Add the results from the previous run to the database
         thumbs = [
             neondata.ThumbnailMetadata(
@@ -1442,6 +1442,119 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
             self.assertEqual(
                 statemon.state.get('video_processor.client.default_thumb_error'),
                 0)
+
+    @tornado.testing.gen_test
+    def test_reprocess_with_previous_jobresult(self):
+        # Add the results from the previous run to the database
+        thumbs = [
+            neondata.ThumbnailMetadata(
+                '%s_thumb1' % self.video_id,
+                self.video_id,
+                model_score=3.0,
+                ttype=neondata.ThumbnailType.NEON,
+                model_version='model1',
+                frameno=167,
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb2' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.RANDOM,
+                model_version='model1',
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb3' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.DEFAULT,
+                rank=0)]
+        neondata.ThumbnailMetadata.save_all(thumbs)
+            
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = [x.key for x in thumbs],
+            non_job_thumb_ids=[thumbs[2].key],
+            job_results=[neondata.VideoJobThumbnailList(
+                thumbnail_ids=[thumbs[0].key, thumbs[1].key],
+                model_version='test_version')],
+            duration=97.0,
+            model_version='test_version')
+        video_meta.serving_url = 'my_serving_url.jpg'
+        video_meta.save()
+
+        # Write the request to the db
+        api_request = neondata.NeonApiRequest(
+            'job1', self.api_key, 'vid1',
+            'some fun video',
+            'http://video.mp4',
+            http_callback='http://callback.com',
+            default_thumbnail='http://default_thumb.jpg')
+        api_request.state = neondata.RequestState.PROCESSING
+        api_request.save()
+        self.vprocessor.job_params['gender'] = 'M'
+        self.vprocessor.reprocess = True
+        self.vprocessor.thumb_model_version='model1'
+
+        yield self.vprocessor.finalize_response()
+
+        video_data = neondata.VideoMetadata.get(self.video_id)
+
+        # Check the default thumbnails in the database. There should be 2 now
+        default_thumbs = neondata.ThumbnailMetadata.get_many(
+            video_data.non_job_thumb_ids)
+        self.assertTrue(all([x.type == neondata.ThumbnailType.DEFAULT for x
+                            in default_thumbs]))
+        default_thumbs = sorted(default_thumbs, key=lambda x: x.rank)
+        self.assertEquals(len(default_thumbs), 2)
+        self.assertEquals(default_thumbs[1].key, '%s_thumb3' % self.video_id)
+        self.assertEquals(default_thumbs[1].rank, 0)
+        self.assertEquals(default_thumbs[0].rank, -1)
+        self.assertRegexpMatches(default_thumbs[0].key, '%s_.+'%self.video_id)
+
+        # There should be two result sets now
+        self.assertEquals(len(video_data.job_results), 2)
+        orig_result = None
+        new_result = None
+        for result in video_data.job_results:
+            if result.gender is None:
+                orig_result = result
+            else:
+                new_result = result
+        self.assertEquals(new_result.gender, 'M')
+        self.assertEquals(new_result.model_version, 'test_version')
+        self.assertEquals(len(new_result.bad_thumbnail_ids), 2)
+        self.assertEquals(orig_result.model_version, 'test_version')
+        orig_thumbs = neondata.ThumbnailMetadata.get_many(
+            orig_result.thumbnail_ids)
+        new_thumbs = neondata.ThumbnailMetadata.get_many(
+            new_result.thumbnail_ids)
+                          
+        
+        # Check the random thumb. There should only be one in all the
+        # runs and it is shared because the model version is the same
+        # for both runs.
+        orig_rand = [x for x in orig_thumbs 
+                     if x.type == neondata.ThumbnailType.RANDOM][0]
+        new_rand = [x for x in new_thumbs 
+                     if x.type == neondata.ThumbnailType.RANDOM][0]
+        self.assertEquals(new_rand.key, '%s_thumb2' % self.video_id)
+        self.assertEquals(new_rand.key, orig_rand.key)
+        self.assertEquals(new_rand.rank, 0)
+
+        # Check the neon thumbs. Each run should have its unique entries
+        self.assertItemsEqual(orig_result.thumbnail_ids,
+                              [thumbs[0].key, thumbs[1].key])
+        n_thumbs = [x for x in new_thumbs if 
+                    x.type == neondata.ThumbnailType.NEON]
+        n_thumbs = sorted(n_thumbs, key= lambda x: x.rank)
+        self.assertEquals(len(n_thumbs), 2)
+        self.assertEquals(n_thumbs[0].frameno, 6)
+        self.assertEquals(n_thumbs[1].frameno, 69)
+        self.assertEquals(n_thumbs[0].model_version, 'model1')
+        self.assertEquals(n_thumbs[1].model_version, 'model1')
+        self.assertIsNotNone(n_thumbs[0].phash)
+        self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
+        self.assertEquals(n_thumbs[0].urls, [
+            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            re.sub('_', '/', n_thumbs[0].key)]) 
 
     @tornado.testing.gen_test
     def test_default_thumb_already_saved(self):
@@ -2002,8 +2115,9 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                           neondata.CallbackState.SUCESS)
 
         # Check the state variables
-        self.assertEquals(statemon.state.get('video_processor.client.processing_error'),
-                          1)
+        self.assertEquals(
+            statemon.state.get('video_processor.client.processing_error'),
+            1)
         self.assertEquals(
             statemon.state.get('video_processor.client.video_download_error'),
             1)
