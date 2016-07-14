@@ -5137,7 +5137,8 @@ class ThumbnailMetadata(StoredObject):
         elif ot_score > 0:
             # it's an older model
             return round(float(score) / float(ot_score) - 1, 3)
-        else return None
+        else:
+            return None
 
 
 class ThumbnailStatus(DefaultedStoredObject):
