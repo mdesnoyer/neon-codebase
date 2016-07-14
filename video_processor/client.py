@@ -233,6 +233,25 @@ class VideoProcessor(object):
         return urlparse.urlunparse(parse)
 
     @tornado.gen.coroutine
+    def update_video_metadata_video_info(self):
+        '''Updates information about the video on the video metadata object
+        in the database.
+        '''
+        def _update_video_info(x):
+            x.duration = self.video_metadata.duration
+            x.publish_date = self.video_metadata.publish_date
+            x.frame_size = x.frame_size or self.video_metadata.frame_size
+
+        try:
+            yield neondata.VideoMetadata.modify(self.video_metadata.key,
+                                                _update_video_info,
+                                                async=True)
+        except Exception as e:
+            _log.error("Error updating video data to database: %s" % e)
+            statemon.state.increment('save_vmdata_error')
+            raise DBError("Error updating video data to database")
+
+    @tornado.gen.coroutine
     def start(self):
         '''
         Actual work done here
@@ -370,6 +389,7 @@ class VideoProcessor(object):
                     key = yield self.executor.submit(
                         bucket.get_key, key_name)
                     self.video_metadata.duration = video_duration
+                    yield self.update_video_metadata_video_info()
                     yield self._set_job_timeout(self.video_metadata.duration,
                                                 key.size)
                     yield self.executor.submit(
@@ -444,6 +464,7 @@ class VideoProcessor(object):
                 if video_info.get('upload_date', None) is not None:
                     self.video_metadata.publish_date = \
                       dateutil.parser.parse(video_info['upload_date']).isoformat()
+                yield self.update_video_metadata_video_info()
 
                 # Update the timeout
                 yield self._set_job_timeout(
@@ -509,6 +530,9 @@ class VideoProcessor(object):
             _log.error(msg)
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
+
+        except DBError:
+            raise
 
         except IOError as e:
             msg = "Error saving video to disk: %s" % e
@@ -601,6 +625,8 @@ class VideoProcessor(object):
             statemon.state.increment('video_duration_30m')
         if duration > 3600:
             statemon.state.increment('video_duration_60m')
+
+        yield self.update_video_metadata_video_info()
 
         # Fetch the ProcessingStrategy
         account_id = self.job_params['api_key']

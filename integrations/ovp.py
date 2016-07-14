@@ -515,7 +515,7 @@ class OVPIntegration(object):
                     def _add_thumb_key(x):
                         x.thumbnail_ids.append(new_thumb.key)
                         x.non_job_thumb_ids.append(new_thumb.key)
-                    updated_video = neondata.VideoMetadata.modify(
+                    updated_video = yield neondata.VideoMetadata.modify(
                         video_meta.key,
                         _add_thumb_key,
                         async=True)

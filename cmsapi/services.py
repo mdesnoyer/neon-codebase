@@ -1353,7 +1353,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         Inputs:
         @i_id: Integration id
-        @i_vid: External video id
+        @vid: External video id
         @thumb_urls: List of image urls that will be ingested
         '''
         url = '/api/v2/%s/thumbnails' % (self.api_key)
