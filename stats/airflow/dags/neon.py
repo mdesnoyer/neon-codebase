@@ -484,7 +484,6 @@ def _load_impala_table(**kwargs):
         builder = stats.impala_table.ImpalaTableLoader(
             cluster=cluster,
             event=event,
-            #execution_date=executation_date,
             execution_date=execution_date,
             hour_interval=dag.schedule_interval.total_seconds()/3600,
             input_path=os.path.join('s3://', output_bucket, cleaned_prefix))
@@ -676,7 +675,8 @@ for event in __EVENTS:
         task_id='create_table_%s' % event,
         dag=clicklogs,
         python_callable=_create_tables,
-        op_kwargs=dict(event=event))
+        op_kwargs=dict(event=event),
+        retry_delay=timedelta(minutes=5))
 
     # Load the data into the impala table
     op = PythonOperator(
