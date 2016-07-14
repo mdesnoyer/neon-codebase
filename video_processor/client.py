@@ -648,6 +648,7 @@ class VideoProcessor(object):
         for result in bottom_results:
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.BAD_NEON,
                 model_score=result.score,
                 model_version=result.model_version,
@@ -804,8 +805,9 @@ class VideoProcessor(object):
         if known_video:
             known_tids = reduce(
                 lambda x,y: x & y,
-                [set(x.thumbnail_ids) for x in known_video.job_results])
-            known_tids &= known_video.thumbnail_ids
+                [set(x.thumbnail_ids) for x in known_video.job_results],
+                set())
+            known_tids &= set(known_video.thumbnail_ids)
 
             known_thumbs = yield neondata.ThumbnailMetadata.get_many(
                 known_tids, async=True)
@@ -844,11 +846,15 @@ class VideoProcessor(object):
                 video_result.thumbnail_ids.append(thumb_meta.key)
 
         for thumb_meta, image in self.bad_thumbnails:
-            yield bad_thumbnails.add_image_data(image, self.video_metadata,
-                                                cdn_metadata,
-                                                async=True)
-            yield thumb_meta.score_image(self.model.predictor,
-                                         image=PILImageUtils.to_cv(image))
+            yield thumb_meta.add_image_data(image, self.video_metadata,
+                                            cdn_metadata,
+                                            async=True)
+            try:
+                yield thumb_meta.score_image(self.model.predictor,
+                                             image=PILImageUtils.to_cv(image))
+            except model.errors.PredictionError as e:
+                _log.warn('Error scoring image: %s' % e)
+                # It's ok if it's not scored, so continue
             video_result.bad_thumbnail_ids.append(thumb_meta.key)
 
         # Save the thumbnail and video data into the database
@@ -896,6 +902,23 @@ class VideoProcessor(object):
             tidset = set(keep_thumbs +
                          video_result.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
+
+            # If there isn't a job result from before, but something
+            # is there, then create the job result object from the
+            # previous run
+            if self.reprocess:
+                prev_thumbs = [x.key for x in thumbs if x.type in [
+                    neondata.ThumbnailType.NEON,
+                    neondata.ThumbnailType.CENTERFRAME,
+                    neondata.ThumbnailType.RANDOM]]
+                if len(prev_thumbs) > 0:
+                    video_obj.job_results.append(
+                        neondata.VideoJobThumbnailList(
+                            thumbnail_ids = prev_thumbs,
+                            bad_thumbnail_ids = video_obj.bad_thumbnail_ids,
+                            model_version=video_obj.model_version))
+                    video_obj.non_job_thumb_ids = keep_thumbs
+            
             # Update the job results
             found_result = False
             for result in video_obj.job_results:
@@ -950,7 +973,8 @@ class VideoProcessor(object):
                 yield thumb.score_image(self.model.predictor,
                                         save_object=True)
 
-        except neondata.ThumbDownloadError, e:
+        except (neondata.ThumbDownloadError,
+                model.errors.PredictionError) as e:
             # If we extracted the default thumb from the url, then
             # don't error out if we cannot get thumb
             if is_user_default_thumb:
@@ -959,6 +983,7 @@ class VideoProcessor(object):
                 statemon.state.increment('default_thumb_error')
                 err_msg = "Failed to download default thumbnail: %s" % e
                 raise DefaultThumbError(err_msg)
+            
 
         # Enable the video to be served if we have any thumbnails available
         def _set_serving_enabled(video_obj):

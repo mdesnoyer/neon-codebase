@@ -561,7 +561,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                     'currently allowed"}', 400)
                                 return
                             yield self.upload_video_custom_thumbnails(
-                                i_id, i_vid,
+                                i_id, vid,
                                 thumb_urls)
                             return
                     except IOError, e:
@@ -1347,13 +1347,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         self.send_json_response(data, 200)
 
     @tornado.gen.coroutine
-    def upload_video_custom_thumbnails(self, i_id, i_vid, thumb_urls):
+    def upload_video_custom_thumbnails(self, i_id, vid, thumb_urls):
         '''
         Add custom thumbnails to the video
 
         Inputs:
         @i_id: Integration id
-        @i_vid: Internal video id
+        @i_vid: External video id
         @thumb_urls: List of image urls that will be ingested
         '''
         url = '/api/v2/%s/thumbnails' % (self.api_key)
@@ -1366,18 +1366,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 headers={'Content-type': 'application/json'},
                 body=json.dumps({
                     'url': turl,
-                    'video_id': p_vid})
-                    request_timeout=30.0)
+                    'video_id': vid}),
+                request_timeout=30.0)
             response = yield v2client.send_request(request)
 
             if response.code >= 400:
-                _log.error("Error submitting custom thumb %s": % response.body)
+                _log.error("Error submitting custom thumb: %s" % response.body)
                 statemon.state.increment('custom_thumbnail_not_added')
                 self.send_json_response(response.body, response.code)
                 return
             statemon.state.increment('custom_thumb_upload')
                 
-        self.send_json_response(data, 202)
+        self.send_json_response(response.body, 202)
 
     @tornado.gen.coroutine
     def update_video_abtest_state(self, i_vid, state):
