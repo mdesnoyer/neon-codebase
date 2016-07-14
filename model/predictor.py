@@ -42,6 +42,9 @@ statemon.define('good_deepnet_connection', int)
 statemon.define('prediction_error', int)
 statemon.define('unknown_demographic', int)
 
+# MEAN_CHANNEL_VALS are the mean pixel value, per channel, of all of our
+# training images. This will remain constant: it's a mean over millions of
+# images so is unlikely to change significantly. We won't be recomputing it.
 MEAN_CHANNEL_VALS = [[[92.366, 85.133, 81.674]]]
 MEAN_CHANNEL_VALS = np.array(MEAN_CHANNEL_VALS).round().astype(np.uint8)
 
@@ -167,32 +170,42 @@ class DemographicSignatures(object):
                        (bias_fn, e))
             raise KeyError(model_name)
 
-    def get_signature(self, gender=None, age=None):
-        '''Returns a function that accepts the output from Aquila and returns
-        the scores for the requested demographic.
-
-        The ouput from aquila must be an N x F(eatures) numpy array, N >= 1
+    def compute_score_for_demo(self, X, gender=None, age=None):
+        '''Returns the score for gender `gender` and age `age` derived from
+        feature vector X (a numpy array)
         '''
+        X = X.reshape(1, -1)
         if gender is None:
             gender = 'None'
         if age is None:
             age = 'None'
         try:
-            W = self.weights[gender][age]
+            W = self.weights[gender, age]
         except KeyError as e:
             _log.error('Invalid key(s) for weights file:', gender, age)
             raise KeyError(e)
         try:
-            b = self.bias[gender][age]
-            b = b.reshape(1, -1)
+            b = self.bias[gender, age]
         except KeyEror as e:
             _log.error('Invalid key(s) for bias file:', gender, age)
             raise KeyError(e)
-        def apply_signature(X):
-            assert X.ndim <= 2, 'X must be 2- or 1-dimensional.'
-            if X.ndim == 1:
-                X = X[None, :]
-            return X.dot(W) + b
+        try:
+            X_prime = X.dot(W) + b
+        except ValueError as e:
+            _log.error('Improper feature vector size:', e.message)
+            raise ValueError(e)
+        return X_prime
+
+    def get_scores_for_all_demos(self, X):
+        '''Returns the scores for all demographics given feature vector
+        X as a pandas multiindex'''
+        X = X.reshape(1, -1)
+        try:
+            X_prime = X.dot(self.weights) + self.bias
+        except ValueError as e:
+            _log.error('Improper feature vector size:', e.message)
+            raise ValueError(e)
+        return X_prime
 
 
 class Predictor(object):
@@ -500,9 +513,8 @@ class DeepnetPredictor(Predictor):
         if response.model_version is not None:
             try:
                 signatures = DemographicSignatures(response.model_version)
-                target_signature = signatures.get_signature(gender=self.gender,
-                                                            age=self.age)
-                score = target_signature(features)
+                score = signatures.compute_score_for_demo(
+                    features, gender=self.gender, age=self.age)
             except KeyError as e:
                 # Could not get a demographic to match, so keep score as None
                 _log.warn_n('Unknown demographic. model: %s age: %s gender %s'
