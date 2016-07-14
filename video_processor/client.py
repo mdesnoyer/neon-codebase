@@ -220,18 +220,6 @@ class VideoProcessor(object):
         # Clean up the executor
         self.executor.shutdown(False)
 
-    @staticmethod
-    def percent_encode_url_path(url):
-        '''
-        Takes a url and re-encodes (i.e., decodes encodes) its path with
-        percent-sign encoding. TODO consider cases: unicode, double-decode
-        '''
-
-        parse = urlparse.urlparse(url)
-        parse = list(parse)
-        parse[2] = urllib.quote(urllib.unquote(parse[2]))
-        return urlparse.urlunparse(parse)
-
     @tornado.gen.coroutine
     def update_video_metadata_video_info(self):
         '''Updates information about the video on the video metadata object
