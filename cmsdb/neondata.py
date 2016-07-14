@@ -5127,7 +5127,7 @@ class ThumbnailMetadata(StoredObject):
             thumbnail""" 
         ot_score = other_thumb.get_score() 
         score = self.get_score() 
-        if ot_score is None or score is None:
+        if ot_score is None or score is None or not self.model_version:
             return None
         # determine the model
         if re.match('20[0-9]{6}-[a-zA-Z0-9]+-[a-zA-Z0-9]+', 
