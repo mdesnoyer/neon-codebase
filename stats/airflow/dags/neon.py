@@ -178,7 +178,7 @@ def _do_s3_prefix_fixup(prefix):
     return ret
 
 
-def _get_s3_cleaned_prefix(dag, execution_date, prefix=''):
+def _get_s3_cleaned_prefix(execution_date, prefix=''):
     """
     Generate an S3 key prefix, specific to the DAG,for the
     cleaned/merged click event files.
@@ -190,8 +190,7 @@ def _get_s3_cleaned_prefix(dag, execution_date, prefix=''):
     :return type: str
     """
     return _do_s3_prefix_fixup(
-        os.path.join(prefix, dag.dag_id, 'cleaned',
-                     execution_date.strftime("%Y/%m/%d"), ''))
+        os.path.join(prefix, execution_date.strftime("%Y/%m/%d"), ''))
 
 
 def _get_s3_input_files(dag, execution_date, task, input_path):
@@ -208,55 +207,6 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
 
     s3 = S3Hook(s3_conn_id='s3')
 
-    # # Get the timestamps for our current task
-    # dt_start = execution_date
-    # ts_start = int((dateutils.timezone(dt_start, timezone='utc') - 
-    #                 EPOCH).total_seconds())
-    # ts_end = int(((dateutils.timezone(dt_start, timezone='utc') + 
-    #                clicklogs.schedule_interval) - EPOCH).total_seconds())
-
-    # input_files = []
-    # for tai in _get_s3_tais(input_path):
-    #     tai_prefix = os.path.join(prefix, tai, dt_start.strftime('%Y/%m/%d'),
-    #                               '')
-    #     _log.debug("looking for keys in s3://{bucket}/{prefix}".format(
-    #         bucket=bucket_name, prefix=tai_prefix))
-    #     try:
-    #         for key in s3.list_keys(bucket_name=bucket_name,
-    #                                 prefix=tai_prefix, delimiter='/'):
-    #             # (merged.)clicklog.<TIMESTAMP_MS>.avro
-    #             if key[-1] == '/':
-    #                 # just the "directory" prefix, not an actual object (file)
-    #                 continue  
-    #             tokens = os.path.basename(key).split('.')
-    #             if tokens[-1] == 'avro':
-    #                 try:
-    #                     # timestamp(ms) is just before the .avro extension
-    #                     ts = int(tokens[-2])  
-    #                 except ValueError:
-    #                     _log.warning(("{task}: file {key} lacks a timestamp "
-    #                                  "in its name").format(task=task, key=key))
-    #                     continue
-    #                 _log.debug(("{task}: considering avro file {key} "
-    #                             "({dt})").format(
-    #                                 task=task, key=key,
-    #                                 dt=_ts_to_datetime(ts / 10 ** 3)))
-    #                 if ts_start <= (ts / 10 ** 3) < ts_end:
-    #                     # the timestamp, at second-resolution, is
-    #                     # between our ds
-    #                     input_files.append(key)
-    #                     _log.info(("{task}: file {key} is between {start} and "
-    #                               "{end}").format(task=task, key=key,
-    #                                               start=ts_start,
-    #                                               end=ts_end))
-    #     except TypeError as e:
-    #         _log.warning(("tai {tai} does not have any objects in S3 prefix "
-    #                      "{prefix}").format(tai=tai, prefix=tai_prefix))
-
-    # return input_files
-
-    #Get the current date
-    #processing_date = datetime.utcnow().strftime("%Y/%m/%d")
     processing_date = execution_date.strftime('%Y/%m/%d')
     _log.info('processing date is %s' % processing_date)
 
@@ -305,10 +255,6 @@ def _get_s3_tais(input_path):
     bucket_name, prefix = _get_s3_tuple(input_path)
 
     s3 = S3Hook(s3_conn_id='s3')
-
-    _log.info('bucket_name is %s' % bucket_name)
-    _log.info('prefix is %s' % prefix)
-    _log.info('input path is %s' % input_path)
 
     # get the TAIs (Tracker Account Id)
     tais = []
@@ -384,10 +330,8 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     
     """
     output_bucket, output_prefix = _get_s3_tuple(output_path)
-    cleaned_prefix = _get_s3_cleaned_prefix(dag=dag,
-                                            execution_date=execution_date,
+    cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                             prefix=output_prefix)
-
     s3 = S3Hook(s3_conn_id='s3')
 
     _log.info('deleting previously cleaned files from prefix {prefix}'.format(
@@ -429,50 +373,6 @@ def _quiet_period(**kwargs):
         time.sleep((deadline - now).total_seconds())
 
 
-# def _stage_files(**kwargs):
-#     """Copy input path files to staging area for the execution date
-
-#     :return:
-#     """
-#     dag = kwargs['dag']
-#     execution_date = kwargs['execution_date']
-#     task = kwargs['task_instance_key_str']
-
-#     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
-#     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
-
-#     s3 = S3Hook(s3_conn_id='s3')
-
-#     _log.info("{task}: staging files for map/reduce".format(task=task))
-#     input_files = _get_s3_input_files(dag=dag,
-#                                       execution_date=execution_date,
-#                                       task=task,
-#                                       input_path=kwargs['input_path'])
-#     output_prefix = _get_s3_staging_prefix(dag=dag,
-#                                            execution_date=execution_date,
-#                                            prefix=staging_prefix)
-
-#     # Copy files to staging location with Reduced Redundancy enabled
-#     if input_files:
-#         for key in input_files:
-#             # namespace prefix with TAI
-#             tai = key.lstrip(input_prefix).split('/')[0]
-#             dst_key = os.path.join(output_prefix, "{tai}.{name}".format(
-#                 tai=tai, name=os.path.basename(key)))
-
-#             _log.info(("copying from s3://{src_bucket}/{src} to "
-#                        "s3://{dst_bucket}/{dst}").format(
-#                            src_bucket=input_bucket,
-#                            src=key,
-#                            dst_bucket=staging_bucket,
-#                            dst=dst_key))
-#             s3.get_key(key, bucket_name=input_bucket).copy(
-#                 dst_bucket=staging_bucket,
-#                 dst_key=dst_key,
-#                 reduced_redundancy=True)
-#     else:
-#         _log.warning("{task}: there were no files to stage".format(task=task))
-
 def _stage_files(**kwargs):
     """Copy input path files to staging area for the execution date
     """
@@ -502,7 +402,7 @@ def _stage_files(**kwargs):
             bucket = s3.get_bucket(input_bucket)
 
             _log.info(("Copying from bucket {src_bucket} to {dest_bucket}").format(src_bucket=keys_to_copy, 
-                                                                                dest_bucket=os.path.join(output_prefix, keys_to_copy_split[-1])))
+                        dest_bucket=os.path.join(output_prefix, keys_to_copy_split[-1])))
 
             bucket.copy_key(os.path.join(output_prefix, keys_to_copy_split[-1]), 
                             str(bucket.name), 
@@ -521,16 +421,13 @@ def _run_mr_cleaning_job(**kwargs):
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
 
-    _log.info("output path received is %s" % kwargs['output_path'])
-
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
     staging_prefix = _get_s3_staging_prefix(dag=dag,
                                             execution_date=execution_date,
                                             prefix=staging_prefix)
-    cleaned_prefix = _get_s3_cleaned_prefix(dag=dag,
-                                            execution_date=execution_date,
+    cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                             prefix=output_prefix)
 
     cleaning_job_input_path = os.path.join("s3://", staging_bucket,
@@ -575,8 +472,7 @@ def _load_impala_table(**kwargs):
     event = kwargs['event']
 
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
-    cleaned_prefix = _get_s3_cleaned_prefix(dag=dag,
-                                            execution_date=execution_date,
+    cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                             prefix=output_prefix)
 
     _log.info("{task}: Loading data!".format(task=task))
@@ -592,12 +488,9 @@ def _load_impala_table(**kwargs):
             execution_date=execution_date,
             hour_interval=dag.schedule_interval.total_seconds()/3600,
             input_path=os.path.join('s3://', output_bucket, cleaned_prefix))
-
-        _log.info("Before run")
     
         builder.run()
 
-        _log.info("After run")
     except:
         statemon.state.increment('impala_table_load_failure')
     return "Impala tables loaded"
@@ -617,9 +510,6 @@ def _delete_staging_files(**kwargs):
 
     staging_full_prefix = _get_s3_staging_prefix(dag, execution_date,
                                                  staging_prefix)
-    
-    _log.info('Deleting stage file from bucket %s' % staging_bucket)
-    _log.info('Deleting stage file from prefix %s' % staging_full_prefix)
 
     return _delete_s3_prefix(staging_bucket, staging_full_prefix)
 
@@ -686,12 +576,12 @@ def _clear_all_tasks(operators=None, **kwargs):
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
-    'start_date': datetime(2014, 5, 26),
+    'start_date': datetime(2016, 7, 13),
     'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
     'email_on_retry': True,
     'retries': 3,
-    'retry_delay': timedelta(minutes=1),
+    'retry_delay': timedelta(minutes=5),
 
     # 'execution_timeout': timedelta(minutes=2)
     # 'queue': 'bash_queue',
@@ -787,7 +677,6 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_create_tables,
         op_kwargs=dict(event=event))
-    create_op.set_upstream(mr_cleaning_job)
 
     # Load the data into the impala table
     op = PythonOperator(

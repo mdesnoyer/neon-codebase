@@ -241,7 +241,7 @@ class Cluster():
                     _log.info("creating the cluster as the request came from cluster manager")
                     self._create()
                 else:
-                    _log.error("cluster not created as the request for create was not from cluster manager")
+                    _log.error("cluster wont be created as the request for create was not from cluster manager")
             else:
                 _log.info("Found cluster %s of type %s with id %s" %
                           (self.cluster_name, self.cluster_type,
@@ -743,24 +743,6 @@ class Cluster():
             return default
         raise KeyError('No tag %s' % tag_name)
 
-    # def _find_master_info(self):
-    #     '''Find the ip address and id of the master node.'''
-    #     conn = EmrConnection(self.cluster_region)
-        
-    #     self.master_ip = None
-    #     self.master_id = \
-    #       conn.describe_cluster(self.cluster_id).masterinstanceid
-    #     for instance in emr_iterator(conn, 'instances', self.cluster_id):
-    #         if (instance.status.state == 'RUNNING' and 
-    #             instance.ec2instanceid == self.master_id):
-    #             if options.use_public_ip and instance.publicipaddress:
-    #                 self.master_ip = instance.publicipaddress
-    #             else:
-    #                 self.master_ip = instance.privateipaddress
-
-    #     if self.master_ip is None:
-    #         raise MasterMissingError("Could not find the master ip")
-    #     _log.info("Found master ip address %s" % self.master_ip)
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
         conn = EmrConnection(self.cluster_region)
