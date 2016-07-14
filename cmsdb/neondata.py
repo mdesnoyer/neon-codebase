@@ -5022,6 +5022,7 @@ class ThumbnailMetadata(StoredObject):
         image - OpenCV image data. If not provided, image will be downloaded
         save_object - If true, the score is saved to the database
         '''
+        # TODO (Nick): Get the correct score with the demographic information
         if (self.model_score is not None or self.features is not None):
             # No need to compute the score, it's there
             return

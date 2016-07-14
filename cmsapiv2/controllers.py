@@ -2053,9 +2053,11 @@ class ThumbnailStatsHandler(APIV2Handler):
         raise tornado.gen.Return(retval)
 
 
-'''*********************************************************************
+'''
+*********************************************************************
 LiftStatsHandler
-*********************************************************************'''
+*********************************************************************
+'''
 class LiftStatsHandler(APIV2Handler):
 
     @tornado.gen.coroutine
@@ -2083,6 +2085,8 @@ class LiftStatsHandler(APIV2Handler):
         default_neon_score = base_thumb.get_neon_score()
         def _get_estimated_lift(thumb):
             # The ratio of a thumbnail's Neon score to the default's.
+            # TODO (Nick): This has to operate on the RAW scores, as 
+            # np.exp(raw_score) / np.exp(raw_default_score)
             score = thumb.get_neon_score()
             if default_neon_score is None or score is None:
                 return None

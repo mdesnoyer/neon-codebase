@@ -4,6 +4,7 @@ def lookup(model, score):
     Gives the max integer for which table score is <= input score.
     E.g., Input:0.10, for model "aqv1.1" output: 9"""
 
+    # TODO (Nick): Get the correct score with the demographic information
     score_float = float(score)
     if not model:
         sequence = previous_model
