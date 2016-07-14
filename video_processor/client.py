@@ -186,8 +186,10 @@ class VideoProcessor(object):
                 self.job_params['job_id']
 
         self.n_thumbs = int(self.job_params.get('topn', None) or
-                            self.job_params.get('api_param', None) or 5)
+                            self.job_params.get('api_param', None) or 6)
         self.n_thumbs = max(self.n_thumbs, 1)
+        self.m_thumbs = int(self.job_params.get('botm', None) or 6)
+        self.m_thumbs = max(self.m_thumbs, 1)
 
         # The default thumb url extracted from the video url
         self.extracted_default_thumbnail = None
@@ -209,6 +211,7 @@ class VideoProcessor(object):
         self.model = model
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
+        self.bad_thumbnails = []
 
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
@@ -241,13 +244,15 @@ class VideoProcessor(object):
                 statemon.state.decrement('workers_downloading')
 
             #Process the video
-            n_thumbs = max(self.n_thumbs, 5)
+            n_thumbs = max(self.n_thumbs, 6)
+            m_thumbs = max(self.m_thumbs, 6)
 
             with self.cv_semaphore:
                 statemon.state.increment('workers_cv_processing')
                 try:
                     yield self.process_video(self.tempfile.name,
-                                             n_thumbs=n_thumbs)
+                                             n_thumbs=n_thumbs,
+                                             m_thumbs=m_thumbs)
                 finally:
                     statemon.state.decrement('workers_cv_processing')
 
@@ -511,7 +516,7 @@ class VideoProcessor(object):
             raise VideoDownloadError(msg)
 
     @tornado.gen.coroutine
-    def process_video(self, video_file, n_thumbs=1):
+    def process_video(self, video_file, n_thumbs=1, m_thumbs=0):
         ''' process all the frames from the partial video downloaded '''
         # The video might have finished by somebody else so double
         # check that we still want to process it.
@@ -609,20 +614,22 @@ class VideoProcessor(object):
         self.model.update_processing_strategy(processing_strategy)
 
         try:
-            results = \
+            top_results, bottom_results = \
               self.model.choose_thumbnails(
                   mov,
                   n=n_thumbs,
+                  m=m_thumbs,
                   video_name=self.video_url)
-            results = sorted(results, key=lambda x:x.score, reverse=True)
+            top_results = sorted(top_results, key=lambda x: x.score, reverse=True)
+            bottom_results = sorted(bottom_results, key=lambda x: x.score)
         except model.errors.VideoReadError:
             msg = "Error using OpenCV to read video. %s" % self.video_url
             _log.error(msg)
             statemon.state.increment('video_read_error')
             raise BadVideoError(msg)
-        
+
         rank=0
-        for result in results:
+        for result in top_results:
             meta = neondata.ThumbnailMetadata(
                 None,
                 ttype=neondata.ThumbnailType.NEON,
@@ -633,7 +640,18 @@ class VideoProcessor(object):
                 rank=rank,
                 filtered=result.filtered_reason)
             self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
-            rank += 1 
+            rank += 1
+
+        for result in bottom_results:
+            meta = neondata.ThumbnailMetadata(
+                None,
+                ttype=neondata.ThumbnailType.BAD_NEON,
+                model_score=result.score,
+                model_version=result.model_version,
+                features=result.features,
+                frameno=result.frameno,
+                filtered=result.filtered_reason)
+            self.bad_thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
 
         # Get the baseline frames of the video
         yield self._get_center_frame(video_file)
@@ -798,18 +816,27 @@ class VideoProcessor(object):
             statemon.state.increment('no_thumbs')
             _log.warn("No thumbnails extracted for video %s url %s"\
                     % (self.video_metadata.key, self.video_metadata.url))
-        
+
         for thumb_meta, image in self.thumbnails:
             yield self.video_metadata.add_thumbnail(
-                thumb_meta, image,
+                thumb_meta,
+                image,
                 cdn_metadata=cdn_metadata,
                 save_objects=False,
                 async=True)
-            
+
+        for thumb_meta, image in self.bad_thumbnails:
+            yield self.video_metadata.add_bad_thumbnail(
+                thumb_meta,
+                image,
+                cdn_metadata=cdn_metadata,
+                save_objects=False,
+                async=True)
+
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
-            for new_thumb, garb in self.thumbnails:
+            for new_thumb, _ in self.thumbnails + self.bad_thumbnails:
                 old_thumb = t_objs[new_thumb.key]
                 # There was already an entry for this thumb, so update
                 urlset = set(new_thumb.urls + old_thumb.urls)
@@ -827,11 +854,11 @@ class VideoProcessor(object):
                 old_thumb.features = new_thumb.features
         try:
             new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
-                [x[0].key for x in self.thumbnails],
+                [x[0].key for x in self.thumbnails + self.bad_thumbnails],
                 _merge_thumbnails,
                 create_missing=True,\
                 async=True)
-            if len(self.thumbnails) > 0 and len(new_thumb_dict) == 0:
+            if len(self.thumbnails) + len(self.bad_thumbnails) > 0 and len(new_thumb_dict) == 0:
                 raise DBError("Couldn't change some thumbs")
         except Exception, e:
             _log.error("Error writing thumbnail data to database: %s" % e)
@@ -847,9 +874,9 @@ class VideoProcessor(object):
                 neondata.ThumbnailType.NEON,
                 neondata.ThumbnailType.CENTERFRAME,
                 neondata.ThumbnailType.RANDOM]]
-            tidset = set(keep_thumbs +
-                         self.video_metadata.thumbnail_ids)
+            tidset = set(keep_thumbs + self.video_metadata.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
+            video_obj.bad_thumbnail_ids = [t[0].key for t in self.bad_thumbnails]
             video_obj.url = self.video_metadata.url
             video_obj.duration = self.video_metadata.duration
             video_obj.video_valence = self.video_metadata.video_valence

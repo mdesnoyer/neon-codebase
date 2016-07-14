@@ -886,12 +886,15 @@ class MandrillEmailSender(object):
  
         response = yield utils.http.send_request(request, async=True)
 
-        resp_body = json.loads(response.body)  
-        if response.code != ResponseCode.HTTP_OK or \
-           resp_body[0].get('reject_reason') is not None:
-            statemon.state.increment('mandrill_email_not_sent')
-            raise BadRequestError(
-                'Unable to send email, response = %s' % resp_body) 
+        resp_body = json.loads(response.body) 
+        try:  
+            if response.code != ResponseCode.HTTP_OK or \
+               resp_body[0].get('reject_reason') is not None:
+                statemon.state.increment('mandrill_email_not_sent')
+                raise BadRequestError(
+                    'Unable to send email, response = %s' % resp_body) 
+        except KeyError: 
+            pass 
 
         raise tornado.gen.Return(True)  
 

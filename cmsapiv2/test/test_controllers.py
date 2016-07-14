@@ -26,6 +26,7 @@ import unittest
 import utils.neon
 import utils.http
 import urllib
+import urlparse
 import test_utils.neontest
 from test_utils import sqsmock
 import uuid
@@ -2708,6 +2709,7 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals({
+            'estimated_time_remaining': None, 
             'job_id': 'job1',
             'testing_enabled' : False,
             'url' : 'http://someurl.com',
@@ -2717,6 +2719,34 @@ class TestVideoHandler(TestControllersBase):
             'title' : 'Title'
             },
             rjson['videos'][0])
+
+    @tornado.testing.gen_test
+    def test_get_single_video_processing(self):
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key, 'vid1'),
+            request_id='job1',
+            i_id='int2',
+            testing_enabled=False,
+            duration=31.5,
+            custom_data={'my_data' : 'happygo'},
+            tids=['vid1_t1', 'vid1_t2'],
+            video_url='http://someurl.com')
+        vm.save()
+        request = neondata.NeonApiRequest('job1', self.account_id_api_key,
+                                          title='Title',
+                                          publish_date='2015-06-10')
+        request.state = neondata.RequestState.PROCESSING
+        request.save()
+        url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        vid1 = rjson['videos'][0] 
+ 
+        self.assertEquals(vid1['video_id'], 'vid1')
+        self.assertTrue(vid1['estimated_time_remaining'] > 30.0)  
 
     @tornado.testing.gen_test
     def test_get_all_fields(self):
@@ -3010,6 +3040,35 @@ class TestVideoHandler(TestControllersBase):
             self.account_id_api_key,
             async=True)
         self.assertEquals(request.video_title, 'vidkevinnew')
+
+    @tornado.testing.gen_test
+    def test_update_video_cb_email(self):
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=vid1'\
+              '&title=kevinsvid&url=some_url' % (
+                  self.account_id_api_key,
+                  self.test_i_id)
+
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            method='POST',
+            allow_nonstandard_methods=True)
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id']
+        url = '/api/v2/%s/videos?video_id=vid1&callback_email=a@a.com' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            method='PUT',
+            allow_nonstandard_methods=True)
+
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        request = yield neondata.NeonApiRequest.get(
+            job_id,
+            self.account_id_api_key,
+            async=True)
+        self.assertEquals(request.callback_email, 'a@a.com')
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_active(self):
@@ -7012,11 +7071,10 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
                 200, 
-                buffer=StringIO('{"code": "Hello There you fool"}')))
+                buffer=StringIO('{"code": "Hello There you fool"}'))
         limit = neondata.AccountLimits(self.account_id)
         yield limit.save(async=True)
 
@@ -7036,11 +7094,10 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
                 200, 
-                buffer=StringIO('{"code": "Hello There you fool"}')))
+                buffer=StringIO('{"code": "Hello There you fool"}'))
         limit = neondata.AccountLimits(
             self.account_id, 
             max_email_posts=0, 
@@ -7058,11 +7115,10 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
                 200, 
-                buffer=StringIO('{"code": "Hello There you fool"}')))
+                buffer=StringIO('{"code": "Hello There you fool"}'))
         limit = neondata.AccountLimits(
             self.account_id, 
             email_posts=2, 
@@ -7084,10 +7140,9 @@ class TestEmailHandler(TestControllersBase):
         body = { 
             'template_slug' : 'reset-password'
         }
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
                 x, 
-                400)) 
+                400) 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             response = yield self._send_authed_request(url, body) 
 	    self.assertEquals(e.exception.code, 400)
@@ -7194,6 +7249,119 @@ class TestFeatureHandler(TestControllersBase):
         self.assertEquals(f2['variance_explained'], 0.0) 
         self.assertEquals(f2['model_name'], 'kfmodel')
  
+class TestEmailSupportHandler(TestControllersBase):
+
+    def setUp(self):
+        super(TestEmailSupportHandler, self).setUp()
+        # Mock communication with Mandrill service.
+        self.http_mocker = patch('utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+              self.http_mocker.start())
+        self.url = self.get_url('/api/v2/email/support/')
+        self.headers = {'Content-Type': 'application/json'}
+
+        self.http_mock.side_effect = lambda x: tornado.httpclient.HTTPResponse(
+            x,
+            200,
+            buffer=StringIO('{"code": "{from_name}{from_email}{message}"}'))
+
+    def tearDown(self):
+        self.http_mocker.stop()
+        self.http_mock.reset_mock()
+        super(TestEmailSupportHandler, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_success(self):
+
+        from_email = 'email@gmail.com'
+        from_name = 'Joe Coolguy'
+        message = 'I am contacting you in respect of a family treasure' \
+                  'of Gold deposited in my name'
+
+        body = json.dumps({
+            'from_email': from_email,
+            'from_name': from_name,
+            'message': message
+        })
+        r = yield self.http_client.fetch(
+            self.url,
+            method='POST',
+            headers=self.headers,
+            body=body)
+        response = json.loads(r.body)['message']
+        self.assertRegexpMatches(response, 'Email sent')
+
+        # Check that Mandrill was contacted twice (for template, for send).
+        self.assertEqual(2, self.http_mock.call_count)
+
+        # Check the contents of those requests.
+        req1 = self.http_mock.call_args_list[0][0][0]
+        expect_slug = controllers.EmailSupportHandler.SUPPORT_TEMPLATE_SLUG
+        expect_address = controllers.EmailSupportHandler.SUPPORT_ADDRESS
+        parsed = urlparse.urlparse(req1.url)
+        got_slug = urlparse.parse_qs(parsed.query)['name'][0]
+        self.assertEqual(expect_slug, got_slug)
+        req2 = self.http_mock.call_args_list[1][0][0]
+        sent = json.loads(req2.body)
+        self.assertEqual(sent['message']['from_email'], from_email)
+        self.assertEqual(sent['message']['from_name'], from_name)
+        expect_html = ''.join([from_name, from_email, message])
+        self.assertEqual(sent['message']['html'], expect_html)
+        self.assertEqual(sent['message']['to'][0]['email'], expect_address)
+
+    @tornado.testing.gen_test
+    def test_arg_is_missing(self):
+        from_email = 'email@gmail.com'
+        message = 'I am contacting you in respect of a family treasure' \
+                  'of Gold deposited in my name'
+        body = json.dumps({
+            'from_email': from_email,
+            'message': message
+        })
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.url,
+                method='POST',
+                headers=self.headers,
+                body=body)
+        self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
+
+        from_email = 'email@gmail.com'
+        from_name = 'Joe Coolguy'
+        message = ''
+        body = json.dumps({
+            'from_email': from_email,
+            'from_name': from_name,
+            'message': message
+        })
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.url,
+                method='POST',
+                headers=self.headers,
+                body=body)
+        self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
+
+    @tornado.testing.gen_test
+    def test_email_invalid(self):
+        from_email = 'emailgmail.com'
+        from_name = 'Joe Coolguy'
+        message = 'I am contacting you in respect of a family treasure' \
+                  'of Gold deposited in my name'
+
+        body = json.dumps({
+            'from_email': from_email,
+            'from_name': from_name,
+            'message': message
+        })
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.url,
+                method='POST',
+                headers=self.headers,
+                body=body)
+        self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
+
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()
