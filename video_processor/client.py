@@ -131,7 +131,7 @@ define('max_attempt_count', default=5,
 
 define("cmsapi_user", default=None, help='User to make api requests with')
 define("cmsapi_pass", default=None, help='Password for the cmsapi user')
-define("front_end_base_url", default='https://app.neon-lab.com/', help='The base url for the frontend')
+define("frontend_base_url", default='https://app.neon-lab.com', help='The base url for the frontend')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -1068,8 +1068,14 @@ class VideoProcessor(object):
 
         if len(dt) == 0 or len(rt) < 4:
             raise Exception('Not enough thumbnails to process.')
+         
+        tas['collection_url'] = \
+           "{base_url}/share/video/{vid}/account/{aid}/token/{token}/".format(
+               base_url=options.frontend_base_url, 
+               vid=neondata.InternalVideoID.to_external(video.key), 
+               aid=video.get_account_id(), 
+               token=video.share_token) 
         
-        tas['collection_url'] = 'https://app.neon-lab.com' 
         th_info = sorted(
             [(t.urls[0], t.get_estimated_lift(dt[0])) for t in rt], 
             key=lambda x: x[1], 
