@@ -2746,7 +2746,35 @@ class TestVideoHandler(TestControllersBase):
         vid1 = rjson['videos'][0] 
  
         self.assertEquals(vid1['video_id'], 'vid1')
-        self.assertTrue(vid1['estimated_time_remaining'] > 30.0)  
+        self.assertTrue(vid1['estimated_time_remaining'] > 30.0)
+  
+    @tornado.testing.gen_test
+    def test_get_single_video_processing_none_duration(self):
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key, 'vid1'),
+            request_id='job1',
+            i_id='int2',
+            testing_enabled=False,
+            duration=None,
+            custom_data={'my_data' : 'happygo'},
+            tids=['vid1_t1', 'vid1_t2'],
+            video_url='http://someurl.com')
+        vm.save()
+        request = neondata.NeonApiRequest('job1', self.account_id_api_key,
+                                          title='Title',
+                                          publish_date='2015-06-10')
+        request.state = neondata.RequestState.PROCESSING
+        request.save()
+        url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        vid1 = rjson['videos'][0] 
+ 
+        self.assertEquals(vid1['video_id'], 'vid1')
+        self.assertEquals(vid1['estimated_time_remaining'], 0.0)  
 
     @tornado.testing.gen_test
     def test_get_all_fields(self):
