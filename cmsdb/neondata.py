@@ -5130,11 +5130,9 @@ class ThumbnailMetadata(StoredObject):
         if ot_score is None or score is None:
             return None
         # determine the model
-        if not self.model_version and ot_score > 0:
-            # assume that it is the old model (rank centrality)
-            return round(float(score) / float(ot_score) - 1, 3)
-        if re.match('20[0-9]{6}-[a-zA-Z0-9]+-[a-zA-Z0-9]+', 
-                    self.model_version):
+        if (self.model_version and 
+            (re.match('20[0-9]{6}-[a-zA-Z0-9]+-[a-zA-Z0-9]+', 
+                      self.model_version) or ('aqv1' in model))):
             # aquila v2
             return round(numpy.exp(score) / numpy.exp(ot_score) - 1, 3)
         elif ot_score > 0:
