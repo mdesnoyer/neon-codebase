@@ -561,7 +561,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                     'currently allowed"}', 400)
                                 return
                             yield self.upload_video_custom_thumbnails(
-                                i_id, i_vid,
+                                i_id, vid,
                                 thumb_urls)
                             return
                     except IOError, e:
@@ -1347,101 +1347,37 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         self.send_json_response(data, 200)
 
     @tornado.gen.coroutine
-    def upload_video_custom_thumbnails(self, i_id, i_vid, thumb_urls):
+    def upload_video_custom_thumbnails(self, i_id, vid, thumb_urls):
         '''
         Add custom thumbnails to the video
 
         Inputs:
         @i_id: Integration id
-        @i_vid: Internal video id
+        @vid: External video id
         @thumb_urls: List of image urls that will be ingested
         '''
-        p_vid = neondata.InternalVideoID.to_external(i_vid)
-        
-        # Get the video object
-        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-        if not vmdata:
-            _log.error("Could not find video: %s" % i_vid)
-            statemon.state.increment(ref=_video_not_found_ref, safe=False)
-            self.send_json_response("Video not found: %s" % p_vid, 400)
-
-        # Figure out the rank of the custom thumbs we know about so far
-        existing_thumbs = yield tornado.gen.Task(
-            neondata.ThumbnailMetadata.get_many,
-            vmdata.thumbnail_ids)
-        min_rank = 1
-        for thumb in existing_thumbs:
-            if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and 
-                thumb.rank < min_rank):
-                min_rank = thumb.rank
-        cur_rank = min_rank - 1
-
-        # Get the CDN metadata
-        cdn_metadata = yield tornado.gen.Task(
-            neondata.CDNHostingMetadataList.get,
-            neondata.CDNHostingMetadataList.create_key(vmdata.get_account_id(),
-                                                       i_id))
-
-        # Upload the thumbnails to the hosting services
-        thumb_futures = []
-        new_thumbs = []
-        for url in thumb_urls:
-            new_thumb = neondata.ThumbnailMetadata(
-                None,
-                internal_vid = i_vid,
-                ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
-                rank=cur_rank)
-            new_thumbs.append(new_thumb)
-            
-            thumb_futures.append(vmdata.download_and_add_thumbnail(
-                new_thumb,
+        url = '/api/v2/%s/thumbnails' % (self.api_key)
+        v2client = cmsapiv2.client.Client(options.apiv2_user,
+                                          options.apiv2_pass)
+        for turl in thumb_urls:
+            request = tornado.httpclient.HTTPRequest(
                 url,
-                cdn_metadata=cdn_metadata,
-                async=True))
-                                                                
-            cur_rank -= cur_rank
+                method='POST',
+                headers={'Content-type': 'application/json'},
+                body=json.dumps({
+                    'url': turl,
+                    'video_id': vid}),
+                request_timeout=30.0)
+            response = yield v2client.send_request(request)
 
-        try:
-            yield thumb_futures
-        except Exception as e:
-            data = '{"error": "Invalid image link or failed to download image"}'
-            _log.exception('Error downloading the image %s: %s' %
-                           (thumb_urls, e))
-            statemon.state.increment('invalid_image_link')
-            self.send_json_response(data, 400)
-            return
-        new_tids = [x.key for x in new_thumbs]
-
-        # Now save the information in the database
-        # TODO(sunil): Do this as a transaction
-        result = yield tornado.gen.Task(neondata.ThumbnailMetadata.save_all,
-                                        new_thumbs)
-        if result:
-            vm_save = yield tornado.gen.Task(
-                neondata.VideoMetadata.modify,
-                i_vid,
-                lambda x: x.thumbnail_ids.extend(new_tids))
-            if vm_save:
-                _log.info("custom thumbnails added to video=%s tids=%s"\
-                          %(i_vid, new_tids))
-                data = ''
-                self.send_json_response(data, 202)
-                statemon.state.increment('custom_thumb_upload')
+            if response.code >= 400:
+                _log.error("Error submitting custom thumb: %s" % response.body)
+                statemon.state.increment('custom_thumbnail_not_added')
+                self.send_json_response(response.body, response.code)
                 return
-            else:
-                _log.error('Error modifying the video metadata for vid %s' %
-                           i_vid)
-                data = '{"error": "internal error"}'
-                statemon.state.increment('thumb_metadata_not_modified')
-                self.send_json_response(data, 500)
-                return
-        else:
-            _log.error('Error saving new thumbnail metadata to vid %s' %
-                       i_vid)
-            data = '{"error": "internal error"}'
-            statemon.state.increment('thumb_metadata_not_saved')
-            self.send_json_response(data, 500)
-            return
+            statemon.state.increment('custom_thumb_upload')
+                
+        self.send_json_response(response.body, 202)
 
     @tornado.gen.coroutine
     def update_video_abtest_state(self, i_vid, state):

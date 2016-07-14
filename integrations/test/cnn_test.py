@@ -25,6 +25,8 @@ import time
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
+import unittest
+import utils.neon
 from utils.options import options
 
 
@@ -488,3 +490,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(one_vid_mock.call_count, 2)
 
         one_vid_mocker.stop()
+
+if __name__ == '__main__':
+    utils.neon.InitNeon()
+    unittest.main()

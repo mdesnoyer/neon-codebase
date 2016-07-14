@@ -2352,6 +2352,34 @@ class TestVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
         results = yield neondata.VideoMetadata.search_videos()
         self.assertEquals(len(results['videos']), 1)
 
+    @tornado.testing.gen_test
+    def test_video_results_list(self):
+        orig = neondata.VideoMetadata(
+            'a1_vid1',
+            job_results = [
+                neondata.VideoJobThumbnailList(thumbnail_ids=['tid1', 'tid2']),
+                neondata.VideoJobThumbnailList('50+', 'M',
+                                               ['tid3', 'tid4'],
+                                               ['bad1'],
+                                               'model_vers')])
+        yield orig.save(async=True)
+
+        found = yield neondata.VideoMetadata.get('a1_vid1', async=True)
+        self.assertItemsEqual(found.job_results[0].thumbnail_ids,
+                              ['tid1', 'tid2'])
+        self.assertIsNone(found.job_results[0].age)
+        self.assertIsNone(found.job_results[0].gender)
+        self.assertIsNone(found.job_results[0].model_version)
+        self.assertEquals(found.job_results[0].bad_thumbnail_ids, [])
+        self.assertItemsEqual(found.job_results[1].thumbnail_ids,
+                              ['tid3', 'tid4'])
+        self.assertEquals(found.job_results[1].age, '50+')
+        self.assertEquals(found.job_results[1].gender, 'M')
+        self.assertEquals(found.job_results[1].model_version, 'model_vers')
+        self.assertItemsEqual(found.job_results[1].bad_thumbnail_ids, ['bad1'])
+
+        
+        self.assertEquals(orig, found)
 class TestVerification(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()

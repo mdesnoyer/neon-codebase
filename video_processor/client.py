@@ -214,23 +214,32 @@ class VideoProcessor(object):
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
         self.bad_thumbnails = []
 
+        self.thumb_model_version = None
+
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
     def __del__(self):
         # Clean up the executor
         self.executor.shutdown(False)
 
-    @staticmethod
-    def percent_encode_url_path(url):
+    @tornado.gen.coroutine
+    def update_video_metadata_video_info(self):
+        '''Updates information about the video on the video metadata object
+        in the database.
         '''
-        Takes a url and re-encodes (i.e., decodes encodes) its path with
-        percent-sign encoding. TODO consider cases: unicode, double-decode
-        '''
+        def _update_video_info(x):
+            x.duration = self.video_metadata.duration
+            x.publish_date = self.video_metadata.publish_date
+            x.frame_size = x.frame_size or self.video_metadata.frame_size
 
-        parse = urlparse.urlparse(url)
-        parse = list(parse)
-        parse[2] = urllib.quote(urllib.unquote(parse[2]))
-        return urlparse.urlunparse(parse)
+        try:
+            yield neondata.VideoMetadata.modify(self.video_metadata.key,
+                                                _update_video_info,
+                                                async=True)
+        except Exception as e:
+            _log.error("Error updating video data to database: %s" % e)
+            statemon.state.increment('save_vmdata_error')
+            raise DBError("Error updating video data to database")
 
     @tornado.gen.coroutine
     def start(self):
@@ -370,6 +379,7 @@ class VideoProcessor(object):
                     key = yield self.executor.submit(
                         bucket.get_key, key_name)
                     self.video_metadata.duration = video_duration
+                    yield self.update_video_metadata_video_info()
                     yield self._set_job_timeout(self.video_metadata.duration,
                                                 key.size)
                     yield self.executor.submit(
@@ -444,6 +454,7 @@ class VideoProcessor(object):
                 if video_info.get('upload_date', None) is not None:
                     self.video_metadata.publish_date = \
                       dateutil.parser.parse(video_info['upload_date']).isoformat()
+                yield self.update_video_metadata_video_info()
 
                 # Update the timeout
                 yield self._set_job_timeout(
@@ -509,6 +520,9 @@ class VideoProcessor(object):
             _log.error(msg)
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
+
+        except DBError:
+            raise
 
         except IOError as e:
             msg = "Error saving video to disk: %s" % e
@@ -602,6 +616,8 @@ class VideoProcessor(object):
         if duration > 3600:
             statemon.state.increment('video_duration_60m')
 
+        yield self.update_video_metadata_video_info()
+
         # Fetch the ProcessingStrategy
         account_id = self.job_params['api_key']
         
@@ -633,6 +649,7 @@ class VideoProcessor(object):
         for result in top_results:
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.NEON,
                 model_score=result.score,
                 model_version=result.model_version,
@@ -640,12 +657,14 @@ class VideoProcessor(object):
                 frameno=result.frameno,
                 rank=rank,
                 filtered=result.filtered_reason)
+            self.thumb_model_version = result.model_version
             self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
             rank += 1
 
         for result in bottom_results:
             meta = neondata.ThumbnailMetadata(
                 None,
+                internal_vid=self.video_metadata.key,
                 ttype=neondata.ThumbnailType.BAD_NEON,
                 model_score=result.score,
                 model_version=result.model_version,
@@ -681,13 +700,6 @@ class VideoProcessor(object):
                 frameno=int(nframes / 2),
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
-            yield meta.score_image(self.model.predictor,
-                                   image=cv_image)
-        except model.errors.PredictionError as e:
-            _log.warn('Error predicting score for the center frame: %s' %
-                      e)
-            # We don't wait to fail in this case because we don't care
-            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting center frame from %s:"
                        " %s" % (self.video_url, e))
@@ -713,13 +725,6 @@ class VideoProcessor(object):
                 frameno=frameno,
                 rank=0)
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
-            yield meta.score_image(self.model.predictor,
-                                   image=cv_image)
-        except model.errors.PredictionError as e:
-            _log.warn('Error predicting score for the random frame: %s' %
-                      e)
-            # We don't wait to fail in this case because we don't care
-            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting random frame from %s:"
                            " %s" % (self.video_url, e))
@@ -809,8 +814,26 @@ class VideoProcessor(object):
                         % (api_key, self.video_metadata.integration_id), 10)
             cdn_metadata = [neondata.NeonCDNHostingMetadata()]
 
+        # Get any known thumbs for the video
+        known_thumbs = []
+        known_video = yield neondata.VideoMetadata.get(self.video_metadata.key,
+                                                       async=True)
+        if known_video:
+            known_tids = reduce(
+                lambda x,y: x | y,
+                [set(x.thumbnail_ids) for x in known_video.job_results],
+                set())
+            known_tids |= set(known_video.thumbnail_ids)
+
+            known_thumbs = yield neondata.ThumbnailMetadata.get_many(
+                known_tids, async=True)
+
         # Attach the thumbnails to the video. This will upload the
         # thumbnails to the appropriate CDNs.
+        video_result = neondata.VideoJobThumbnailList(
+            age=self.job_params.get('age'),
+            gender=self.job_params.get('gender'),
+            model_version=self.model_version)
         if len(filter(lambda x: x[0].type == neondata.ThumbnailType.NEON,
                       self.thumbnails)) < 1:
             # TODO (Sunil): Video to be marked as failed or int err ? 
@@ -819,20 +842,36 @@ class VideoProcessor(object):
                     % (self.video_metadata.key, self.video_metadata.url))
 
         for thumb_meta, image in self.thumbnails:
-            yield self.video_metadata.add_thumbnail(
-                thumb_meta,
-                image,
-                cdn_metadata=cdn_metadata,
-                save_objects=False,
-                async=True)
+            # If we have a thumbnail of this type already and it's
+            # scored with the same model, we do not need to keep the
+            # new one around
+            same_thumbs = [x for x in known_thumbs if 
+                           x.type == thumb_meta.type and 
+                           x.model_version == self.thumb_model_version]
+            if (thumb_meta.type != neondata.ThumbnailType.NEON and 
+                len(same_thumbs) > 0):
+                same_thumbs = sorted(same_thumbs, key=lambda x: x.rank)
+                video_result.thumbnail_ids.append(same_thumbs[0].key)
+            else:
+                # Fill out the data on this thumb and add it to the results
+                yield thumb_meta.add_image_data(image, self.video_metadata,
+                                                cdn_metadata,
+                                                async=True)
+                yield thumb_meta.score_image(self.model.predictor,
+                                             image=PILImageUtils.to_cv(image))
+                video_result.thumbnail_ids.append(thumb_meta.key)
 
         for thumb_meta, image in self.bad_thumbnails:
-            yield self.video_metadata.add_bad_thumbnail(
-                thumb_meta,
-                image,
-                cdn_metadata=cdn_metadata,
-                save_objects=False,
-                async=True)
+            yield thumb_meta.add_image_data(image, self.video_metadata,
+                                            cdn_metadata,
+                                            async=True)
+            try:
+                yield thumb_meta.score_image(self.model.predictor,
+                                             image=PILImageUtils.to_cv(image))
+            except model.errors.PredictionError as e:
+                _log.warn('Error scoring image: %s' % e)
+                # It's ok if it's not scored, so continue
+            video_result.bad_thumbnail_ids.append(thumb_meta.key)
 
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
@@ -848,6 +887,7 @@ class VideoProcessor(object):
                 old_thumb.type = new_thumb.type
                 old_thumb.model_score = new_thumb.model_score
                 old_thumb.model_version = new_thumb.model_version
+                old_thumb.features = new_thumb.features
                 old_thumb.rank = new_thumb.rank
                 old_thumb.phash = new_thumb.phash
                 old_thumb.frameno = new_thumb.frameno
@@ -875,9 +915,39 @@ class VideoProcessor(object):
                 neondata.ThumbnailType.NEON,
                 neondata.ThumbnailType.CENTERFRAME,
                 neondata.ThumbnailType.RANDOM]]
-            tidset = set(keep_thumbs + self.video_metadata.thumbnail_ids)
+            tidset = set(keep_thumbs +
+                         video_result.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
-            video_obj.bad_thumbnail_ids = [t[0].key for t in self.bad_thumbnails]
+
+            # If there isn't a job result from before, but something
+            # is there, then create the job result object from the
+            # previous run
+            if self.reprocess:
+                prev_thumbs = [x.key for x in thumbs if x.type in [
+                    neondata.ThumbnailType.NEON,
+                    neondata.ThumbnailType.CENTERFRAME,
+                    neondata.ThumbnailType.RANDOM]]
+                if len(prev_thumbs) > 0 and len(video_obj.job_results) == 0:
+                    video_obj.job_results.append(
+                        neondata.VideoJobThumbnailList(
+                            thumbnail_ids = prev_thumbs,
+                            bad_thumbnail_ids = video_obj.bad_thumbnail_ids,
+                            model_version=video_obj.model_version))
+                    video_obj.non_job_thumb_ids = keep_thumbs
+            
+            # Update the job results
+            found_result = False
+            for result in video_obj.job_results:
+                if (result.age == video_result.age and 
+                    result.gender == video_result.gender):
+                    # Replace the last run with these parameters
+                    result.thumbnail_ids = video_result.thumbnail_ids
+                    result.bad_thumbnail_ids = video_result.bad_thumbnail_ids
+                    result.model_version = video_result.model_version
+                    found_result = True
+            if not found_result:
+                video_obj.job_results.append(video_result)
+            
             video_obj.url = self.video_metadata.url
             video_obj.duration = self.video_metadata.duration
             video_obj.video_valence = self.video_metadata.video_valence
@@ -919,7 +989,8 @@ class VideoProcessor(object):
                 yield thumb.score_image(self.model.predictor,
                                         save_object=True)
 
-        except neondata.ThumbDownloadError, e:
+        except (neondata.ThumbDownloadError,
+                model.errors.PredictionError) as e:
             # If we extracted the default thumb from the url, then
             # don't error out if we cannot get thumb
             if is_user_default_thumb:
@@ -928,6 +999,7 @@ class VideoProcessor(object):
                 statemon.state.increment('default_thumb_error')
                 err_msg = "Failed to download default thumbnail: %s" % e
                 raise DefaultThumbError(err_msg)
+            
 
         # Enable the video to be served if we have any thumbnails available
         def _set_serving_enabled(video_obj):
@@ -1261,7 +1333,7 @@ class VideoClient(multiprocessing.Process):
 
     ##### Model Methods #####
 
-    def load_model(self):
+    def load_model(self, job):
         ''' load model '''
         _log.info('Generating predictor instance')
         aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
@@ -1269,12 +1341,11 @@ class VideoClient(multiprocessing.Process):
         predictor = model.predictor.DeepnetPredictor(
             port=options.model_server_port,
             concurrency=options.request_concurrency,
-            aquila_connection=aquila_conn)
+            aquila_connection=aquila_conn,
+            gender=job.get('gender'),
+            age=job.get('age'))
         predictor.connect()
-        # TODO (nick): Figure out how to get the aquila server to relay the
-        #              model version to the local model.
-        self.model_version = '%s-aqv1.1.250' % os.path.basename(
-            self.model_file)
+        self.model_version = os.path.basename(self.model_file)
         # note, the model file is no longer a complete model, but is instead
         # an input dictionary for local search.
         self.model = model.generate_model(self.model_file, predictor)
@@ -1317,7 +1388,7 @@ class VideoClient(multiprocessing.Process):
             # TODO(mdesnoyer): Only load the model once. Right now,
             # there's a memory problem so we load the model for every
             # job.
-            self.load_model()
+            self.load_model(job)
             vprocessor = VideoProcessor(job, self.model,
                                         self.model_version,
                                         self.cv_semaphore,

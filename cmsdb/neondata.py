@@ -805,15 +805,16 @@ class StoredObject(object):
 
             override this if you need something custom to get _data
         '''
-        def _json_fixer(obj): 
-            for key, value in obj.items():
+        def _json_fixer(obj):
+            cur_data = obj
+            for key, value in cur_data.items():
                 try:  
                     if value == float('-inf'):
-                        obj[key] = PythonNaNStrings.NEGINF
+                        cur_data[key] = PythonNaNStrings.NEGINF
                     if value == float('inf'):
-                        obj[key] = PythonNaNStrings.INF
+                        cur_data[key] = PythonNaNStrings.INF
                     if value == float('nan'):
-                        obj[key] = PythonNaNStrings.NAN
+                        cur_data[key] = PythonNaNStrings.NAN
                 except ValueError: 
                     pass 
             # we want to remove these extras from the _data object 
@@ -821,15 +822,18 @@ class StoredObject(object):
             addcs = self._additional_columns() 
             for c in addcs:
                 try:  
-                    del obj[c.column_name]
+                    del cur_data[c.column_name]
                 except KeyError: 
                     pass 
             return obj
-        obj = _json_fixer(copy.copy(self.to_dict()['_data'])) 
+        obj = _json_fixer(copy.deepcopy(self.to_dict()['_data'])) 
         def json_serial(obj):
             if isinstance(obj, datetime.datetime):
                 serial = obj.isoformat()
                 return serial
+            elif isinstance(obj, StoredObject):
+                return obj.to_dict()
+            return obj.__dict__
         return json.dumps(obj, default=json_serial)
 
     @utils.sync.optional_sync
@@ -1871,6 +1875,26 @@ class NamespacedStoredObject(StoredObject):
         rv = yield super(NamespacedStoredObject, cls).delete_many(
                                [cls.format_key(k) for k in keys], async=True)
         raise tornado.gen.Return(rv) 
+
+class UnsaveableStoredObject(NamespacedStoredObject):
+    '''A Stored object that cannot be saved directly to the DB.'''
+    def __init__(self):
+        self.key = ''
+
+    def save(self):
+        raise NotImplementedError()
+
+    @classmethod
+    def save_all(cls, *args, **kwargs):
+        raise NotImplementedError()
+
+    @classmethod
+    def modify(cls, *args, **kwargs):
+        raise NotImplementedError()
+
+    @classmethod
+    def modify_many(cls, *args, **kwargs):
+        raise NotImplementedError()
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
@@ -2965,11 +2989,8 @@ class CDNHostingMetadataList(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return CDNHostingMetadataList.__name__
-    
-    def get_json_data(self):
-        return json.dumps(json.loads(self.to_json())['_data'])
 
-class CDNHostingMetadata(NamespacedStoredObject):
+class CDNHostingMetadata(UnsaveableStoredObject):
     '''
     Specify how to host the the images with one CDN platform.
 
@@ -3057,29 +3078,6 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
         # the created and updated on these objects
         # self.created = self.updated = str(datetime.datetime.utcnow())
-
-    # TODO(sunil or mdesnoyer): Write a function to add a new
-    # rendition size to the list and upload the requisite images to
-    # where they are hosted. Some of the functionality will be in
-    # cdnhosting, but this object will have to be saved too. We
-    # probably want to update all the images in the account or it
-    # could have parameters like a single image, all the images newer
-    # than a date etc.
-
-    def save(self):
-        raise NotImplementedError()
-
-    @classmethod
-    def save_all(cls, *args, **kwargs):
-        raise NotImplementedError()
-
-    @classmethod
-    def modify(cls, *args, **kwargs):
-        raise NotImplementedError()
-
-    @classmethod
-    def modify_many(cls, *args, **kwargs):
-        raise NotImplementedError()
 
     @classmethod
     def _create(cls, key, obj_dict):
@@ -4141,7 +4139,9 @@ class NeonApiRequest(NamespacedStoredObject):
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None,
             callback_state=CallbackState.NOT_SENT, 
-            callback_email=None):
+            callback_email=None,
+            age=None,
+            gender=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -4183,7 +4183,11 @@ class NeonApiRequest(NamespacedStoredObject):
         # what email address should we send this to, when done processing
         # this could be associated to an existing user(username), 
         # but that is not required 
-        self.callback_email = None 
+        self.callback_email = callback_email 
+
+        # Demographic parameters for the video processing
+        self.age = age
+        self.gender= gender
 
     @classmethod
     def key2id(cls, key):
@@ -4874,10 +4878,11 @@ class ThumbnailMetadata(StoredObject):
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
        
-        # This is a full feature vector. It stores a numpy array of floats. 
-        # Each index is dependent on the model used. Human readable versions of 
-        # this exist in the Features table. 
-        self.features = features  
+        # This is a full feature vector. It stores a numpy array of
+        # floats.  Each index is dependent on the model used. Human
+        # readable versions of this exist in the Features table.
+        self.features = features 
+         
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
@@ -5090,13 +5095,25 @@ class ThumbnailMetadata(StoredObject):
         yield ThumbnailServingURLs.delete(key, async=True)
         yield ThumbnailMetadata.delete(key, async=True) 
 
-    def get_neon_score(self):
+    def get_neon_score(self, gender=None, age=None):
         """Get a value in [1..99] that the Neon score maps to.
 
         Uses a mapping dictionary according to the name of the
-        scoring model."""
-        if self.model_score:
-            return model.scores.lookup(self.model_version, self.model_score)
+        scoring model.
+        """
+        model_score = self.model_score
+        if self.features is not None:
+            # We can calculate the underlying score for a demographic
+            try:
+                sig = model.predictor.DemographicSignatures(
+                    self.model_version).get_signature(gender, age)
+                model_score = numpy.dot(sig, self.features)
+            except KeyError as e:
+                # We don't know about this model, gender, age combo
+                pass
+            
+        if model_score:
+            return model.scores.lookup(self.model_version, model_score)
         return None
 
     def get_estimated_lift(self, other_thumb): 
@@ -5279,6 +5296,20 @@ class BillingPlans(StoredObject):
         '''
         return BillingPlans.__name__
 
+class VideoJobThumbnailList(UnsaveableStoredObject):
+    '''Represents the list of thumbnails from a video processing job.'''
+    def __init__(self, age=None, gender=None, thumbnail_ids=None,
+                 bad_thumbnail_ids=None,
+                 model_version=None):
+        self.model_version = model_version
+        self.thumbnail_ids = thumbnail_ids or []
+        self.bad_thumbnail_ids = bad_thumbnail_ids or []
+        
+        # WARNING: If anything is added here, make sure to update
+        # _merge_video_data in video_processor/client.py
+        self.age = age
+        self.gender = gender
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -5296,10 +5327,22 @@ class VideoMetadata(StoredObject):
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
                  publish_date=None, hidden=None, share_token=None,
+                 job_results=None, non_job_thumb_ids=None, 
                  bad_tids=None):
-        super(VideoMetadata, self).__init__(video_id) 
-        self.thumbnail_ids = tids or []
+        super(VideoMetadata, self).__init__(video_id)
+        # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
+        # contain the thumbs from the most recent job only.
+        self.thumbnail_ids = tids or [] 
         self.bad_thumbnail_ids = bad_tids or []
+        
+        # A list of VideoJobThumbnailList objects representing the
+        # thumbnails extracted for each processing step.
+        self.job_results = job_results or []
+
+        # A list of thumbnail ids that are not associated with a
+        # specific run of the job (e.g. default thumb)
+        self.non_job_thumb_ids = non_job_thumb_ids or []
+        
         self.url = video_url 
         self.duration = duration # in seconds
         self.video_valence = vid_valence 
@@ -5391,30 +5434,12 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=cdn_metadata,
-                                       save_objects=save_objects, video=video,
-                                       append_to_good=True, async=True)
-        raise tornado.gen.Return(rv)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def add_bad_thumbnail(self, thumb, image, cdn_metadata=None,
-                      save_objects=False, video=None):
-        '''Add a bad thumbnail to the video. Reference above.'''
-        rv = yield self._add_thumbnail(thumb, image, cdn_metadata=cdn_metadata,
-                                       save_objects=save_objects, video=video,
-                                       append_to_good=False, async=True)
-        raise tornado.gen.Return(rv)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def _add_thumbnail(self, thumb, image, cdn_metadata=None,
-                      save_objects=False, video=None, append_to_good=True):
-
         thumb.video_id = self.key
         yield thumb.add_image_data(image, self, cdn_metadata, async=True)
 
-        target = self.thumbnail_ids if append_to_good else self.bad_thumbnail_ids
+        def _add_thumb_to_video_object(video_obj):
+            video_obj.thumbnail_ids.append(thumb.key)
+            video_obj.non_job_thumb_ids.append(thumb.key)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
@@ -5424,27 +5449,21 @@ class VideoMetadata(StoredObject):
             if not sucess:
                 raise IOError("Could not save thumbnail")
 
-            def _modify(v):
-                if append_to_good:
-                    v.thumbnail_ids.append(thumb.key)
-                else:
-                    v.bad_thumbnail_ids.append(thumb.key)
-
             updated_video = yield self.modify(
                     self.key,
-                    _modify,
+                    _add_thumb_to_video_object,
                     async=True)
 
             if updated_video is None:
                 # It wasn't in the database, so save this object
-                target.append(thumb.key)
+                _add_thumb_to_video_object(self)
                 sucess = yield self.save(async=True)
                 if not sucess:
                     raise IOError("Could not save video data")
             else:
                 self.__dict__ = updated_video.__dict__
         else:
-            target.append(thumb.key)
+            _add_thumb_to_video_object(self)
 
         raise tornado.gen.Return(thumb)
 
@@ -5478,8 +5497,8 @@ class VideoMetadata(StoredObject):
                 async=True)
         if thumb is None:
             thumb = ThumbnailMetadata(None,
-                          ttype=ThumbnailType.DEFAULT,
-                          external_id=external_thumbnail_id)
+                                      ttype=ThumbnailType.DEFAULT,
+                                      external_id=external_thumbnail_id)
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)
