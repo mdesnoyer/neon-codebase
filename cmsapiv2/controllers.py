@@ -2121,7 +2121,8 @@ class ThumbnailStatsHandler(APIV2Handler):
         raise tornado.gen.Return(retval)
 
 
-'''*********************************************************************
+'''
+*********************************************************************
 LiftStatsHandler
 *********************************************************************'''
 class LiftStatsHandler(ShareableContentHandler):

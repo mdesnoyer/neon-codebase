@@ -1492,11 +1492,19 @@ class LocalSearcher(object):
         # account for the case where the video is very short
         search_divisor = (self._orig_local_search_width /
                           self._orig_local_search_step)
-        self.local_search_width = min(self._orig_local_search_width,
-                                      max(search_divisor,
-                                          self.num_frames / self.n_thumbs))
-        self.local_search_step = max(1, self.local_search_width /
-                                     search_divisor)
+        if num_frames < 600:
+            self.local_search_width = 8
+            self.local_search_step = 1
+        elif num_frames < 1800:
+            self.local_search_width = 16
+            self.local_search_step = 2
+        else:
+            self.local_search_width = 32
+            self.local_search_step = 4
+        self.mixing_samples = min(
+            self.mixing_samples,
+            int(num_frames / self.local_search_width))
+
         _log.info('Search width: %i' % (self.local_search_width))
         _log.info('Search step: %i' % (self.local_search_step))
         video_time = float(num_frames) / self.fps
@@ -1809,18 +1817,19 @@ class LocalSearcher(object):
         with self._proc_lock:
 
             # Keep a small heap of the worst frames.
-            _res = _Result(
-                frameno=frameno,
-                score=frame_score,
-                image=frames[0],
-                model_vers=model_vers,
-                aq_features=features)
-            # Invert score for sorting.
-            _item = (-frame_score, _res)
-            if len(self.worst_results) < self.m_thumbs:
-                heapq.heappush(self.worst_results, _item)
-            elif -frame_score > self.worst_results[0][0]:
-                heapq.heapreplace(self.worst_results, _item)
+            if self.m_thumbs > 0:
+                _res = _Result(
+                    frameno=frameno,
+                    score=frame_score,
+                    image=frames[0],
+                    model_vers=model_vers,
+                    aq_features=features)
+                # Invert score for sorting.
+                _item = (-frame_score, _res)
+                if len(self.worst_results) < self.m_thumbs:
+                    heapq.heappush(self.worst_results, _item)
+                elif frame_score < self.worst_results[0][0]:
+                    heapq.heapreplace(self.worst_results, _item)
 
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
@@ -1849,10 +1858,11 @@ class LocalSearcher(object):
             if frameno is not None:
                 # then there are still samples to be taken
                 self._inq.put(('samp', frameno))
-            else:
+                return
+            elif self._active_samples <= 0:
                 self.done_sampling = True
                 _log.info('Finished sampling')
-            return
+                return
         # okay, let's get a search frame instead.
         try:
             srch_info = self.search_algo.get_search()
