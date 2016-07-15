@@ -42,6 +42,12 @@ statemon.define('unable_to_connect', int)  # could not connect to server in the 
 statemon.define('good_deepnet_connection', int)
 statemon.define('prediction_error', int)
 statemon.define('unknown_demographic', int)
+statemon.define('unknown_model', int)
+# MEAN_CHANNEL_VALS are the mean pixel value, per channel, of all of our
+# training images. This will remain constant: it's a mean over millions of
+# images so is unlikely to change significantly. We won't be recomputing it.
+MEAN_CHANNEL_VALS = [[[92.366, 85.133, 81.674]]]
+MEAN_CHANNEL_VALS = np.array(MEAN_CHANNEL_VALS).round().astype(np.uint8)
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -65,7 +71,7 @@ def _resize_to(img, w=None, h=None):
     w = int(h * asp)
   elif h is None:
     h = int(w / asp)
-  return img.resize((w, h), Image.BILINEAR)
+  return img.resize((w, h), Image.ANTIALIAS)
 
 
 def _center_crop_to(img, w, h):
@@ -112,7 +118,9 @@ def _pad_to_asp(img, asp):
     newsize = (ow, nh)
   else:
     return img
-  nimg = Image.new(img.mode, newsize)
+  nimg = np.zeros((newsize[1], newsize[0], 3)).astype(np.uint8)
+  nimg += MEAN_CHANNEL_VALS
+  nimg = Image.fromarray(nimg)
   nimg.paste(img, box=(left, upper))
   return nimg
 
@@ -130,8 +138,7 @@ def _aquila_prep(image):
     img = Image.fromarray(image[:,:,::-1])
     img = _pad_to_asp(img, 16./9)
     # resize the image to 299 x 299
-    img = _resize_to(img, w=314, h=314)
-    img = _center_crop_to(img, w=299, h=299)
+    img = _resize_to(img, w=299, h=299)
     return np.array(img).astype(np.uint8)
 
 class DemographicSignatures(object):
@@ -144,27 +151,74 @@ class DemographicSignatures(object):
     __metaclass__ = utils.obj.KeyedSingleton
 
     def __init__(self, model_name):
-        # Load up the file
-        fn = os.path.join(os.path.dirname(__file__),
-                          'demographics',
-                          '%s.pkl' % model_name)
+        # Load up the files
+        weights_fn = os.path.join(os.path.dirname(__file__),
+                                  'demographics',
+                                  '%s-weight.pkl' % model_name)
+        bias_fn = os.path.join(os.path.dirname(__file__),
+                               'demographics',
+                               '%s-bias.pkl' % model_name)
         try:
-            self.mat = pandas.read_pickle(fn)
+            self.weights = pandas.read_pickle(weights_fn)
         except IOError as e:
-            _log.error('Could not read a valid model file at %s: %s' % (fn, e))
+            _log.error('Could not read a valid model weights file at %s: %s' % 
+                       (weights_fn, e))
+            statemon.state.increment('unknown_model')
             raise KeyError(model_name)
+        try:
+            self.bias = pandas.read_pickle(bias_fn)
+        except IOError as e:
+            _log.error('Could not read a valid model bias file at %s: %s' % 
+                       (bias_fn, e))
+            statemon.state.increment('unknown_model')
+            raise KeyError(model_name)  
 
-    def get_signature(self, gender=None, age=None):
-        '''Returns a signature vector for a given demographic group.
-
-        dot this vector with your image signature and you get the
-        model score for that image for that demographic.
+    def compute_score_for_demo(self, X, gender=None, age=None):
+        '''Returns the score for gender `gender` and age `age` derived from
+        feature vector X (a numpy array)
         '''
+        X = np.array(X)
+        X = X.reshape(1, -1)
         if gender is None:
             gender = 'None'
         if age is None:
             age = 'None'
-        return self.mat[gender][age]
+        try:
+            W = self.weights[gender, age]
+        except KeyError as e:
+            _log.error('Unknown Demographic for weights file: %s,%s' % (gender, age))
+            statemon.state.increment('unknown_demographic')
+            raise KeyError(e)
+        try:
+            b = self.bias[gender, age]
+        except KeyEror as e:
+            _log.error('Unknown Demographic for bias file: %s,%s' % (gender, age))
+            statemon.state.increment('unknown_demographic')
+            raise KeyError(e)
+        try:
+            score = X.dot(W) + b
+        except ValueError as e:
+            _log.error('Improper feature vector size: %s' % e.message)
+            raise ValueError(e)
+        # return score
+        # for now, we're nto going to return the score as multiindex 
+        # series objects, but simply as floats.
+        return float(score)
+
+    def get_scores_for_all_demos(self, X):
+        '''Returns the scores for all demographics given feature vector
+        X as a pandas multiindex'''
+        X = X.reshape(1, -1)
+        try:
+            scores = X.dot(self.weights) + self.bias
+        except ValueError as e:
+            _log.error('Improper feature vector size: %s' % e.message)
+            raise ValueError(e)
+        # return scores
+        # for now, we're nto going to return the scores as multiindex 
+        # series objects, but simply as numpy arrays.
+        return np.array(score)
+
 
 class Predictor(object):
     '''An abstract valence predictor.
@@ -241,8 +295,7 @@ class Predictor(object):
             except tornado.gen.Return:
                 raise
             except Exception as e:
-                _log.warn('Problem scoring image. Retrying: %s' %
-                          e)
+                _log.warn('Problem scoring image. Retrying: %s' % e)
                 delay = (1 << cur_try) * base_time * random.random()
                 yield tornado.gen.sleep(delay)
         statemon.state.increment('prediction_error')
@@ -471,14 +524,12 @@ class DeepnetPredictor(Predictor):
         if response.model_version is not None:
             try:
                 signatures = DemographicSignatures(response.model_version)
-                target_signature = signatures.get_signature(gender=self.gender,
-                                                            age=self.age)
-                score = target_signature.dot(features)
+                score = signatures.compute_score_for_demo(
+                    features, gender=self.gender, age=self.age)
             except KeyError as e:
-                # Could not get a demographic to match, so keep score as None
-                _log.warn_n('Unknown demographic. model: %s age: %s gender %s'
+                # There was some problem obtaining the score.
+                _log.warn_n('Unknown model/demographic. model: %s age: %s gender %s'
                             % (response.model_version, self.gender, self.age))
-                statemon.state.increment('unknown_demographic')
         raise tornado.gen.Return((score, features, vers))
 
     def complete(self):

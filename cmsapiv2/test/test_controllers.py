@@ -2059,11 +2059,11 @@ class TestVideoHandler(TestControllersBase):
                                    urls=['d'],
                                    ttype='neon',
                                    features=np.random.rand(1024),
-                                   model_version='20160707-test').save()
+                                   model_version='20160713-test').save()
         neondata.ThumbnailMetadata('testing_vtid_bad', width=500,
                                    urls=['bad'],
                                    features=np.random.rand(1024),
-                                   model_version='20160707-test').save()
+                                   model_version='20160713-test').save()
         neondata.ThumbnailMetadata('testing_vtid_rand', 
                                    ttype='random',
                                    urls=['rand.jpg']).save()
@@ -2071,7 +2071,7 @@ class TestVideoHandler(TestControllersBase):
                                    ttype='default',
                                    urls=['default.jpg'],
                                    features=np.random.rand(1024),
-                                   model_version='20160707-test').save()
+                                   model_version='20160713-test').save()
         neondata.NeonApiRequest('job1', self.account_id_api_key).save()
         defop = neondata.BrightcoveIntegration.modify(self.test_i_id,
             lambda x: x,
@@ -3319,8 +3319,8 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(len(bad_thumbs[('F', '20-29')]), 1)
         self.assertEquals(bad_thumbs[('F', '20-29')][0]['thumbnail_id'],
                           'testing_vtid_bad')
-        self.assertGreater(bad_thumbs[('F', '20-29')][0]['neon_score'],
-                           0)
+        # No demo score bucket is greater than the model score, so 0.
+        self.assertGreater(bad_thumbs[('F', '20-29')][0]['neon_score'], 0)
 
         # Ask for the thumbnails and they should return the result
         # from the (None, None) demographic response
@@ -4006,7 +4006,7 @@ class TestThumbnailHandler(TestControllersBase):
         ).save()
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['neon_score'], 12)
+        self.assertEquals(rjson['neon_score'], 13)
 
     @tornado.testing.gen_test
     def test_get_thumbnail_with_renditions(self):
@@ -4079,7 +4079,7 @@ class TestThumbnailHandler(TestControllersBase):
             'featandscore',
             urls=['http://asdf.com/1.jpg'],
             model_score='-1e-3',
-            model_version='20160707-test',
+            model_version='20160713-test',
             features=features
         ).save()
         url = '/api/v2/%s/thumbnails?thumbnail_id=featandscore' % (
@@ -4105,14 +4105,14 @@ class TestThumbnailHandler(TestControllersBase):
             'scoreonly',
             urls=['http://asdf.com/1.jpg'],
             model_score='-1e-3',
-            model_version='20160707-test',
+            model_version='20160713-test',
             features=None
         ).save()
         url = '/api/v2/%s/thumbnails?thumbnail_id=scoreonly' % (
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['neon_score'], 0)
+        self.assertGreater(rjson['neon_score'], 0)
         
     @tornado.testing.gen_test
     def test_thumbnail_update_no_params(self):
@@ -4550,7 +4550,7 @@ class TestLiftStatsHandler(TestControllersBase):
         self.assertNotIn('a', [i['thumbnail_id'] for i in lift])
         [self.assertIsNone(i['lift']) for i in lift
             if i['thumbnail_id'] in ['b', 'd']]
-        [self.assertEqual(i['lift'], 0.583) for i in lift
+        [self.assertEqual(i['lift'], 0.25) for i in lift
             if i['thumbnail_id'] == 'c']
 
 

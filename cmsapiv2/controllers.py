@@ -2121,9 +2121,11 @@ class ThumbnailStatsHandler(APIV2Handler):
         raise tornado.gen.Return(retval)
 
 
-'''*********************************************************************
+'''
+*********************************************************************
 LiftStatsHandler
-*********************************************************************'''
+*********************************************************************
+'''
 class LiftStatsHandler(APIV2Handler):
 
     @tornado.gen.coroutine
@@ -2147,7 +2149,6 @@ class LiftStatsHandler(APIV2Handler):
             query_tids,
             async=True,
             as_dict=True)
-
 
         lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
             base_thumb) if t else None}

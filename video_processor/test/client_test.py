@@ -1127,7 +1127,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertEquals(tas['thumbnail_one'], 'second_best')  
         self.assertEquals(tas['thumbnail_two'], 'third_best')  
         self.assertEquals(tas['thumbnail_three'], 'fourth_best')  
-        self.assertEquals(tas['lift'], 2.167) 
+        self.assertEquals(tas['lift'], '67%')
         self.assertEquals(rv, True)
  
     @tornado.testing.gen_test
@@ -1912,7 +1912,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertEquals(tas['thumbnail_one'], 'second_best')  
         self.assertEquals(tas['thumbnail_two'], 'third_best')  
         self.assertEquals(tas['thumbnail_three'], 'fourth_best')  
-        self.assertEquals(tas['lift'], '217%') 
+        self.assertEquals(tas['lift'], '67%') 
  
     @tornado.testing.gen_test
     def test_get_template_args_no_tn_exception(self):
