@@ -58,7 +58,7 @@ class TestAllModelFiles(test_utils.neontest.TestCase):
             self._test_pandas_array(fn, exp_size)
 
         mtype = 'score.pkl'
-        exp_size = (100,)
+        exp_size = (99,)
         _log.info('Checking %s type files' % mtype)
         for fn in glob(os.path.join(model_dir, '*%s' % mtype)):
             self._test_pandas_array(fn, exp_size)
