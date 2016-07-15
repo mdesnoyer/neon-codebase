@@ -4097,7 +4097,7 @@ class TestThumbnailHandler(TestControllersBase):
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertIsNone(rjson['neon_score'])
+        self.assertGreater(rjson['neon_score'], 0)
 
         neondata.ThumbnailMetadata(
             'scoreonly',
