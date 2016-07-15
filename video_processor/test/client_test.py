@@ -489,22 +489,45 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
 
+    @patch('video_processor.client.S3Connection')
     @tornado.testing.gen_test
-    def test_download_youtube_video_with_duration(self):
+    def test_download_s3_error_with_valid_httpfallback(self, s3_mock):
+        s3_mock.side_effect = [
+            boto.exception.S3ResponseError(402, "Permissions error")
+            ]
+
+        url = 'https://s3-us-west-2.amazonaws.com/customer-videos/some/video.mp4'
+
+        vprocessor = self.setup_video_processor(
+            "neon", url=url)
+
+        with self.assertLogExists(logging.WARNING, 'Falling back on http'):
+            yield vprocessor.download_video_file()
+
+        # Make sure the video was downloaded from the url
+        self.youtube_extract_info_mock.assert_called_with(url, download=True)
+
+        self.assertEquals(vprocessor.video_metadata.url, url)
+
+    @tornado.testing.gen_test
+    def test_download_youtube_video_with_duration_and_title(self):
         self.youtube_extract_info_mock.return_value = {
             u'_type': u'video',
-                u'upload_date': u'20110620', 
-                u'protocol': u'https', 
-                u'creator': None, 
-                u'format_note': u'hd720', 
-                u'height': 720, 
-                u'like_count': 0, 
-                u'duration': 15, 
-                u'player_url': None, 
-                u'id': 'yces6PZOsgc', 
-                u'view_count': 328}
+            u'upload_date': u'20110620', 
+            u'protocol': u'https', 
+            u'creator': None, 
+            u'format_note': u'hd720', 
+            u'height': 720, 
+            u'like_count': 0, 
+            u'duration': 15, 
+            u'player_url': None, 
+            u'id': 'yces6PZOsgc', 
+            u'view_count': 328,
+            u'title': 'new_title'}
         vprocessor = self.setup_video_processor(
             "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
+        self.api_request.video_title = None
+        self.api_request.save()
         
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 15)
@@ -513,6 +536,10 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         vid_meta = neondata.VideoMetadata.get(vprocessor.video_metadata.key)
         self.assertEquals(vid_meta.duration, 15.0)
+
+        request = neondata.NeonApiRequest.get(vid_meta.job_id,
+                                              self.na.neon_api_key)
+        self.assertEquals(request.video_title, 'new_title')
 
     @tornado.testing.gen_test
     def test_download_youtube_video_missing_duration(self):
@@ -1252,29 +1279,6 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         # can be different from multiple get_serving_url calls
         self.assertEquals(api_request.response['serving_url'].split('neon-images')[1],
                 video_data.get_serving_url(save=False).split('neon-images')[1])
-
-        # Check that a notification was sent
-        self.assertTrue(self.http_mock.called)
-        cargs, kwargs = self.http_mock.call_args
-        request_saw = cargs[0]
-        self.assertEquals(request_saw.url,
-                          'http://www.neon-lab.com/api/accounts/acct1/events')
-        data = urlparse.parse_qs(request_saw.body)
-        self.assertEquals(data['api_key'][0],
-                          options.get('video_processor.client.notification_api_key'))
-        self.assertEquals(data['event'][0], 'processing_complete')
-        video_dict = json.loads(data['video'][0])
-        self.assertEquals(video_dict['video_id'], 'vid1')
-        self.assertEquals(video_dict['title'], 'some fun video')
-        self.assertEquals(len(video_dict['thumbnails']), 3)
-
-        body_json = json.loads(self.submit_mock.call_args[0][0].body)
-        self.assertEquals('/api/v2/%s/email' % api_request.api_key, 
-            self.submit_mock.call_args[0][0].url) 
-        self.assertTrue(self.submit_mock.called)
-        self.assertEquals(body_json['template_slug'], 'video-results') 
-        self.assertEquals(body_json['subject'], 'Your Neon Images Are Here!')
-        self.assertEquals(body_json['to_email_address'], 'test@invalid.xxx')
    
         # check video object again to ensure serving_url is not set
         video_data = neondata.VideoMetadata.get(self.video_id)
