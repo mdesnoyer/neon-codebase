@@ -37,5 +37,5 @@ def lookup(model, score, gender=None, age=None):
     try:
         return sum(score_map[gender, age] < score_float)
     except KeyEror as e:
-        _log.error_n('Invalid demographics:', gender, age)
+        _log.error_n('Invalid demographics: %s %s' % (gender, age))
         return None
