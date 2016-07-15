@@ -200,7 +200,10 @@ class DemographicSignatures(object):
         except ValueError as e:
             _log.error('Improper feature vector size:', e.message)
             raise ValueError(e)
-        return score
+        # return score
+        # for now, we're nto going to return the score as multiindex 
+        # series objects, but simply as floats.
+        return float(score)
 
     def get_scores_for_all_demos(self, X):
         '''Returns the scores for all demographics given feature vector
@@ -211,7 +214,10 @@ class DemographicSignatures(object):
         except ValueError as e:
             _log.error('Improper feature vector size:', e.message)
             raise ValueError(e)
-        return scores
+        # return scores
+        # for now, we're nto going to return the scores as multiindex 
+        # series objects, but simply as numpy arrays.
+        return np.array(score)
 
 
 class Predictor(object):
