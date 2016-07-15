@@ -5135,7 +5135,7 @@ class ThumbnailMetadata(StoredObject):
         # determine the model
         if (self.model_version and 
             (re.match('20[0-9]{6}-[a-zA-Z0-9]+', 
-                      self.model_version) or ('aqv1' in model))):
+                      self.model_version) or ('aqv1' in self.model_version))):
             # aquila v2
             return round(numpy.exp(score) / numpy.exp(ot_score) - 1, 3)
         elif ot_score > 0:
