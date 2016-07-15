@@ -3227,8 +3227,6 @@ class TestVideoHandler(TestControllersBase):
                           if x['thumbnail_id'] == 'testing_vtid_default'][0]
         general_default = [x for x in demos[(None, None)] 
                           if x['thumbnail_id'] == 'testing_vtid_default'][0]
-        self.assertNotEqual(female_default['neon_score'],
-                            general_default['neon_score'])
 
         # Now, ask for bad thumbnails too
         url = ('/api/v2/%s/videos?video_id=vid1&fields=%s'
