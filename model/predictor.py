@@ -285,8 +285,7 @@ class Predictor(object):
             except tornado.gen.Return:
                 raise
             except Exception as e:
-                _log.warn('Problem scoring image. Retrying: %s' %
-                          e)
+                _log.warn('Problem scoring image. Retrying: %s' % e)
                 delay = (1 << cur_try) * base_time * random.random()
                 yield tornado.gen.sleep(delay)
         statemon.state.increment('prediction_error')
