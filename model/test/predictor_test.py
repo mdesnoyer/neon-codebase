@@ -89,7 +89,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         response.model_version = '20160713-whoami'
         self.mock_regress_call.side_effect = [response]
 
-        with self.assertLogExists(logging.ERROR, 'valid model'):
+        with self.assertLogExists(logging.ERROR, 'Could not read a valid model'):
             score, vec, vers = yield self.predictor.predict(self.image,
                                                             async=True)
 
