@@ -12,17 +12,17 @@ def lookup(model, score, gender=None, age=None):
     def get_file(model):
         return os.path.join(os.path.dirname(__file__),
                                 'demographics',
-                                '%s.pkl' % model)
+                                '%s-score.pkl' % model)
     if not model:
         # try the previous (i.e., pre-aquila) model
-        model = '20160000-prevmodel-score'
-    elif re.match('20[0-9]{6}-[a-zA-Z0-9]+-[a-zA-Z0-9]+', model):
+        model = '20160000-prevmodel'
+    elif re.match('20[0-9]{6}-[a-zA-Z0-9]+', model):
         # it's aquila v2
         pass
     elif 'aqv1' in model:
-        model = '20160000-aquilav1-score'
+        model = '20160000-aquilav1'
     else:
-        model = '20160000-prevmodel-score'
+        model = '20160000-prevmodel'
     try:
         score_map = pd.read_pickle(get_file(model))
     except IOError as e:
