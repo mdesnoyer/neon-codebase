@@ -1770,6 +1770,17 @@ class VideoHandler(ShareableContentHandler):
         url = args.get('url', None)
         if (reprocess is None) == (url is None):
             raise Invalid('Exactly one of reprocess or url is required')
+        if reprocess:
+            # Do not count a reprocessing towards the limit on the
+            # number of videos to process or stop a reprocessing if
+            # we're at the limit.
+            self.adjust_limits = False
+        else:
+            try:
+                yield self.check_account_limits(
+                    self.get_limits_after_prepare()[HTTPVerbs.POST])
+            except KeyError:
+                pass
 
         # add the video / request
         video_and_request = yield tornado.gen.Task(
@@ -1918,7 +1929,11 @@ class VideoHandler(ShareableContentHandler):
                }
 
     @classmethod
-    def get_limits(self):
+    def get_limits_after_prepare(self):
+        # get_limits() causes the limits to be checked in prepare(),
+        # but the limits need to be checked after argument parsing
+        # because a video being reprocessed shouldn't count towards
+        # the limit.
         post_list = [{ 'left_arg': 'video_posts',
                        'right_arg': 'max_video_posts',
                        'operator': '<',
