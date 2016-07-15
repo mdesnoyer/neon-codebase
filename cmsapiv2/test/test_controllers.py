@@ -4610,13 +4610,19 @@ class TestLiftStatsHandler(TestControllersBase):
         self.verify_account_mocker.stop()
 
         url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
-            '?base_id={}&thumbnail_ids={}&video_id={}'.format('a', 'b', '1')))
+            '?base_id={}&thumbnail_ids={}'.format('a', 'b')))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(401, e.exception.code)
 
         url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
-            '?base_id={}&thumbnail_ids={}'.format('a', 'b')))
+            '?base_id={}&thumbnail_ids={}&share_token={}'.format('a', 'b', share_token)))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(401, e.exception.code)
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
+            '?base_id={}&thumbnail_ids={}&video_id={}'.format('a', 'b', '1')))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(401, e.exception.code)
