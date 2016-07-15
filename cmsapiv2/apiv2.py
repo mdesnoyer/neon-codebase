@@ -588,7 +588,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         defined_limits_dict = self.get_limits()
         if defined_limits_dict is None:
-            return
+            defined_limits_dict = self.get_limits_after_prepare()
+            if defined_limits_dict is None: 
+                return  
 
         def _modify_limits(al): 
             try: 
