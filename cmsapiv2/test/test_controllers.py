@@ -14,6 +14,7 @@ from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
+import logging
 import numpy as np
 import random
 from requests_toolbelt import MultipartEncoder
@@ -44,6 +45,8 @@ from utils.options import options
 
 define('run_stripe_on_test_account', default=0, type=int,
        help='If set, will run tests that hit the real Stripe APIs')
+
+_log = logging.getLogger(__name__)
 
 class TestBase(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
@@ -940,7 +943,8 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         account = neondata.NeonUserAccount('name', 'a0', serving_enabled=False)
         yield account.save(async=True)
         account.email = email
-        user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN, email_verified=False)
+        user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN,
+                             email_verified=False)
         self.assertFalse(user.is_email_verified())
         yield user.save(async=True)
 
@@ -2366,6 +2370,74 @@ class TestVideoHandler(TestControllersBase):
                                          allow_nonstandard_methods=True)
 
         self.assertEquals(e.exception.code, 402)
+
+        # Make sure the job isn't in the database or submitted
+        self.assertIsNone(neondata.VideoMetadata.get(
+            neondata.InternalVideoID.generate(self.account_id_api_key,
+                                              '1234ascs')))
+        self.assertEquals(self.job_write_mock.call_count, 0)
+        
+
+    @tornado.testing.gen_test(timeout=600)
+    def test_post_video_reprocess_doesnt_hit_limit(self):
+        # Add a video to reprocess
+        body = {
+                'external_video_ref': '1234ascs33',
+                'url': 'some_url',
+                'title': 'my_demo_video',
+                'gender': 'M',
+                'age': '50+'
+            }
+        header = {"Content-Type": "application/json"}
+        url = '/api/v2/%s/videos' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=json.dumps(body),
+            method='POST',
+            headers=header)
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id']
+        self.assertEquals(response.code, 202)
+
+        # Simulate the job finishing
+        def _finish_job(x):
+            x.state = neondata.RequestState.FINISHED
+        neondata.NeonApiRequest.modify(job_id, self.account_id_api_key,
+                                       _finish_job)
+
+        # Simulate being at the end of the limits
+        neondata.AccountLimits(self.account_id_api_key,
+            video_posts=10).save()
+
+        # Submitting a new job will hit the limit
+        body['external_video_ref'] = 'new-job'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(self.get_url(url),
+                                         body=json.dumps(body),
+                                         method='POST',
+                                         headers=header)
+
+        self.assertEquals(e.exception.code, 402)
+
+        # Reprocessing the first job will not hit the limit
+        self.job_write_mock.reset_mock()
+        self.job_write_mock.side_effect = ['message']
+        body['external_video_ref'] = '1234ascs33'
+        body['reprocess'] = True
+        body['url'] = None
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=json.dumps(body),
+            method='POST',
+            headers=header)
+        self.assertEquals(response.code, 202)
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id']
+
+        # Check that the limit count isn't increased
+        self.assertEquals(
+            neondata.AccountLimits.get(self.account_id_api_key).video_posts,
+            10)
 
     @tornado.testing.gen_test
     def test_post_video_video_exists_in_db(self):
@@ -7724,5 +7796,5 @@ class TestEmailSupportHandler(TestControllersBase):
         self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
 
 if __name__ == "__main__" :
-    utils.neon.InitNeon()
-    unittest.main()
+    args = utils.neon.InitNeon()
+    unittest.main(argv=(['%prog']+args))

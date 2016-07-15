@@ -985,7 +985,6 @@ class StoredObject(object):
                 _log.warn('No %s for id %s in db' % (cls.__name__, key))
             if create_default:
                 obj = cls(key)
-
         db.return_connection(conn)
         raise tornado.gen.Return(obj)
 
@@ -2171,7 +2170,11 @@ class User(NamespacedStoredObject):
         self.username = username.lower()
 
         # the users password_hash, we don't store plain text passwords 
-        self.password_hash = sha256_crypt.encrypt(password)
+        # This is slow to compute, so if it's the default, then speed it up
+        # TODO: If a password isn't supplied, do not store a hash. 
+        # It's a security risk
+        rounds = 50000 if password == 'password' else None
+        self.password_hash = sha256_crypt.encrypt(password, rounds=rounds)
 
         # short-lived JWtoken that will give user access to API calls 
         self.access_token = None

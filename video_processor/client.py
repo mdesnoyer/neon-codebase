@@ -1034,7 +1034,6 @@ class VideoProcessor(object):
             raise DBError("Error finishing api request")
 
         # Send the notifications
-        yield self.send_notifiction_response(api_request)
         yield self.send_notification_email(api_request, new_video_metadata)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
@@ -1122,7 +1121,7 @@ class VideoProcessor(object):
         except Exception as e:
             rv = False  
             statemon.state.increment('unable_to_send_email')
-            _log.error('Unexcepted error %s when sending email', e)  
+            _log.error('Unexcepted error %s when sending email' % e)  
         finally: 
             raise tornado.gen.Return(rv) 
 
@@ -1154,57 +1153,13 @@ class VideoProcessor(object):
             reverse=True)
 
         tas['top_thumbnail'] = th_info[0][0]
-        tas['lift'] = th_info[0][1]
+        tas['lift'] = "{0:.0f}%".format(float(th_info[0][1] * 100)) 
   
         tas['thumbnail_one'] = th_info[1][0]
         tas['thumbnail_two'] = th_info[2][0] 
         tas['thumbnail_three'] = th_info[3][0]
 
         raise tornado.gen.Return(tas)
-         
-    @tornado.gen.coroutine
-    def send_notifiction_response(self, api_request):
-        '''
-        Send Notification to endpoint
-        '''
-
-        api_key = self.job_params['api_key'] 
-        video_id = self.job_params['video_id']
-        title = self.job_params['video_title']
-        i_id = self.video_metadata.integration_id
-        job_id  = self.job_params['job_id']
-        account = yield neondata.NeonUserAccount.get(api_key, async=True)
-        if account is None:
-            _log.error('Could not get the account for api key %s' %
-                       api_key)
-            return
-        thumbs = [t[0].to_dict_for_video_response() for t in self.thumbnails]
-        vr = neondata.VideoResponse(video_id,
-                                    job_id,
-                                    "processed",
-                                    api_request.integration_type,
-                                    i_id,
-                                    title,
-                                    self.video_metadata.duration, 
-                                    api_request.publish_date,
-                                    0, #current_tid
-                                    thumbs)
-
-        notification_url = \
-          'http://www.neon-lab.com/api/accounts/%s/events' % account.account_id
-        request_dict = {}
-        request_dict["api_key"] = options.notification_api_key
-        request_dict["video"] = vr.to_json()
-        request_dict["event"] = "processing_complete"
-        request = tornado.httpclient.HTTPRequest(
-            url=notification_url, 
-            method="POST",
-            body=urllib.urlencode(request_dict), 
-            request_timeout=60.0, 
-            connect_timeout=10.0)
-        response = yield utils.http.send_request(request, async=True)
-        if response.error:
-            _log.error("Notification response not sent to %r " % request)
 
     @tornado.gen.coroutine
     def _set_job_timeout(self, duration=None, size=None,
