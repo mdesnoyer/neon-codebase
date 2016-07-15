@@ -12,7 +12,7 @@ def lookup(model, score, gender=None, age=None):
     def get_file(model):
         return os.path.join(os.path.dirname(__file__),
                                 'demographics',
-                                '%s-score.pkl' % model)
+                                '%s.pkl' % model)
     if not model:
         # try the previous (i.e., pre-aquila) model
         model = '20160000-prevmodel-score'

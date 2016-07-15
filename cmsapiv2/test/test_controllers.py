@@ -2055,11 +2055,11 @@ class TestVideoHandler(TestControllersBase):
                                    urls=['d'],
                                    ttype='neon',
                                    features=np.random.rand(1024),
-                                   model_version='20160707-test').save()
+                                   model_version='20160713-test').save()
         neondata.ThumbnailMetadata('testing_vtid_bad', width=500,
                                    urls=['bad'],
                                    features=np.random.rand(1024),
-                                   model_version='20160707-test').save()
+                                   model_version='20160713-test').save()
         neondata.ThumbnailMetadata('testing_vtid_rand', 
                                    ttype='random',
                                    urls=['rand.jpg']).save()
@@ -2067,7 +2067,7 @@ class TestVideoHandler(TestControllersBase):
                                    ttype='default',
                                    urls=['default.jpg'],
                                    features=np.random.rand(1024),
-                                   model_version='20160707-test').save()
+                                   model_version='20160713-test').save()
         neondata.NeonApiRequest('job1', self.account_id_api_key).save()
         defop = neondata.BrightcoveIntegration.modify(self.test_i_id,
             lambda x: x,
