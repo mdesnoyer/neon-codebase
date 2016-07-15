@@ -107,7 +107,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         self.mock_regress_call.side_effect = [response]
         self.predictor.gender = 'alien'
 
-        with self.assertLogExists(logging.WARNING, 'Unknown demographic'):
+        with self.assertLogExists(logging.ERROR, 'Unknown Demographic'):
             score, vec, vers = yield self.predictor.predict(self.image,
                                                             async=True)
 
@@ -133,7 +133,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
         score2, vec2, vers2 = yield self.predictor.predict(self.image,
                                                            async=True)
 
-        self.assertNotEquals(score1, score2)
+        self.assertNotEquals(float(score1), float(score2))
         numpy.testing.assert_allclose(vec2, vec1)
         self.assertEquals(vers1, vers2)
 

@@ -186,19 +186,19 @@ class DemographicSignatures(object):
         try:
             W = self.weights[gender, age]
         except KeyError as e:
-            _log.error('Invalid key(s) for weights file:', gender, age)
+            _log.error('Unknown Demographic for weights file: %s,%s' % (gender, age))
             statemon.state.increment('unknown_demographic')
             raise KeyError(e)
         try:
             b = self.bias[gender, age]
         except KeyEror as e:
-            _log.error('Invalid key(s) for bias file:', gender, age)
+            _log.error('Unknown Demographic for bias file: %s,%s' % (gender, age))
             statemon.state.increment('unknown_demographic')
             raise KeyError(e)
         try:
             score = X.dot(W) + b
         except ValueError as e:
-            _log.error('Improper feature vector size:', e.message)
+            _log.error('Improper feature vector size: %s' % e.message)
             raise ValueError(e)
         return score
 
@@ -209,7 +209,7 @@ class DemographicSignatures(object):
         try:
             scores = X.dot(self.weights) + self.bias
         except ValueError as e:
-            _log.error('Improper feature vector size:', e.message)
+            _log.error('Improper feature vector size: %s' % e.message)
             raise ValueError(e)
         return scores
 
