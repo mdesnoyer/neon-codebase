@@ -5117,7 +5117,7 @@ class ThumbnailMetadata(StoredObject):
         scoring model.
         """ 
         model_score = self.get_score(gender=gender, age=age)
-        if model_score:
+        if model_score is not None and float(model_score):
             return model.scores.lookup(self.model_version, model_score,
                                        gender, age)
         return None

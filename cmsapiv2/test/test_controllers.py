@@ -3245,7 +3245,8 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(len(bad_thumbs[('F', '20-29')]), 1)
         self.assertEquals(bad_thumbs[('F', '20-29')][0]['thumbnail_id'],
                           'testing_vtid_bad')
-        self.assertGreater(bad_thumbs[('F', '20-29')][0]['neon_score'],
+        # No demo score bucket is greater than the model score, so 0.
+        self.assertEqual(bad_thumbs[('F', '20-29')][0]['neon_score'],
                            0)
 
         # Ask for the thumbnails and they should return the result
@@ -3932,7 +3933,7 @@ class TestThumbnailHandler(TestControllersBase):
         ).save()
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['neon_score'], 12)
+        self.assertEquals(rjson['neon_score'], 13)
 
     @tornado.testing.gen_test
     def test_get_thumbnail_with_renditions(self):
@@ -4012,7 +4013,7 @@ class TestThumbnailHandler(TestControllersBase):
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertGreater(rjson['neon_score'], 0)
+        self.assertEqual(rjson['neon_score'], 0) # No bucket less than the raw score.
 
         neondata.ThumbnailMetadata(
             'featonly',
@@ -4025,7 +4026,7 @@ class TestThumbnailHandler(TestControllersBase):
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertGreater(rjson['neon_score'], 0)
+        self.assertEqual(rjson['neon_score'], 0)
 
         neondata.ThumbnailMetadata(
             'scoreonly',
