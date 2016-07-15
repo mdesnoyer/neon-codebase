@@ -78,7 +78,7 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
 
         self.assertIsNotNone(score)
         numpy.testing.assert_allclose(features, vec)
-        self.assertEquals(vers, '20160707-test')
+        self.assertEquals(vers, '20160713-test')
 
     @tornado.testing.gen_test
     def test_aquilav2_unknown_model(self):
