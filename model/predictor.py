@@ -163,12 +163,14 @@ class DemographicSignatures(object):
         except IOError as e:
             _log.error('Could not read a valid model weights file at %s: %s' % 
                        (weights_fn, e))
+            statemon.state.increment('unknown_model')
             raise KeyError(model_name)
         try:
             self.bias = pandas.read_pickle(bias_fn)
         except IOError as e:
             _log.error('Could not read a valid model bias file at %s: %s' % 
                        (bias_fn, e))
+            statemon.state.increment('unknown_model')
             raise KeyError(model_name)  
 
     def compute_score_for_demo(self, X, gender=None, age=None):
@@ -185,11 +187,13 @@ class DemographicSignatures(object):
             W = self.weights[gender, age]
         except KeyError as e:
             _log.error('Invalid key(s) for weights file:', gender, age)
+            statemon.state.increment('unknown_demographic')
             raise KeyError(e)
         try:
             b = self.bias[gender, age]
         except KeyEror as e:
             _log.error('Invalid key(s) for bias file:', gender, age)
+            statemon.state.increment('unknown_demographic')
             raise KeyError(e)
         try:
             score = X.dot(W) + b
@@ -514,17 +518,12 @@ class DeepnetPredictor(Predictor):
         if response.model_version is not None:
             try:
                 signatures = DemographicSignatures(response.model_version)
-            except IOError as e:
-                _log.warn_n('Unknown model. model: %s' % response.model_version)
-                statemon.state.increment('unknown_model')
-            try:
                 score = signatures.compute_score_for_demo(
                     features, gender=self.gender, age=self.age)
             except KeyError as e:
-                # Could not get a demographic to match, so keep score as None
-                _log.warn_n('Unknown demographic. model: %s age: %s gender %s'
+                # There was some problem obtaining the score.
+                _log.warn_n('Unknown model/demographic. model: %s age: %s gender %s'
                             % (response.model_version, self.gender, self.age))
-                statemon.state.increment('unknown_demographic')
         raise tornado.gen.Return((score, features, vers))
 
     def complete(self):
