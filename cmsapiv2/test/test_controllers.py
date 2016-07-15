@@ -4591,6 +4591,44 @@ class TestLiftStatsHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertIsNone(rjson['lift'][0]['lift'])
 
+    @tornado.testing.gen_test
+    def test_share_token_allows_get(self):
+
+        video = neondata.VideoMetadata('u_1', request_id='1')
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': video.get_id()
+        }
+        share_token = ShareJWTHelper.encode(payload)
+        video.share_token = share_token
+        video.save()
+        video.save()
+
+        neondata.ThumbnailMetadata('a', model_score=.4).save()
+        neondata.ThumbnailMetadata('b', model_score=.5).save()
+
+        self.verify_account_mocker.stop()
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
+            '?base_id={}&thumbnail_ids={}&video_id={}'.format('a', 'b', '1')))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(401, e.exception.code)
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
+            '?base_id={}&thumbnail_ids={}'.format('a', 'b')))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(401, e.exception.code)
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
+            '?base_id={}&thumbnail_ids={}&video_id={}&share_token={}'.format(
+                'a', 'b', '1', share_token)))
+
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.verify_account_mocker.start()
+
 
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):

@@ -2124,14 +2124,16 @@ class ThumbnailStatsHandler(APIV2Handler):
 '''*********************************************************************
 LiftStatsHandler
 *********************************************************************'''
-class LiftStatsHandler(APIV2Handler):
+class LiftStatsHandler(ShareableContentHandler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('base_id'): All(Coerce(str), Length(min=1, max=2048)),
-            Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList())})
+            Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
+            Optional('share_token'): str})
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
@@ -2148,11 +2150,9 @@ class LiftStatsHandler(APIV2Handler):
             async=True,
             as_dict=True)
 
-
         lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
             base_thumb) if t else None}
                 for k, t in thumbs.items()]
-
 
         # Check thumbnail exists.
         rv = {
@@ -2161,7 +2161,9 @@ class LiftStatsHandler(APIV2Handler):
         self.success(rv)
 
     def get_access_levels(self):
-        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
 
 
 '''*********************************************************************
@@ -3211,6 +3213,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/estimated_lift/?$', LiftStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos/?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails/?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
