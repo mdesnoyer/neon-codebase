@@ -1858,12 +1858,11 @@ class LocalSearcher(object):
             if frameno is not None:
                 # then there are still samples to be taken
                 self._inq.put(('samp', frameno))
-            else:
-                while self._active_samples > 0:
-                    sleep(0.5)
+                return
+            elif self._active_samples <= 0:
                 self.done_sampling = True
                 _log.info('Finished sampling')
-            return
+                return
         # okay, let's get a search frame instead.
         try:
             srch_info = self.search_algo.get_search()
