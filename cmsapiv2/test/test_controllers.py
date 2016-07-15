@@ -3246,8 +3246,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(bad_thumbs[('F', '20-29')][0]['thumbnail_id'],
                           'testing_vtid_bad')
         # No demo score bucket is greater than the model score, so 0.
-        self.assertEqual(bad_thumbs[('F', '20-29')][0]['neon_score'],
-                           0)
+        self.assertGreater(bad_thumbs[('F', '20-29')][0]['neon_score'], 0)
 
         # Ask for the thumbnails and they should return the result
         # from the (None, None) demographic response
@@ -4006,14 +4005,14 @@ class TestThumbnailHandler(TestControllersBase):
             'featandscore',
             urls=['http://asdf.com/1.jpg'],
             model_score='-1e-3',
-            model_version='20160707-test',
+            model_version='20160713-test',
             features=features
         ).save()
         url = '/api/v2/%s/thumbnails?thumbnail_id=featandscore' % (
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEqual(rjson['neon_score'], 0) # No bucket less than the raw score.
+        self.assertGreater(rjson['neon_score'], 0)
 
         neondata.ThumbnailMetadata(
             'featonly',
@@ -4026,20 +4025,20 @@ class TestThumbnailHandler(TestControllersBase):
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEqual(rjson['neon_score'], 0)
+        self.assertIsNone(rjson['neon_score'])
 
         neondata.ThumbnailMetadata(
             'scoreonly',
             urls=['http://asdf.com/1.jpg'],
             model_score='-1e-3',
-            model_version='20160707-test',
+            model_version='20160713-test',
             features=None
         ).save()
         url = '/api/v2/%s/thumbnails?thumbnail_id=scoreonly' % (
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['neon_score'], 0)
+        self.assertGreater(rjson['neon_score'], 0)
         
     @tornado.testing.gen_test
     def test_thumbnail_update_no_params(self):
