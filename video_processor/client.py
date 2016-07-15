@@ -1154,7 +1154,7 @@ class VideoProcessor(object):
             reverse=True)
 
         tas['top_thumbnail'] = th_info[0][0]
-        tas['lift'] = th_info[0][1]
+        tas['lift'] = "{0:.0f}%".format(float(th_info[0][1] * 100)) 
   
         tas['thumbnail_one'] = th_info[1][0]
         tas['thumbnail_two'] = th_info[2][0] 
