@@ -19,8 +19,10 @@ import hashlib
 import logging
 import model.errors
 import numpy as np
+import pandas
 from PIL import Image
 import os
+import pandas as pd
 import pyflann
 import random
 import time
@@ -39,6 +41,13 @@ statemon.define('lost_server_connection', int)  # lost the server connection
 statemon.define('unable_to_connect', int)  # could not connect to server in the first place
 statemon.define('good_deepnet_connection', int)
 statemon.define('prediction_error', int)
+statemon.define('unknown_demographic', int)
+statemon.define('unknown_model', int)
+# MEAN_CHANNEL_VALS are the mean pixel value, per channel, of all of our
+# training images. This will remain constant: it's a mean over millions of
+# images so is unlikely to change significantly. We won't be recomputing it.
+MEAN_CHANNEL_VALS = [[[92.366, 85.133, 81.674]]]
+MEAN_CHANNEL_VALS = np.array(MEAN_CHANNEL_VALS).round().astype(np.uint8)
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -62,7 +71,7 @@ def _resize_to(img, w=None, h=None):
     w = int(h * asp)
   elif h is None:
     h = int(w / asp)
-  return img.resize((w, h), Image.BILINEAR)
+  return img.resize((w, h), Image.ANTIALIAS)
 
 
 def _center_crop_to(img, w, h):
@@ -109,7 +118,9 @@ def _pad_to_asp(img, asp):
     newsize = (ow, nh)
   else:
     return img
-  nimg = Image.new(img.mode, newsize)
+  nimg = np.zeros((newsize[1], newsize[0], 3)).astype(np.uint8)
+  nimg += MEAN_CHANNEL_VALS
+  nimg = Image.fromarray(nimg)
   nimg.paste(img, box=(left, upper))
   return nimg
 
@@ -127,10 +138,86 @@ def _aquila_prep(image):
     img = Image.fromarray(image[:,:,::-1])
     img = _pad_to_asp(img, 16./9)
     # resize the image to 299 x 299
-    img = _resize_to(img, w=314, h=314)
-    img = _center_crop_to(img, w=299, h=299)
+    img = _resize_to(img, w=299, h=299)
     return np.array(img).astype(np.uint8)
 
+class DemographicSignatures(object):
+    '''Object that manages all the signatures for different demographics.
+
+    dot this vector with your image signature and you get the model
+    score for that image for that demographic.
+    
+    '''
+    __metaclass__ = utils.obj.KeyedSingleton
+
+    def __init__(self, model_name):
+        # Load up the files
+        weights_fn = os.path.join(os.path.dirname(__file__),
+                                  'demographics',
+                                  '%s-weight.pkl' % model_name)
+        bias_fn = os.path.join(os.path.dirname(__file__),
+                               'demographics',
+                               '%s-bias.pkl' % model_name)
+        try:
+            self.weights = pandas.read_pickle(weights_fn)
+        except IOError as e:
+            _log.error('Could not read a valid model weights file at %s: %s' % 
+                       (weights_fn, e))
+            statemon.state.increment('unknown_model')
+            raise KeyError(model_name)
+        try:
+            self.bias = pandas.read_pickle(bias_fn)
+        except IOError as e:
+            _log.error('Could not read a valid model bias file at %s: %s' % 
+                       (bias_fn, e))
+            statemon.state.increment('unknown_model')
+            raise KeyError(model_name)  
+
+    def compute_score_for_demo(self, X, gender=None, age=None):
+        '''Returns the score for gender `gender` and age `age` derived from
+        feature vector X (a numpy array)
+        '''
+        X = np.array(X)
+        X = X.reshape(1, -1)
+        if gender is None:
+            gender = 'None'
+        if age is None:
+            age = 'None'
+        try:
+            W = self.weights[gender, age]
+        except KeyError as e:
+            _log.error('Unknown Demographic for weights file: %s,%s' % (gender, age))
+            statemon.state.increment('unknown_demographic')
+            raise KeyError(e)
+        try:
+            b = self.bias[gender, age]
+        except KeyEror as e:
+            _log.error('Unknown Demographic for bias file: %s,%s' % (gender, age))
+            statemon.state.increment('unknown_demographic')
+            raise KeyError(e)
+        try:
+            score = X.dot(W) + b
+        except ValueError as e:
+            _log.error('Improper feature vector size: %s' % e.message)
+            raise ValueError(e)
+        # return score
+        # for now, we're nto going to return the score as multiindex 
+        # series objects, but simply as floats.
+        return float(score)
+
+    def get_scores_for_all_demos(self, X):
+        '''Returns the scores for all demographics given feature vector
+        X as a pandas multiindex'''
+        X = X.reshape(1, -1)
+        try:
+            scores = X.dot(self.weights) + self.bias
+        except ValueError as e:
+            _log.error('Improper feature vector size: %s' % e.message)
+            raise ValueError(e)
+        # return scores
+        # for now, we're nto going to return the scores as multiindex 
+        # series objects, but simply as numpy arrays.
+        return np.array(score)
 
 
 class Predictor(object):
@@ -185,13 +272,15 @@ class Predictor(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def predict(self, image, ntries=3, timeout=10.0, *args, **kwargs):
+    def predict(self, image, ntries=3, timeout=10.0, base_time=0.4, 
+                *args, **kwargs):
         '''Predicts the valence score of an image synchronously.
 
         Inputs:
         image - numpy array of the image
 
-        Returns: predicted valence score
+        Returns: (predicted valence score, feature vector, model_version) 
+                 any can be None
 
         Raises: NotTrainedError if it has been called before train() has.
         '''
@@ -200,14 +289,14 @@ class Predictor(object):
         while cur_try < ntries:
             cur_try += 1
             try:
-                score = yield self._predict(image, *args, **kwargs)
-                raise tornado.gen.Return(score)
+                score, vec, vers = yield self._predict(image,
+                                                       *args, **kwargs)
+                raise tornado.gen.Return((score, vec, vers))
             except tornado.gen.Return:
                 raise
             except Exception as e:
-                _log.warn('Problem scoring image. Retrying: %s' %
-                          e)
-                delay = (1 << cur_try) * 0.4 * random.random()
+                _log.warn('Problem scoring image. Retrying: %s' % e)
+                delay = (1 << cur_try) * base_time * random.random()
                 yield tornado.gen.sleep(delay)
         statemon.state.increment('prediction_error')
         if isinstance(e, model.errors.PredictionError):
@@ -221,7 +310,8 @@ class Predictor(object):
         Inputs:
         image - numpy array of the image
 
-        Returns: predicted valence score
+        Returns: (predicted valence score, feature vector, model_version) 
+                 any can be None
 
         Raises: NotTrainedError if it has been called before train() has.
         '''
@@ -285,7 +375,8 @@ class DeepnetPredictor(Predictor):
     the gRPC channel changes.'''
 
     def __init__(self, concurrency=10, port=9000,
-                 aquila_connection=None):
+                 aquila_connection=None,
+                 gender=None, age=None):
         '''
         concurrency - The maximum number of simultaneous requests to
         submit.
@@ -313,6 +404,11 @@ class DeepnetPredictor(Predictor):
         self._conn_callback = None
         self._conn_lock = threading.RLock()
         self._consequtive_connection_failures = 0
+
+        # Optional demographic parameters used to get the target
+        # vector needed when calculating the model score.
+        self.gender = None
+        self.age = None
 
     def _reconnect(self, force_refresh):
         '''
@@ -416,11 +512,25 @@ class DeepnetPredictor(Predictor):
                 self.active -= 1
                 self._cv.notify_all()
 
-        if len(response.valence) != 1:
-            raise model.errors.PredictionError(
-                'Invalid response, must be a single value. Was: %s' % 
-                response.valence)
-        raise tornado.gen.Return(response.valence[0])
+        vers = response.model_version or 'aqv1.1.250'
+
+        if len(response.valence) == 1:
+            # The response is only returning the valence, not the
+            # feature vector
+            raise tornado.gen.Return((response.valence[0], None, vers))
+
+        features = np.array(response.valence)
+        score = None
+        if response.model_version is not None:
+            try:
+                signatures = DemographicSignatures(response.model_version)
+                score = signatures.compute_score_for_demo(
+                    features, gender=self.gender, age=self.age)
+            except KeyError as e:
+                # There was some problem obtaining the score.
+                _log.warn_n('Unknown model/demographic. model: %s age: %s gender %s'
+                            % (response.model_version, self.gender, self.age))
+        raise tornado.gen.Return((score, features, vers))
 
     def complete(self):
         '''
@@ -504,7 +614,7 @@ class KFlannPredictor(Predictor):
 
         if video_id is None:
             score = self.score_neighbours(self.get_neighbours(image, k=self.k))
-            raise tornado.gen.Return(score)
+            raise tornado.gen.Return((score, None, None))
 
         # If we don't want to include images from the same
         # video, we need to ask for extra neighbours. This
@@ -521,7 +631,7 @@ class KFlannPredictor(Predictor):
             if neighbour[3] <> video_hash:
                 valid_neighbours.append(neighbour)
         score = self.score_neighbours(valid_neighbours)
-        raise tornado.gen.Return(score)
+        raise tornado.gen.Return((score, None, None))
 
     def score_neighbours(self, neighbours):
         '''Returns the score for k neighbours.'''

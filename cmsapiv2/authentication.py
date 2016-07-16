@@ -8,8 +8,6 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 from datetime import datetime, timedelta
-import emails.verify
-import emails.forgot
 from passlib.hash import sha256_crypt
 from voluptuous import RequiredFieldInvalid
 
@@ -69,8 +67,6 @@ class AuthenticateHandler(APIV2Handler):
         password = args.get('password')
 
         api_accessor = yield neondata.User.get(username, async=True)
-        result = None
-
         access_token, refresh_token = AccountHelper.get_auth_tokens(
             {'username': username})
 
@@ -78,7 +74,11 @@ class AuthenticateHandler(APIV2Handler):
             x.access_token = access_token
             x.refresh_token = refresh_token
 
+        result = None
         if api_accessor:
+            if not api_accessor.is_email_verified():
+                raise NotAuthorizedError('Email needs verification')
+
             if sha256_crypt.verify(password, api_accessor.password_hash):
                 user = yield neondata.User.modify(username,
                     _update_tokens,
@@ -199,31 +199,27 @@ class RefreshTokenHandler(APIV2Handler):
         refresh_token = args.get('token')
         try:
             payload = JWTHelper.decode_token(refresh_token)
-            if payload.get('username'):
-                username = payload['username'].lower()
-                user = yield neondata.User.get(username, async=True)
-                account_ids = yield user.get_associated_account_ids(async=True)
 
-                access_token = JWTHelper.generate_token(
-                    {'username': username},
-                    token_type=TokenTypes.ACCESS_TOKEN)
+            username = payload['username'].lower()
+            user = yield neondata.User.get(username, async=True)
+            if not user:
+                raise NotFoundError('No user found for this username')
 
-                def _update_user(u):
-                    u.access_token = access_token
+            account_ids = yield user.get_associated_account_ids(async=True)
+            if not account_ids:
+                raise HTTPError('User has no associated account')
 
-                yield neondata.User.modify(username,
-                    _update_user,
-                    async=True)
-            elif payload.get('account_id'):
-                account_id = payload.get('account_id')
-                account = yield neondata.NeonUserAccount.get(account_id, async=True)
-                if not account:
-                    raise jwt.NotFoundError('Account does not exist.')
-                account_ids = [account.get_id()]
+            access_token = JWTHelper.generate_token(
+                {'username': username,
+                 'account_id': account_ids[0]},
+                token_type=TokenTypes.ACCESS_TOKEN)
 
-                access_token = JWTHelper.generate_token(
-                    {'account_id': account.get_id()},
-                    token_type=TokenTypes.ACCESS_TOKEN)
+            def _update_user(u):
+                u.access_token = access_token
+
+            yield neondata.User.modify(username,
+                _update_user,
+                async=True)
 
             result = {
                 'access_token': access_token,
@@ -234,7 +230,7 @@ class RefreshTokenHandler(APIV2Handler):
 
         except jwt.ExpiredSignatureError:
             raise NotAuthorizedError('refresh token has expired, please authenticate again')
-        except jwt.InvalidTokenError:
+        except (jwt.InvalidTokenError, KeyError):
             raise NotAuthorizedError('refresh token invalid, please authenticate again')
 
     @classmethod
@@ -282,15 +278,16 @@ class NewAccountHandler(APIV2Handler):
                 Required('email'): CustomVoluptuousTypes.Email(),
                 Required('admin_user_username'): All(CustomVoluptuousTypes.Email(), Length(min=6, max=512)),
                 Required('admin_user_password'): All(Coerce(str), Length(min=8, max=64)),
-            })
+            }, extra=ALLOW_EXTRA)
             schema(args)
         # If not email, then provide a loginless account.
         else:
-            account = yield AccountHelper.save_loginless_account()
+            account, user = yield AccountHelper.save_loginless_account()
 
             # Generate and return tokens.
-            access_token, refresh_token = AccountHelper.get_auth_tokens(
-                {'account_id': account.get_id()})
+            access_token, refresh_token = AccountHelper.get_auth_tokens({
+                'username': account.get_id(),
+                'account_id': account.get_id()})
             self.success({
                 'account_ids': [account.get_id()],
                 'access_token': access_token,
@@ -361,13 +358,22 @@ class AccountHelper(object):
         """Add an account that is kept via the session cookie."""
 
         # Save anonymous Neon user account.
-        account = neondata.NeonUserAccount(uuid.uuid1().hex)
-        account.save(async=True)
+        account = neondata.NeonUserAccount(
+            uuid.uuid1().hex,
+            serving_enabled=False)
+        account.users = [account.get_id()]
+        yield account.save(async=True)
+        # Save the initial admin user.
+        user = neondata.User(
+            account.get_id(),
+            access_level=neondata.AccessLevels.ADMIN,
+            email_verified=False)
+        yield user.save(async=True)
 
         # Save other account objects that are based on the Neon api key.
         yield AccountHelper.save_default_objects(account)
 
-        raise tornado.gen.Return(account)
+        raise tornado.gen.Return((account, user))
 
     @staticmethod
     @tornado.gen.coroutine
@@ -389,18 +395,25 @@ class AccountHelper(object):
         Yields the NeonUserAccount, after save to db
         """
 
-        # Instantiate account from json payload in verifier.
+        # Instantiate account and user from payload in verifier.
         account = neondata.NeonUserAccount.create(
             verifier.extra_info['account'])
-
-        # Create user.
+        # Enable this for Mastermind serving.
+        account.serving_enabled = True
         user_json = json.loads(verifier.extra_info['user'])
         user = neondata.User._create(
             user_json['_data']['key'],
             user_json)
+        user.email_verified = True
+
         # Let database confirm email's uniqueness.
         try:
             yield user.save(overwrite_existing_object=False, async=True)
+
+            # Clean up any placeholder.
+            if(user.get_id() in account.users):
+                account.users.remove(user.get_id())
+                yield user.delete(account.get_id(), async=True)
         except neondata.psycopg2.IntegrityError:
             raise AlreadyExists('User with that email already exists.')
 
@@ -408,6 +421,8 @@ class AccountHelper(object):
         yield AccountHelper.save_default_objects(account)
 
         # Save account and return it.
+        account.users.append(user.get_id())
+        account.email = account.email if account.email else user.username
         yield account.save(async=True)
         raise tornado.gen.Return(account)
 
@@ -434,18 +449,28 @@ class AccountHelper(object):
             neondata.TrackerAccountIDMapper.STAGING)
         yield tracker_s_aid_mapper.save(async=True)
 
-        # Create or update account with the demo billing plan and limits.
+        # Set account to have the demo billing plan and limits.
         billing_plan = yield neondata.BillingPlans.get(
             'demo',
             async=True)
         account_limits = neondata.AccountLimits(account.neon_api_key)
         account_limits.populate_with_billing_plan(billing_plan)
-        yield account_limits.save(async=True)
+        try:
+            yield account_limits.save(
+                overwrite_existing_object=False,
+                async=True)
+        except neondata.psycopg2.IntegrityError:
+            pass
 
         # Add the default experiment strategy.
         experiment_strategy = neondata.ExperimentStrategy(
             account.neon_api_key)
-        yield experiment_strategy.save(async=True)
+        try:
+            yield experiment_strategy.save(
+                overwrite_existing_object=False,
+                async=True)
+        except neondata.psycopg2.IntegrityError:
+            pass
 
     @staticmethod
     @tornado.gen.coroutine
@@ -471,7 +496,6 @@ class AccountHelper(object):
         yield verifier.save(async=True)
 
         # Send email.
-
         rv = yield AccountHelper.send_verification_email(
             account=account,
             user=user,
@@ -488,27 +512,18 @@ class AccountHelper(object):
         If the email is sent successfully, it returns True.
         If something goes wrong, it logs and raises an exception.
         """
-        kwargs = {}
+        temp_args = {}
         url = '%s/account/confirm?token=%s' % (origin, token)
-        kwargs['to_addresses'] = account.email
-        subject, body = emails.verify.template()
-        kwargs['subject'] = subject
-        kwargs['body'] = body.format(
-            first_name=user.first_name,
-            url=url,
-            username=user.username)
-        kwargs['source'] = 'Neon Account Creation <noreply@neon-lab.com>'
-        kwargs['reply_addresses'] = 'noreply@neon-lab.com'
-        kwargs['format'] = 'html'
-        ses = boto.connect_ses()
-        try:
-            # Yield on this external call.
-            yield executor.submit(ses.send_email, **kwargs)
-        except Exception as e:
-            _log.error('Failed to Verification Send email to %s exc_info %s' %
-                (user.username, e))
-            raise Exception('unable to send verification email')
-        raise tornado.gen.Return()
+        temp_args['url'] = url 
+        temp_args['first_name'] = user.first_name
+        temp_args['username'] = user.username      
+   
+        yield MandrillEmailSender.send_mandrill_email(
+            account.email, 
+            'verify-account', 
+            template_args=temp_args)
+
+        raise tornado.gen.Return(True)
 
     @staticmethod
     def get_auth_tokens(payload):
@@ -606,33 +621,55 @@ class UserHandler(APIV2Handler):
         """handles user endpoint post request"""
 
         schema = Schema({
-          Required('username') : All(Coerce(str), Length(min=8, max=256)),
-          Required('password') : All(Coerce(str), Length(min=8, max=64)),
-          Required('access_level') : All(Coerce(int), Range(min=1, max=31)),
-          'first_name': All(Coerce(str), Length(min=1, max=256)),
-          'last_name': All(Coerce(str), Length(min=1, max=256)),
-          'secondary_email': All(Coerce(str), Length(min=1, max=256)),
-          'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
-          'title': All(Coerce(str), Length(min=1, max=32))
+            Required('username'): CustomVoluptuousTypes.Email(),
+            Required('password'): All(Coerce(str), Length(min=8, max=64)),
+            'access_level' : All(Coerce(int), Range(min=1, max=31)),
+            'first_name': All(Coerce(str), Length(min=1, max=256)),
+            'last_name': All(Coerce(str), Length(min=1, max=256)),
+            'secondary_email': All(Coerce(str), Length(min=1, max=256)),
+            'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
+            'title': All(Coerce(str), Length(min=1, max=32))
         })
 
         args = self.parse_args()
         schema(args)
 
-        new_user = neondata.User(username=args.get('username'),
-                       password=args.get('password'),
-                       access_level=args.get('access_level'),
-                       first_name=args.get('first_name', None),
-                       last_name=args.get('last_name', None),
-                       secondary_email=args.get('secondary_email', None),
-                       cell_phone_number=args.get('cell_phone_number', None),
-                       title=args.get('title',None))
+        # Validate the email address is not claimed.
+        username = args['username'].lower()
+        is_address_claimed = yield AccountHelper.is_address_claimed(username)
+        if is_address_claimed:
+            raise AlreadyExists('User with that email already exists.')
 
-        yield new_user.save(async=True)
-        new_user = yield neondata.User.get(args.get('username'), async=True)
-        user = yield self.db2api(new_user)
+        # Get the account in the authorization token payload.
+        payload = JWTHelper.decode_token(self.access_token)
+        account_id = payload['account_id']
+        account = yield neondata.NeonUserAccount.get(account_id, async=True)
+        if not account:
+            raise NotAuthorizedError('This requires an account.')
 
-        self.success(user)
+        # Instantiate a user to store in the verification payload.
+        user = neondata.User(
+            username=username,
+            password=args.get('password'),
+            access_level=neondata.AccessLevels.ADMIN,
+            first_name=args.get('first_name'),
+            last_name=args.get('last_name'),
+            secondary_email=args.get('secondary_email'),
+            cell_phone_number=args.get('cell_phone_number'),
+            title=args.get('title'))
+
+        # Create and send verification.
+        account.users = [username]
+        account.email = username
+        yield AccountHelper.user_wants_verification(
+            account=account,
+            user=user,
+            origin=self.origin,
+            executor=self.executor)
+
+        # Respond with a sent email message.
+        msg = 'Account verification email sent to %s' % account.email
+        self.success({'message': msg})
 
     @tornado.gen.coroutine
     def put(self):
@@ -816,10 +853,11 @@ class ForgotPasswordHandler(APIV2Handler):
             async=True)
 
         if email_address:
-            self._send_email(email_address, user)
+            yield self._send_email(email_address, user)
             msg = 'Reset Password email sent to %s' % email_address
             self.success({'message' : msg})
-
+    
+    @tornado.gen.coroutine
     def _send_email(self,
                     email_address,
                     user):
@@ -828,31 +866,22 @@ class ForgotPasswordHandler(APIV2Handler):
             if the email is sent successfully, it returns True
             if something goes wrong it logs, and raises an exception
         """
-        kwargs = {}
         click_me_url = '%s/user/reset/token/%s/username/%s/' % (
             self.origin,
             user.reset_password_token,
             user.username)
-        kwargs['to_addresses'] = email_address
 
-        subject, body = emails.forgot.template()
-        kwargs['subject'] = subject
-        kwargs['body'] = body.format(
-            first_name=user.first_name,
-            url=click_me_url,
-            username=user.username)
-        kwargs['source'] = 'Neon Forgot Your Password <noreply@neon-lab.com>'
-        kwargs['reply_addresses'] = 'noreply@neon-lab.com'
-        kwargs['format'] = 'html'
-        ses = boto.connect_ses()
-        try:
-            ses.send_email(**kwargs)
-        except Exception as e:
-            _log.error('Failed to Send Reset Password email to %s exc_info %s' %
-                (email_address, e))
-            raise Exception('unable to send reset password email')
+        temp_args = {}
+        temp_args['url'] = click_me_url 
+        temp_args['first_name'] = user.first_name
+        temp_args['username'] = user.username      
+   
+        yield MandrillEmailSender.send_mandrill_email(
+            email_address, 
+            'reset-password', 
+            template_args=temp_args)
 
-        return True
+        raise tornado.gen.Return(True) 
 
     @classmethod
     def get_access_levels(self):

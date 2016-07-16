@@ -48,6 +48,7 @@ xlwt==1.0.0
 dill==0.2.4
 passlib==1.6.5
 stripe==1.32.2
-youtube_dl
+youtube_dl>=2016.07.13
 hdfs==2.0.6
 grpcio==0.13.1
+requests-toolbelt==0.6.2

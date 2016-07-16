@@ -304,18 +304,18 @@ class TestVideoDBWatcher(ServerPostgresTest):
     def test_account_default_thumb_update(self, get_ivids_mock, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
         a1 = neondata.NeonUserAccount('a1', 'acct1', serving_enabled=True)
-        a1.default_thumbnail_id = 'a1_NOVIDEO_tdef'
+        a1.default_thumbnail_id = 'a1_%s_tdef' % neondata.InternalVideoID.NOVIDEO
         a2 = neondata.NeonUserAccount('a2', 'acct2', serving_enabled=True)
         datamock.NeonUserAccount.iterate_all.return_value = [
             a1, a2]
-        get_ivids_mock.return_value = [] 
+        get_ivids_mock.return_value = []
 
         # Process the data
         self.watcher._process_db_data(True)
 
         # Check the data
         self.assertEqual(self.directive_publisher.default_thumbs['acct1'],
-                         'a1_NOVIDEO_tdef')
+                         'a1_%s_tdef' % neondata.InternalVideoID.NOVIDEO)
         self.assertNotIn('acct2', self.directive_publisher.default_thumbs)
 
         # Check if we remove the default thumb, it is removed from the map
@@ -644,27 +644,28 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
             self.watcher._change_subscriber.subscribe_to_db_changes())
         while not self.watcher._change_subscriber._is_subscribed: 
             yield tornado.gen.sleep(0.1)
-        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
-                                                        'key1_NOVIDEO',
+        nvd = neondata.InternalVideoID.NOVIDEO
+        default_acct_thumb = neondata.ThumbnailMetadata('key1_%s_t0' % nvd,
+                                                        'key1_%s' % nvd,
                                                         ttype='default',
                                                         rank=0)
         yield default_acct_thumb.save(async=True)
-        t_urls = neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+        t_urls = neondata.ThumbnailServingURLs('key1_%s_t0' % nvd,
                                                {(160, 90) : 't_default.jpg'})
         yield t_urls.save(async=True)
-        self.acct.default_thumbnail_id = 'key1_NOVIDEO_t0'
+        self.acct.default_thumbnail_id = 'key1_%s_t0' % nvd
         self.acct.default_size = (640, 480)
         yield self.acct.save(async=True)
         yield self.assertWaitForEquals(
             lambda: self.directive_publisher.default_thumbs['key1'],
-            'key1_NOVIDEO_t0', async=True)
+            'key1_%s_t0' % nvd, async=True)
 
         self.assertEquals(self.directive_publisher.default_sizes['key1'],
                           [640,480])
 
         yield self.assertWaitForEquals(
             lambda: self.directive_publisher.get_serving_urls(
-                'key1_NOVIDEO_t0').get_serving_url(160, 90),
+                'key1_%s_t0' % nvd).get_serving_url(160, 90),
             't_default.jpg', async=True)
         self.acct.default_thumbnail_id = None
         yield self.acct.save(async=True)
@@ -2320,12 +2321,13 @@ class SmokeTesting(ServerAsyncPostgresTest):
         # it's all hooked together.
 
         # Create the account with a default thumbnail
-        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
-                                                        'key1_NOVIDEO',
+        nvd = neondata.InternalVideoID.NOVIDEO
+        default_acct_thumb = neondata.ThumbnailMetadata('key1_%s_t0' % nvd,
+                                                        'key1_%s' % nvd,
                                                         ttype='default',
                                                         rank=0)
         default_acct_thumb.save()
-        neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+        neondata.ThumbnailServingURLs('key1_%s_t0' % nvd,
                                       {(160, 90) : 't_default.jpg'}).save()
         acct = neondata.NeonUserAccount('acct1', 'key1', serving_enabled=True)
         acct.default_thumbnail_id = default_acct_thumb.key

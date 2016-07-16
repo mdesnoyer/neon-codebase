@@ -8,6 +8,12 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+import dateutil.parser
+import numpy as np
+import PIL.Image
+import io
+import StringIO
+
 import cmsapiv2.client
 import fractions
 import logging
@@ -16,18 +22,6 @@ _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
-define("send_mandrill_emails", 
-    default=1, 
-    help="should we actually send the email", 
-    type=str) 
-define("mandrill_api_key", 
-    default='Y7N4ELi5hMDp_RbTQH9OqQ', 
-    help="key from mandrillapp.com used to make api calls", 
-    type=str)
-define("mandrill_base_url", 
-    default='https://mandrillapp.com/api/1.0', 
-    help="mandrill base api url", 
-    type=str)
 
 statemon.define('put_account_oks', int)
 statemon.define('get_account_oks', int)
@@ -52,9 +46,6 @@ statemon.define('post_video_oks', int)
 statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
-
-statemon.define('mandrill_template_not_found', int)
-statemon.define('mandrill_email_not_sent', int)
 
 '''*****************************************************************
 AccountHandler
@@ -174,7 +165,7 @@ class IntegrationHelper():
 
     @staticmethod
     @tornado.gen.coroutine
-    def create_integration(acct, args, integration_type, cdn=None): 
+    def create_integration(acct, args, integration_type, cdn=None):
         """Creates an integration for any integration type.
 
         Keyword arguments:
@@ -200,19 +191,19 @@ class IntegrationHelper():
             integration.publisher_id = args['publisher_id']
 
             integration.read_token = args.get(
-                'read_token', 
+                'read_token',
                 integration.read_token)
             integration.write_token = args.get(
-                'write_token', 
+                'write_token',
                 integration.write_token)
             integration.application_client_id = args.get(
-                'application_client_id', 
+                'application_client_id',
                 integration.application_client_id)
             integration.application_client_secret = args.get(
-                'application_client_secret', 
+                'application_client_secret',
                 integration.application_client_secret)
             integration.callback_url = args.get(
-                'callback_url', 
+                'callback_url',
                 integration.callback_url)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
 
@@ -220,25 +211,25 @@ class IntegrationHelper():
                 integration.playlist_feed_ids = playlist_feed_ids.split(',')
 
             integration.id_field = args.get(
-                'id_field', 
+                'id_field',
                 integration.id_field)
             integration.uses_batch_provisioning = Boolean()(args.get(
-                'uses_batch_provisioning', 
+                'uses_batch_provisioning',
                 integration.uses_batch_provisioning))
             integration.uses_bc_gallery = Boolean()(args.get(
-                'uses_bc_gallery', 
+                'uses_bc_gallery',
                 integration.uses_bc_gallery))
             integration.uses_bc_thumbnail_api = Boolean()(args.get(
-                'uses_bc_thumbnail_api', 
+                'uses_bc_thumbnail_api',
                 integration.uses_bc_thumbnail_api))
             integration.uses_bc_videojs_player = Boolean()(args.get(
-                'uses_bc_videojs_player', 
+                'uses_bc_videojs_player',
                 integration.uses_bc_videojs_player))
             integration.uses_bc_smart_player = Boolean()(args.get(
-                'uses_bc_smart_player', 
+                'uses_bc_smart_player',
                 integration.uses_bc_smart_player))
             integration.last_process_date = args.get(
-                'last_process_date', 
+                'last_process_date',
                 integration.last_process_date)
         else:
             raise ValueError('Unknown integration type')
@@ -324,8 +315,8 @@ class IntegrationHelper():
             if client_secret and not client_id:
                 raise BadRequestError(
                     'App secret cannot be valued if id is not also valued')
-            # TODO validate with BC that keys are valid and the granted 
-            # permissions are as expected. (This is implemented in the 
+            # TODO validate with BC that keys are valid and the granted
+            # permissions are as expected. (This is implemented in the
             # Oauth feature branch. Need to invoke it here after merge)
         elif integration_type is neondata.IntegrationType.OOYALA:
             # Implement for Ooyala
@@ -352,7 +343,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
 
-        acct = yield neondata.NeonUserAccount.get( 
+        acct = yield neondata.NeonUserAccount.get(
             args['account_id'],
             async=True)
         integration = yield tornado.gen.Task(
@@ -463,11 +454,11 @@ class BrightcovePlayerHandler(APIV2Handler):
         schema(args)
         integration_id = args['integration_id']
         integration = yield neondata.BrightcoveIntegration.get(
-            integration_id, 
+            integration_id,
             async=True)
         if not integration:
             raise NotFoundError(
-                'BrighcoveIntegration does not exist for player reference:%s', 
+                'BrighcoveIntegration does not exist for player reference:%s',
                 args['player_ref'])
 
         # Retrieve the list of players from Brightcove api
@@ -758,7 +749,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        publisher_id = args.get('publisher_id')  
+        publisher_id = args.get('publisher_id')
 
         # Check credentials with Brightcove's CMS API.
         client_id = args.get('application_client_id')
@@ -769,29 +760,29 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             integration_type=neondata.IntegrationType.BRIGHTCOVE)
 
         acct = yield neondata.NeonUserAccount.get(
-            args['account_id'], 
+            args['account_id'],
             async=True)
 
-        if not acct: 
+        if not acct:
             raise NotFoundError('Neon Account required.')
 
-        app_id = args.get('application_client_id', None) 
+        app_id = args.get('application_client_id', None)
         app_secret = args.get('application_client_secret', None)
- 
-        if app_id or app_secret: 
+
+        if app_id or app_secret:
             # Check credentials with Brightcove's CMS API.
             IntegrationHelper.validate_oauth_credentials(
                 client_id=app_id,
                 client_secret=app_secret,
                 integration_type=neondata.IntegrationType.BRIGHTCOVE)
             # Excecute a search and get last_processed_date
-            
+
             lpd = yield self._get_last_processed_date(
                 publisher_id,
-                app_id, 
+                app_id,
                 app_secret)
 
-            if lpd: 
+            if lpd:
                 args['last_process_date'] = lpd
             else:
                 raise BadRequestError('Brightcove credentials are bad, ' \
@@ -820,10 +811,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                     [960, 540],
                     [1280, 720]])
             args['uses_bc_thumbnail_api'] = True
-            
+
         integration = yield IntegrationHelper.create_integration(
-            acct, 
-            args, 
+            acct,
+            args,
             neondata.IntegrationType.BRIGHTCOVE,
             cdn=cdn)
 
@@ -836,9 +827,9 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint get request"""
 
         schema = Schema({
-            Required('account_id') : All(Coerce(str), 
+            Required('account_id') : All(Coerce(str),
                 Length(min=1, max=256)),
-            Required('integration_id') : All(Coerce(str), 
+            Required('integration_id') : All(Coerce(str),
                 Length(min=1, max=256)),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
@@ -887,23 +878,23 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             neondata.IntegrationType.BRIGHTCOVE)
 
         # Check credentials with Brightcove's CMS API.
-        app_id = args.get('application_client_id', None) 
-        app_secret = args.get('application_client_secret', None) 
-        if app_id and app_secret: 
+        app_id = args.get('application_client_id', None)
+        app_secret = args.get('application_client_secret', None)
+        if app_id and app_secret:
             IntegrationHelper.validate_oauth_credentials(
-                app_id, 
+                app_id,
                 app_secret,
                 neondata.IntegrationType.BRIGHTCOVE)
 
             # just run a basic search to see that the creds are ok
             lpd = yield self._get_last_processed_date(
                 integration.publisher_id,
-                app_id, 
+                app_id,
                 app_secret)
 
-            if not lpd: 
+            if not lpd:
                 raise BadRequestError('Brightcove credentials are bad, ' \
-                    'application_id or application_secret are wrong.')  
+                    'application_id or application_secret are wrong.')
 
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
@@ -943,45 +934,45 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def _get_last_processed_date(self, publisher_id, app_id, app_secret):
         """calls out to brightcove with the sent in app_id
-             and app_secret to get the 4th most recent video 
+             and app_secret to get the 4th most recent video
              so that we can set a reasonable last_process_date
-             on this video  
+             on this video
 
-           raises on unknown exceptions 
-           returns none if a video search could not be completed 
+           raises on unknown exceptions
+           returns none if a video search could not be completed
         """
         rv = None
 
         bc_cms_api = api.brightcove_api.CMSAPI(
-            publisher_id, 
-            app_id, 
-            app_secret) 
-        try: 
-            # return the fourth oldest video  
+            publisher_id,
+            app_id,
+            app_secret)
+        try:
+            # return the fourth oldest video
             videos = yield bc_cms_api.get_videos(
-                limit=1, 
-                offset=3, 
+                limit=1,
+                offset=3,
                 sort='-updated_at')
 
-            if videos and len(videos) is not 0: 
+            if videos and len(videos) is not 0:
                 video = videos[0]
-                rv = video['updated_at'] 
-            else: 
+                rv = video['updated_at']
+            else:
                 rv = datetime.utcnow().strftime(
                     '%Y-%m-%dT%H:%M:%SZ')
-        except (api.brightcove_api.BrightcoveApiServerError, 
+        except (api.brightcove_api.BrightcoveApiServerError,
                 api.brightcove_api.BrightcoveApiClientError,
-                api.brightcove_api.BrightcoveApiNotAuthorizedError, 
-                api.brightcove_api.BrightcoveApiError) as e: 
+                api.brightcove_api.BrightcoveApiNotAuthorizedError,
+                api.brightcove_api.BrightcoveApiError) as e:
             _log.error('Brightcove Error occurred trying to get \
                         last_processed_date : %s' % e)
-            pass 
-        except Exception as e: 
+            pass
+        except Exception as e:
             _log.error('Unknown Error occurred trying to get \
                         last_processed_date: %s' % e)
-            raise  
-        
-        raise tornado.gen.Return(rv)  
+            raise
+
+        raise tornado.gen.Return(rv)
 
     @classmethod
     def _get_default_returned_fields(cls):
@@ -1014,85 +1005,161 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                         HTTPVerbs.POST]
                }
 
+
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
-    """handles all requests to the thumbnails endpoint within the v2 API"""
+
     @tornado.gen.coroutine
     def post(self, account_id):
-        """handles a thumbnail endpoint post request"""
+        """Create a new thumbnail"""
 
+        # The client can submit either a url argument or file in the body
+        # with a Content-Type: multipart/form-data header.
         schema = Schema({
-          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
-          Required('video_id') : All(Coerce(str), Length(min=1, max=256)),
-          Required('url') : All(Coerce(str), Length(min=1, max=2048)),
-          'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024)) 
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
+            # Video id associates this image as thumbnail of a video.
+            'video_id' : All(Coerce(str), Length(min=1, max=256)),
+            'url': Url(),
+            # Tag id associates the image with a collection.
+            'tag_id': All(Coerce(str), Length(min=1, max=256)),
+            # This is a partner's id for the image.
+            'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
         })
-        args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
-        video_id = args['video_id']
-        internal_video_id = neondata.InternalVideoID.generate(
-            account_id_api_key, video_id)
-        external_thumbnail_id = args.get('thumbnail_ref', None) 
+        self.args = self.parse_args()
+        self.args['account_id'] = account_id
+        schema(self.args)
 
-        video = yield neondata.VideoMetadata.get(
-            internal_video_id, 
+        self.thumb = self.image = self.video = None
+
+        # Switch on whether a video is tied to this submission.
+        if self.args.get('video_id'):
+            yield self._post_with_video()
+            return
+        yield self._post_without_video()
+
+    @tornado.gen.coroutine
+    def _post_with_video(self):
+        """Set image and thumbnail data object with video association.
+
+        Confirm video exists, then add the thumbnail to the video's
+        list of thumbnails. Calculate the new thumbnail's rank from the old
+        thumbnails."""
+        _video_id = neondata.InternalVideoID.generate(
+            self.account_id, self.args['video_id'])
+        self.video = video = yield neondata.VideoMetadata.get(
+            _video_id,
+            async=True)
+        if not video:
+            raise NotFoundError('No video for {}'.format(_video_id))
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            video.thumbnail_ids,
             async=True)
 
-        current_thumbnails = yield neondata.ThumbnailMetadata.get_many( 
-            video.thumbnail_ids, 
-            async=True)
+        # Calculate new thumbnail's rank: one less than everything else
+        # or default value 1 if no other thumbnail.
+        rank = min([t.rank for t in thumbs
+            if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]) - 1 if thumbs else 1
 
-        cdn_key = neondata.CDNHostingMetadataList.create_key(
-            account_id_api_key, 
-            video.integration_id)
+        # Save the image file and thumbnail data object.
+        yield self._set_thumb(rank)
+        statemon.state.increment('post_thumbnail_oks')
+        yield self._respond_with_thumb()
 
-        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
-            cdn_key, 
-            async=True)
+    @tornado.gen.coroutine
+    def _post_without_video(self):
+        """Set the image to CDN. Set the thumb data to database.
 
-        # ranks can be negative 
-        min_rank = 1
-        for thumb in current_thumbnails:
-            if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and
-                thumb.rank < min_rank):
-                min_rank = thumb.rank
-        cur_rank = min_rank - 1
+        Returns- the new thumbnail."""
+        yield self._set_thumb()
+        statemon.state.increment('post_thumbnail_oks')
+        yield self._respond_with_thumb()
 
-        new_thumbnail = neondata.ThumbnailMetadata(
-            None,
-            internal_vid=internal_video_id, 
-            external_id=external_thumbnail_id,
-            ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
-            rank=cur_rank)
+    @tornado.gen.coroutine
+    def _set_thumb(self, rank=None):
+        """Set self.thumb to a new thumbnail from submitted image."""
 
-        # upload image to cdn 
-        yield video.download_and_add_thumbnail(
-            new_thumbnail,
-            image_url=args['url'],
-            cdn_metadata=cdn_metadata,
-            async=True)
-
-        # save the thumbnail
-        yield new_thumbnail.save(async=True)
-
-        # save the video 
-        new_video = yield neondata.VideoMetadata.modify(
-            internal_video_id, 
-            lambda x: x.thumbnail_ids.append(new_thumbnail.key),
-            async=True) 
-
-        if new_video:
-            statemon.state.increment('post_thumbnail_oks')
-            new_thumbnail = yield neondata.ThumbnailMetadata.get(
-                new_thumbnail.key,
-                async=True)
-            retobj = yield self.db2api(new_thumbnail)
-            self.success(retobj, code=ResponseCode.HTTP_ACCEPTED)
+        # Instantiate the thumbnail data object.
+        if self.video:
+            video_id = self.video.get_id()
+            integration_id = self.video.integration_id
         else:
-            raise SaveError('unable to save thumbnail to video')
+            video_id = neondata.InternalVideoID.generate(self.account_id)
+            integration_id = None
+        self.thumb = neondata.ThumbnailMetadata(
+            None,
+            internal_vid=video_id,
+            external_id=self.args.get('thumbnail_ref'),
+            ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
+            rank=rank)
+
+        # Set the image from url or body form data.
+        yield self._set_image()
+
+        # Get CDN store.
+        cdn = yield neondata.CDNHostingMetadataList.get(
+            neondata.CDNHostingMetadataList.create_key(
+                self.account_id,
+                integration_id),
+            async=True)
+
+        # If the thumbnail is tied to a video, set that association.
+        if self.video:
+            self.thumb = yield self.video.download_and_add_thumbnail(
+                self.thumb,
+                image=self.image,
+                image_url=self.args.get('url'),
+                cdn_metadata=cdn,
+                async=True,
+                save_objects=True)
+        else:
+            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn,
+                                            async=True)
+            yield self.thumb.save(async=True)
+
+    @tornado.gen.coroutine
+    def _set_image(self):
+        """Set self.image to a PIL image or raise HTTP_BAD_REQUEST."""
+
+        # Get from url.
+        url = self.args.get('url')
+        if url:
+            self.image = yield neondata.ThumbnailMetadata.download_image_from_url(url, async=True)
+            if self.image:
+                return
+
+        # Get image from body.
+        try:
+            self.image = ThumbnailHandler._get_image_from_httpfile(
+                self.request.files['upload'][0])
+            if self.image:
+                return
+        except IOError:
+            raise BadRequestError('File is not image.')
+        except KeyError:
+            pass
+
+        if not self.image:
+            raise BadRequestError('Image not available',
+                                  ResponseCode.HTTP_BAD_REQUEST)
+
+    @staticmethod
+    def _get_image_from_httpfile(httpfile):
+        """Get the image from the http post request.
+           Inputs- a HTTPFile, or any dict with body string
+           Returns- instance of PIL.Image
+        """
+        return PIL.Image.open(io.BytesIO(httpfile.body))
+
+    @tornado.gen.coroutine
+    def _respond_with_thumb(self):
+        """Success. Reload the thumbnail and return it."""
+        thumb = yield neondata.ThumbnailMetadata.get(
+            self.thumb.key,
+            async=True)
+        rv = yield self.db2api(thumb)
+        self.success(rv, code=ResponseCode.HTTP_ACCEPTED)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -1168,15 +1235,14 @@ class ThumbnailHandler(APIV2Handler):
 
     @classmethod
     @tornado.gen.coroutine
-    def _convert_special_field(cls, obj, field):
-
+    def _convert_special_field(cls, obj, field, age=None, gender=None):
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
         elif field == 'thumbnail_id':
             retval = obj.key
         elif field == 'neon_score':
-            retval = obj.get_neon_score()
+            retval = obj.get_neon_score(age=age, gender=gender)
         elif field == 'url':
             retval = obj.urls[0] or []
         elif field == 'external_ref':
@@ -1184,12 +1250,17 @@ class ThumbnailHandler(APIV2Handler):
         elif field == 'renditions':
             urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
             retval = ThumbnailHelper.renditions_of(urls)
+        elif field == 'feature_ids': 
+            retval = ThumbnailHelper.get_feature_ids(obj) 
         else:
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
 
 
+'''*********************************************************************
+ThumbnailHelper
+*********************************************************************'''
 class ThumbnailHelper(object):
     """A collection of stateless functions for working on Thumbnails"""
 
@@ -1221,6 +1292,19 @@ class ThumbnailHelper(object):
             if not rv.get(tid):
                 rv[tid] = []
         raise tornado.gen.Return(rv)
+
+    @staticmethod 
+    def get_feature_ids(obj): 
+        # TODO order these by importance 
+        # load in pkl file, and multiply, order by index
+        if not obj.features: 
+            return None 
+        if not obj.model_version: 
+            return None
+        model_name = obj.model_version
+        rv = [ neondata.Feature.create_key(
+            model_name, i[0]) for i, x in np.ndenumerate(obj.features) ]
+        return rv 
 
     @staticmethod
     def renditions_of(urls_obj):
@@ -1258,7 +1342,6 @@ class ThumbnailHelper(object):
         return f.numerator, f.denominator
 
 
-
 '''*********************************************************************
 VideoHelper
 *********************************************************************'''
@@ -1288,6 +1371,8 @@ class VideoHelper(object):
         request.publish_date = args.get('publish_date', None)
         request.api_param = int(args.get('n_thumbs', 5))
         request.callback_email = args.get('callback_email', None) 
+        request.age = args.get('age', None)
+        request.gender = args.get('gender', None)
         yield request.save(async=True)
 
         if request:
@@ -1336,10 +1421,7 @@ class VideoHelper(object):
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
                 # save the default thumbnail
-                image = yield neondata.ThumbnailMetadata.download_image_from_url(
-                    default_thumbnail_url, async=True)
                 thumb = yield video.download_and_add_thumbnail(
-                    image=image,
                     image_url=default_thumbnail_url,
                     external_thumbnail_id=args.get('thumbnail_ref', None),
                     async=True)
@@ -1361,10 +1443,20 @@ class VideoHelper(object):
             if reprocess:
                 # Flag the request to be reprocessed
                 def _flag_reprocess(x):
+                    if x.state in [neondata.RequestState.SUBMIT,
+                                   neondata.RequestState.REPROCESS,
+                                   neondata.RequestState.REQUEUED,
+                                   neondata.RequestState.PROCESSING,
+                                   neondata.RequestState.FINALIZING]:
+                        raise AlreadyExists(
+                            'A job for this video is currently underway. '
+                            'Please try again later')
                     x.state = neondata.RequestState.REPROCESS
                     x.fail_count = 0
                     x.try_count = 0
                     x.response = {}
+                    x.age = args.get('age', None)
+                    x.gender = args.get('gender', None)
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
                     account_id_api_key,
@@ -1373,22 +1465,26 @@ class VideoHelper(object):
 
                 raise tornado.gen.Return((video, api_request))
             else:
-                raise AlreadyExists('job_id=%s' % (video.job_id))
+                raise AlreadyExists('This item already exists: job_id=%s' % (video.job_id))
 
     @staticmethod
     @tornado.gen.coroutine
-    def get_thumbnails_from_ids(tids):
+    def get_thumbnails_from_ids(tids, gender=None, age=None):
         """gets thumbnailmetadata objects
 
         Keyword arguments:
         tids -- a list of tids that needs to be retrieved
+        gender - A gender to get the thumbnail data for 
+        age - An age group to get the thumbnail data for
         """
         thumbnails = []
         if tids:
+            tids = set(tids)
             thumbnails = yield tornado.gen.Task(
                 neondata.ThumbnailMetadata.get_many,
                 tids)
-            thumbnails = yield [ThumbnailHandler.db2api(x) for
+            thumbnails = yield [ThumbnailHandler.db2api(x, gender=gender,
+                                                        age=age) for
                                 x in thumbnails]
             renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
             for thumbnail in thumbnails:
@@ -1505,6 +1601,19 @@ class VideoHelper(object):
         return next_page_url
 
     @staticmethod
+    def get_estimated_remaining(video, request):
+        if not video.duration or int(video.duration) <= 0: 
+            return 0.0  
+
+        est_process_time = 2.5 * video.duration
+        updated_ts = dateutil.parser.parse(
+            request.updated)
+        utc_now = datetime.utcnow()
+        diff = (utc_now - updated_ts).total_seconds()
+ 
+        return max(float(est_process_time - diff), 60.0)
+
+    @staticmethod
     @tornado.gen.coroutine
     def db2api(video, request, fields=None):
         """Converts a database video metadata object to a video
@@ -1519,13 +1628,64 @@ class VideoHelper(object):
         """
         if fields is None:
             fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled', 'job_id']
+                      'testing_enabled', 'job_id', 'estimated_time_remaining']
 
         new_video = {}
         for field in fields:
             if field == 'thumbnails':
+                # Get the main thumbnails to return. Start with
+                # thumbnail_ids being present, then fallback to
+                # job_results default run
+                main_tids = video.thumbnail_ids
+                if not main_tids:
+                    for video_result in video.job_results:
+                        if (video_result.age is None and 
+                            video_result.gender is None):
+                            main_tids = video_result.thumbnail_ids
+                            break
+                    if not main_tids and len(video.job_results) > 0:
+                        main_tids = video.job_results[0].thumbnail_ids
                 new_video['thumbnails'] = yield \
-                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
+                  VideoHelper.get_thumbnails_from_ids(main_tids +
+                                                      video.non_job_thumb_ids)
+            elif field == 'demographic_thumbnails':
+                new_video['demographic_thumbnails'] = []
+                for video_result in video.job_results:
+                    cur_thumbs = yield VideoHelper.get_thumbnails_from_ids(
+                        (video_result.thumbnail_ids + video.non_job_thumb_ids),
+                        age=video_result.age,
+                        gender=video_result.gender)
+                    cur_entry = {
+                        'gender' : video_result.gender,
+                        'age' : video_result.age,
+                        'thumbnails' : cur_thumbs}
+                    if 'bad_thumbnails' in fields:
+                        cur_entry['bad_thumbnails'] = yield \
+                          VideoHelper.get_thumbnails_from_ids(
+                              video_result.bad_thumbnail_ids,
+                              age=video_result.age,
+                              gender=video_result.gender)
+                    new_video['demographic_thumbnails'].append(cur_entry)
+                if (len(video.job_results) == 0 and 
+                    len(video.thumbnail_ids) > 0):
+                    # For backwards compability create a demographic
+                    # thumbnail entry that's generic demographics if
+                    # the video is done processing.
+                    cur_thumbs = yield VideoHelper.get_thumbnails_from_ids(
+                        video.thumbnail_ids)
+                    if (neondata.ThumbnailType.NEON in 
+                        [x['type'] for x in cur_thumbs]):
+                        new_video['demographic_thumbnails'].append({
+                            'gender' : None,
+                            'age' : None,
+                            'thumbnails' : cur_thumbs})
+                    
+
+            elif field == 'bad_thumbnails':
+                # demographic_thumbnails are also required here and
+                # are handled in that section.
+                pass
+
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -1554,6 +1714,12 @@ class VideoHelper(object):
                 new_video[field] = video.updated
             elif field == 'url':
                 new_video[field] = video.url
+            elif field == 'estimated_time_remaining':
+                if request.state == neondata.RequestState.PROCESSING:  
+                    new_video[field] = VideoHelper.get_estimated_remaining(
+                        video, request)
+                else: 
+                    new_video[field] = None 
             else:
                 raise BadRequestError('invalid field %s' % field)
 
@@ -1591,7 +1757,9 @@ class VideoHandler(ShareableContentHandler):
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
           'callback_email': All(Coerce(str), Length(min=1, max=2048)),
-          'n_thumbs': All(Coerce(int), Range(min=1, max=32))
+          'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
+          'gender': In(['M', 'F', None]),
+          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])
         })
 
         args = self.parse_args()
@@ -1601,6 +1769,17 @@ class VideoHandler(ShareableContentHandler):
         url = args.get('url', None)
         if (reprocess is None) == (url is None):
             raise Invalid('Exactly one of reprocess or url is required')
+        if reprocess:
+            # Do not count a reprocessing towards the limit on the
+            # number of videos to process or stop a reprocessing if
+            # we're at the limit.
+            self.adjust_limits = False
+        else:
+            try:
+                yield self.check_account_limits(
+                    self.get_limits_after_prepare()[HTTPVerbs.POST])
+            except KeyError:
+                pass
 
         publish_date = args.get('publish_date', None) 
         if publish_date: 
@@ -1695,20 +1874,20 @@ class VideoHandler(ShareableContentHandler):
             Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
             'testing_enabled': Boolean(),
             'title': Any(str, unicode, Length(min=1, max=1024)),
-            'hidden': Boolean(),
+            'callback_email': CustomVoluptuousTypes.Email(),
+            'hidden': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
-
-        title = args.get('title', None)
 
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key,
             args['video_id'])
 
         def _update_video(v):
-            v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
+            v.testing_enabled =  Boolean()(
+                args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
         video = yield neondata.VideoMetadata.modify(
@@ -1723,9 +1902,10 @@ class VideoHandler(ShareableContentHandler):
         # we may need to update the request object as well
         db2api_fields = ['testing_enabled', 'video_id']
         api_request = None
-        if title is not None and video.job_id is not None:
+        if video.job_id is not None:
             def _update_request(r):
-                r.video_title = title
+                r.video_title = args.get('title', r.video_title)
+                r.callback_email = args.get('callback_email', r.callback_email)
 
             api_request = yield neondata.NeonApiRequest.modify(
                 video.job_id,
@@ -1742,18 +1922,22 @@ class VideoHandler(ShareableContentHandler):
 
     @classmethod
     def get_access_levels(self):
-        return {HTTPVerbs.GET:
-                    neondata.AccessLevels.READ,
-                HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-                HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-                'account_required': [
-                    HTTPVerbs.GET,
-                    HTTPVerbs.PUT,
-                    HTTPVerbs.POST],
-                'subscription_required': [HTTPVerbs.POST]}
+        return {
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET,
+                                        HTTPVerbs.PUT,
+                                        HTTPVerbs.POST],
+                 'subscription_required' : [HTTPVerbs.POST]
+               }
 
     @classmethod
-    def get_limits(self):
+    def get_limits_after_prepare(self):
+        # get_limits() causes the limits to be checked in prepare(),
+        # but the limits need to be checked after argument parsing
+        # because a video being reprocessed shouldn't count towards
+        # the limit.
         post_list = [{ 'left_arg': 'video_posts',
                        'right_arg': 'max_video_posts',
                        'operator': '<',
@@ -1941,9 +2125,11 @@ class ThumbnailStatsHandler(APIV2Handler):
         raise tornado.gen.Return(retval)
 
 
-'''*********************************************************************
+'''
+*********************************************************************
 LiftStatsHandler
-*********************************************************************'''
+*********************************************************************
+'''
 class LiftStatsHandler(APIV2Handler):
 
     @tornado.gen.coroutine
@@ -1968,16 +2154,10 @@ class LiftStatsHandler(APIV2Handler):
             async=True,
             as_dict=True)
 
-        default_neon_score = base_thumb.get_neon_score()
-        def _get_estimated_lift(thumb):
-            # The ratio of a thumbnail's Neon score to the default's.
-            score = thumb.get_neon_score()
-            if default_neon_score is None or score is None:
-                return None
-            return round(score / float(default_neon_score) - 1, 3)
-
-        lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t) if t else None}
+        lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
+            base_thumb) if t else None}
                 for k, t in thumbs.items()]
+
 
         # Check thumbnail exists.
         rv = {
@@ -2313,7 +2493,7 @@ class UserHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        username = args.get('username') 
+        username = args.get('username')
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username:
@@ -2325,10 +2505,10 @@ class UserHandler(APIV2Handler):
             u.last_name = args.get('last_name', u.last_name)
             u.title = args.get('title', u.title)
             u.cell_phone_number = args.get(
-                'cell_phone_number', 
+                'cell_phone_number',
                 u.cell_phone_number)
             u.secondary_email = args.get(
-                'secondary_email', 
+                'secondary_email',
                 u.secondary_email)
             u.send_emails = Boolean()(args.get(
                 'send_emails', 
@@ -2356,35 +2536,35 @@ class UserHandler(APIV2Handler):
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['username', 'created', 'updated', 
-                'first_name', 'last_name', 'title', 
+        return ['username', 'created', 'updated',
+                'first_name', 'last_name', 'title',
                 'secondary_email', 'cell_phone_number',
                 'access_level' ]
-    
+
     @classmethod
     def _get_passthrough_fields(cls):
         return ['username', 'created', 'updated',
-                'first_name', 'last_name', 'title', 
+                'first_name', 'last_name', 'title',
                 'secondary_email', 'cell_phone_number',
                 'access_level' ]
 
 '''*****************************************************************
-BillingAccountHandler 
+BillingAccountHandler
 *****************************************************************'''
 class BillingAccountHandler(APIV2Handler):
-    """This talks to a sevice and creates a billing account with our 
+    """This talks to a sevice and creates a billing account with our
           external billing integration (currently stripe).
 
-       This acts as an upreate function, essentially always call 
-        post, to save account information on the recurly side of 
-        things. 
+       This acts as an upreate function, essentially always call
+        post, to save account information on the recurly side of
+        things.
     """
     @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
           Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
           Required('billing_token_ref') : All(
-              Coerce(str), 
+              Coerce(str),
               Length(min=1, max=512))
         })
         args = self.parse_args()
@@ -2392,12 +2572,12 @@ class BillingAccountHandler(APIV2Handler):
         schema(args)
         billing_token_ref = args.get('billing_token_ref')
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
+            account_id,
             async=True)
 
-        if not account: 
+        if not account:
             raise NotFoundError('Neon Account required.')
-      
+
         customer_id = None
 
         @tornado.gen.coroutine
@@ -2409,94 +2589,94 @@ class BillingAccountHandler(APIV2Handler):
             cid = customer.id
             _log.info('New Stripe customer %s created with id %s' % (
                 account.email, cid))
-            raise tornado.gen.Return(customer) 
+            raise tornado.gen.Return(customer)
 
         try:
-            if account.billing_provider_ref: 
+            if account.billing_provider_ref:
                 customer = yield self.executor.submit(
-                    stripe.Customer.retrieve, 
+                    stripe.Customer.retrieve,
                     account.billing_provider_ref)
-             
-                customer.email = account.email or customer.email 
+
+                customer.email = account.email or customer.email
                 customer.source = billing_token_ref
-                customer_id = customer.id 
+                customer_id = customer.id
                 yield self.executor.submit(customer.save)
             else:
-                customer = yield _create_account() 
-        except stripe.error.InvalidRequestError as e: 
+                customer = yield _create_account()
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
-                # this is here just in case the ref got 
+                # this is here just in case the ref got
                 # screwed up, it should rarely if ever happen
-                customer = yield _create_account() 
+                customer = yield _create_account()
             else:
                 _log.error('Invalid request error we do not handle %s' % e)
-                raise 
-        except Exception as e: 
+                raise
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
-            raise  
-       
-        def _modify_account(a): 
+            raise
+
+        def _modify_account(a):
             a.billed_elsewhere = False
             a.billing_provider_ref = customer.id
 
-        yield neondata.NeonUserAccount.modify( 
+        yield neondata.NeonUserAccount.modify(
             account.neon_api_key,
-            _modify_account, 
-            async=True) 
- 
+            _modify_account,
+            async=True)
+
         result = yield self.db2api(customer)
 
-        self.success(result) 
+        self.success(result)
 
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256))
-        }) 
+        })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
 
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
+            account_id,
             async=True)
 
-        if not account: 
+        if not account:
             raise NotFoundError('Neon Account required.')
 
-        if not account.billing_provider_ref: 
-            raise NotFoundError('No billing account found - no ref.')     
+        if not account.billing_provider_ref:
+            raise NotFoundError('No billing account found - no ref.')
 
         try:
             customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
+                stripe.Customer.retrieve,
                 account.billing_provider_ref)
 
-        except stripe.error.InvalidRequestError as e: 
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
-                raise NotFoundError('No billing account found - not in stripe') 
-            else: 
+                raise NotFoundError('No billing account found - not in stripe')
+            else:
                 _log.error('Unknown invalid error occurred talking'\
                            ' to Stripe %s' % e)
-                raise Exception('Unknown Stripe Error')  
-        except Exception as e: 
+                raise Exception('Unknown Stripe Error')
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise
 
         result = yield self.db2api(customer)
-        self.success(result) 
+        self.success(result)
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['id', 'account_balance', 'created', 'currency', 
-                'default_source', 'delinquent', 'description', 
+        return ['id', 'account_balance', 'created', 'currency',
+                'default_source', 'delinquent', 'description',
                 'discount', 'email', 'livemode', 'subscriptions',
                 'metadata', 'sources']
-    
+
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['id', 'account_balance', 'created', 'currency', 
-                'default_source', 'delinquent', 'description', 
+        return ['id', 'account_balance', 'created', 'currency',
+                'default_source', 'delinquent', 'description',
                 'discount', 'email', 'livemode']
 
     @classmethod
@@ -2504,30 +2684,30 @@ class BillingAccountHandler(APIV2Handler):
     def _convert_special_field(cls, obj, field):
         if field == 'subscriptions':
             retval = obj.subscriptions.to_dict()
-        elif field == 'sources': 
+        elif field == 'sources':
             retval = obj.sources.to_dict()
-        elif field == 'metadata': 
-            retval = obj.metadata.to_dict() 
+        elif field == 'metadata':
+            retval = obj.metadata.to_dict()
         else:
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
-             
+
 
     @classmethod
     def get_access_levels(cls):
-        return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.GET] 
+        return {
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.GET]
                }
 
 '''*****************************************************************
-BillingSubscriptionHandler 
+BillingSubscriptionHandler
 *****************************************************************'''
 class BillingSubscriptionHandler(APIV2Handler):
-    """This talks to recurly and creates a billing subscription with our 
-          recurly integration. 
+    """This talks to recurly and creates a billing subscription with our
+          recurly integration.
     """
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -2538,64 +2718,64 @@ class BillingSubscriptionHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
-        plan_type = args.get('plan_type') 
+        plan_type = args.get('plan_type')
 
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
-            async=True)
-       
-        billing_plan = yield neondata.BillingPlans.get(
-            plan_type, 
+            account_id,
             async=True)
 
-        if not billing_plan: 
-            raise NotFoundError('No billing plan for that plan_type')       
-  
-        if not account: 
+        billing_plan = yield neondata.BillingPlans.get(
+            plan_type,
+            async=True)
+
+        if not billing_plan:
+            raise NotFoundError('No billing plan for that plan_type')
+
+        if not account:
             raise NotFoundError('Neon Account was not found')
 
-        if not account.billing_provider_ref: 
+        if not account.billing_provider_ref:
             raise NotFoundError(
                 'There is not a billing account set up for this account')
-        try: 
+        try:
             original_plan_type = account.subscription_information['plan']['id']
-        except TypeError: 
-            original_plan_type = None 
+        except TypeError:
+            original_plan_type = None
 
-        try: 
+        try:
             customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
+                stripe.Customer.retrieve,
                 account.billing_provider_ref)
 
-            # get all subscriptions, they are sorted 
-            # by most recent, if there are not any, just 
+            # get all subscriptions, they are sorted
+            # by most recent, if there are not any, just
             # submit the new one, otherwise cancel the most
-            # recent and submit the new one 
+            # recent and submit the new one
             cust_subs = yield self.executor.submit(
                 customer.subscriptions.all)
-           
+
             if len(cust_subs['data']) > 0:
                 cancel_me = cust_subs['data'][0]
                 yield self.executor.submit(cancel_me.delete)
 
             if plan_type == 'demo':
-                subscription = stripe.Subscription(id='canceled') 
-                def _modify_account(a): 
-                    a.subscription_information = None 
+                subscription = stripe.Subscription(id='canceled')
+                def _modify_account(a):
+                    a.subscription_information = None
                     a.billed_elsewhere = True
                     a.billing_provider_ref = None
                     a.verify_subscription_expiry = None
                 # cancel all the things!
-                cards = yield self.executor.submit( 
-                    customer.sources.all, 
-                    object='card') 
-                for card in cards: 
+                cards = yield self.executor.submit(
+                    customer.sources.all,
+                    object='card')
+                for card in cards:
                     yield self.executor.submit(card.delete)
-                _log.info('Subscription downgraded for account %s' % 
+                _log.info('Subscription downgraded for account %s' %
                      account.neon_api_key)
-            else: 
+            else:
                 subscription = yield self.executor.submit(
-                    customer.subscriptions.create, 
+                    customer.subscriptions.create,
                     plan=plan_type)
                 def _modify_account(a):
                     a.serving_enabled = True
@@ -2606,132 +2786,132 @@ class BillingSubscriptionHandler(APIV2Handler):
                         'cmsapiv2.apiv2.check_subscription_interval'))
                         ).strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
- 
-                _log.info('New subscription created for account %s' % 
+
+                _log.info('New subscription created for account %s' %
                     account.neon_api_key)
 
             yield neondata.NeonUserAccount.modify(
-                account.neon_api_key, 
-                _modify_account, 
+                account.neon_api_key,
+                _modify_account,
                 async=True)
-             
-        except stripe.error.InvalidRequestError as e: 
+
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
                 _log.error('Billing mismatch for account %s' % account.email)
                 raise NotFoundError('No billing account found in Stripe')
- 
+
             _log.error('Unhandled InvalidRequestError\
                  occurred talking to Stripe %s' % e)
             raise
-        except stripe.error.CardError as e: 
-            raise  
-        except Exception as e:  
+        except stripe.error.CardError as e:
+            raise
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
-            raise 
- 
+            raise
+
         billing_plan = yield neondata.BillingPlans.get(
-            plan_type.lower(), 
-            async=True) 
-               
-        # only update limits if we have actually changed the plan type 
+            plan_type.lower(),
+            async=True)
+
+        # only update limits if we have actually changed the plan type
         if original_plan_type != plan_type.lower():
-            def _modify_limits(a): 
+            def _modify_limits(a):
                 a.populate_with_billing_plan(billing_plan)
-                
+
             yield neondata.AccountLimits.modify(
                 account.neon_api_key,
-                _modify_limits,  
-                create_missing=True, 
-                async=True) 
- 
+                _modify_limits,
+                create_missing=True,
+                async=True)
+
         result = yield self.db2api(subscription)
 
-        self.success(result) 
+        self.success(result)
 
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256))
-        }) 
+        })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
 
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
+            account_id,
             async=True)
 
-        if not account: 
+        if not account:
             raise NotFoundError('Neon Account required.')
 
-        if not account.billing_provider_ref: 
-            raise NotFoundError('No billing account found - no ref.')     
+        if not account.billing_provider_ref:
+            raise NotFoundError('No billing account found - no ref.')
 
         try:
             customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
+                stripe.Customer.retrieve,
                 account.billing_provider_ref)
 
             cust_subs = yield self.executor.submit(
                 customer.subscriptions.all)
 
-            most_recent_sub = cust_subs['data'][0] 
-        except stripe.error.InvalidRequestError as e: 
+            most_recent_sub = cust_subs['data'][0]
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
                 raise NotFoundError('No billing account found - not in stripe')
-            else: 
+            else:
                 _log.error('Unknown invalid error occurred talking'\
                            ' to Stripe %s' % e)
-                raise Exception('Unknown Stripe Error') 
-        except IndexError: 
-            raise NotFoundError('A subscription was not found.')  
-        except Exception as e: 
+                raise Exception('Unknown Stripe Error')
+        except IndexError:
+            raise NotFoundError('A subscription was not found.')
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise
 
         result = yield self.db2api(most_recent_sub)
- 
-        self.success(result) 
+
+        self.success(result)
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+        return ['id', 'application_fee_percent', 'cancel_at_period_end',
                 'canceled_at', 'current_period_end', 'current_period_start',
-                'customer', 'discount', 'ended_at', 'plan', 
-                'quantity', 'start', 'tax_percent', 'trial_end', 
-                'trial_start'] 
-    
+                'customer', 'discount', 'ended_at', 'plan',
+                'quantity', 'start', 'tax_percent', 'trial_end',
+                'trial_start']
+
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+        return ['id', 'application_fee_percent', 'cancel_at_period_end',
                 'canceled_at', 'current_period_end', 'current_period_start',
-                'customer', 'discount', 'ended_at', 'metadata', 'plan', 
-                'quantity', 'start', 'tax_percent', 'trial_end', 
+                'customer', 'discount', 'ended_at', 'metadata', 'plan',
+                'quantity', 'start', 'tax_percent', 'trial_end',
                 'trial_start']
- 
+
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
-        if field == 'metadata': 
-            retval = obj.metadata.to_dict() 
+        if field == 'metadata':
+            retval = obj.metadata.to_dict()
         else:
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
- 
+
     @classmethod
     def get_access_levels(cls):
-        return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 'account_required'  : [HTTPVerbs.POST] 
+        return {
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required'  : [HTTPVerbs.POST]
                }
 
 '''*********************************************************************
 TelemetrySnippetHandler : class responsible for creating the telemetry snippet
    HTTP Verbs     : get
 *********************************************************************'''
-class TelemetrySnippetHandler(APIV2Handler): 
+class TelemetrySnippetHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         '''Generates a telemetry snippet for a given account'''
@@ -2746,7 +2926,7 @@ class TelemetrySnippetHandler(APIV2Handler):
         # Find out if there is a Gallery integration
         integrations = yield self.account.get_integrations(async=True)
 
-        using_gallery = any([x.uses_bc_gallery for x in integrations if 
+        using_gallery = any([x.uses_bc_gallery for x in integrations if
                              isinstance(x, neondata.BrightcoveIntegration)])
 
         # Build the snippet
@@ -2776,9 +2956,9 @@ class TelemetrySnippetHandler(APIV2Handler):
 
     @classmethod
     def get_access_levels(cls):
-        return { 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 'account_required'  : [HTTPVerbs.GET] 
+        return {
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required'  : [HTTPVerbs.GET]
                }
 
 '''*****************************************************************
@@ -2884,69 +3064,30 @@ class EmailHandler(APIV2Handler):
                 self.success({'message' : 'user does not want emails'})
         else:  
             raise NotFoundError('Email address is required.')
-
-        url = '{base_url}/templates/info.json?key={api_key}&name={slug}'.format(
-            base_url=options.mandrill_base_url, 
-            api_key=options.mandrill_api_key, 
-            slug=template_slug) 
-            
-        request = tornado.httpclient.HTTPRequest(
-            url=url,
-            method="GET",
-            request_timeout=8.0)
-
-        response = yield tornado.gen.Task(utils.http.send_request, request)
-        if response.code != ResponseCode.HTTP_OK:
-            statemon.state.increment('mandrill_template_not_found')
-            raise BadRequestError('Mandrill template unable to be loaded.')
         
-        template_obj = json.loads(response.body) 
-        template_string = template_obj['code'] 
-
-        if template_args: 
-            email_html = template_string.format(**template_args)
-        else: 
-            email_html = template_string
+        yield MandrillEmailSender.send_mandrill_email(
+            send_to_email, 
+            template_slug, 
+            template_args=template_args)
  
-        # send email via mandrill
-        headers_dict = { 
-            'Reply-To' : args.get('reply_to', 'no-reply@neonlabs.com') 
-        }
-        to_list = [{ 
-            'email' : send_to_email, 
-            'type' : 'to'     
-        }]   
-        message_dict = { 
-            'html' : email_html, 
-            'subject' : args.get('subject', 'Neon Labs'),
-            'from_email' : args.get('from_email_address', 
-                'admin@neon-lab.com'),  
-            'from_name' : args.get('from_name', 'Neon Labs'),
-            'headers' : headers_dict, 
-            'to' : to_list  
-        }
-        json_body = { 
-            'key' : options.mandrill_api_key, 
-            'message' : message_dict  
-        }
+        self.success({'message' : 'Email sent to %s' % send_to_email })
  
-        url = '{base_url}/messages/send.json'.format(
-            base_url=options.mandrill_base_url) 
-        
-        request = tornado.httpclient.HTTPRequest( 
-            url=url, 
-            body=json.dumps(json_body),
-            method='POST', 
-            headers = {"Content-Type" : "application/json"},
-            request_timeout=20.0)
- 
-        response = yield tornado.gen.Task(utils.http.send_request, request)
-
-        if response.code != ResponseCode.HTTP_OK:
-            statemon.state.increment('mandrill_email_not_sent')
-            raise BadRequestError('Unable to send email')  
-        
-        self.success({'message' : 'Email sent to %s' % send_to_email }) 
+    @classmethod
+    def get_limits(self):
+        post_list = [{ 'left_arg': 'email_posts',
+                       'right_arg': 'max_email_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_email_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_email_posts',
+                           'timer_resets': [ ('email_posts', 0) ]
+                       },
+                       'values_to_increase': [ ('email_posts', 1) ],
+                       'values_to_decrease': []
+        }]
+        return {
+                   HTTPVerbs.POST: post_list
+               }
             
     @classmethod
     def get_access_levels(cls):
@@ -2955,12 +3096,101 @@ class EmailHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.POST] 
                }
 
+class FeatureHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self):
+        schema = Schema({
+            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+            'model_name' : All(Coerce(str), Length(min=1, max=512)), 
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+        })
+        args = self.parse_args()
+        schema(args)
+        model_name = args.get('model_name', None)
+        keys = args.get('key', None)
+
+        if (model_name is None) == (keys is None):
+            raise Invalid('Exactly one of model_name or key is required')
+
+        fields = args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
+        
+        # if keys is set
+        if keys: 
+            keys = set(keys.split(',')) 
+            features = yield neondata.Feature.get_many(keys, async=True)
+        else: 
+            features = yield neondata.Feature.get_by_model_name(
+                model_name, 
+                async=True)
+     
+        res_list = yield [self.db2api(f, fields=fields) for f in features] 
+        
+        rv = { 'features' : res_list, 
+               'feature_count' : len(res_list) }
+ 
+        self.success(rv)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['key', 'model_name', 'created', 'updated', 
+                'name', 'variance_explained', 'index'] 
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['key', 'model_name', 'created', 'updated', 
+                'name', 'variance_explained', 'index'] 
+
+    @classmethod
+    def get_access_levels(cls):
+        return {
+                 HTTPVerbs.GET : neondata.AccessLevels.NONE
+               }
+
+
+class EmailSupportHandler(APIV2Handler):
+    '''Allow visitor to send email to Neon without an account.'''
+
+    SUPPORT_ADDRESS = 'support@neon-lab.com'
+    # Reference: https://mandrillapp.com/templates/code?id=support-email-admin
+    SUPPORT_TEMPLATE_SLUG = 'support-email-admin'
+
+    @tornado.gen.coroutine
+    def post(self):
+        '''Send the content of "message" as an email to Neon support.'''
+        schema = Schema({
+            Required('from_email'): All(Coerce(
+                CustomVoluptuousTypes.Email()), Length(min=1, max=1024)),
+            Required('from_name') : All(Coerce(str), Length(min=1, max=1024)),
+            Required('message') : All(Coerce(str), Length(min=1, max=4096))
+        })
+
+        args = self.parse_args()
+        args = schema(args)
+
+        yield MandrillEmailSender.send_mandrill_email(
+            self.SUPPORT_ADDRESS,
+            self.SUPPORT_TEMPLATE_SLUG,
+            template_args=args,
+            from_email=args['from_email'],
+            from_name=args['from_name'])
+
+        self.success({'message' : 'Email sent to %s' % self.SUPPORT_ADDRESS})
+
+    @classmethod
+    def get_access_levels(cls):
+        return {HTTPVerbs.POST: neondata.AccessLevels.NONE}
+
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/batch/?$', BatchHandler),
+    (r'/api/v2/feature/?$', FeatureHandler),
+    (r'/api/v2/email/support/?$', EmailSupportHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',

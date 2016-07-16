@@ -1578,13 +1578,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(res['data'][0]['width'], 800)
         self.assertEqual(res['data'][0]['height'], 600)
 
-    @patch('cvutils.imageutils.utils.http')
-    @patch('cmsdb.cdnhosting.S3Connection')
-    @patch('cmsapi.services.neondata.cmsdb.cdnhosting.utils.http')
     @tornado.testing.gen_test
-    def test_upload_video_custom_thumbnail(self, mock_cloudinary,
-                                           mock_conntype,
-                                           mock_img_download):
+    def test_upload_video_custom_thumbnail(self):
         '''
         Test uploading a custom thumbnail for a video
         PUT
@@ -1600,45 +1595,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         }
         ]}
         '''
-        mock_img_download = self._future_wrap_mock(
-            mock_img_download.send_request)
-        mock_cloudinary = self._future_wrap_mock(mock_cloudinary.send_request)
-        #s3mocks to mock host_thumbnails_to_s3
-        conn = boto_mock.MockConnection()
-        conn.create_bucket('host-thumbnails')
-        conn.create_bucket('n3.neon-images.com')
-        mock_conntype.return_value = conn
-
-        # Mock out the cloudinary call
-        mock_cloudinary.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(x, 200)
-
-        # Mock the image download
-        def _handle_img_download(request, *args, **kwargs):
-            if "jpg" in request.url or "jpeg" in request.url:
-                if "error_image" in request.url:
-                    response = tornado.httpclient.HTTPResponse(request, 500)
-                else:
-                    #downloading any image (create a random image response)
-                    response = create_random_image_response()
-
-            elif ".png" in request.url:
-                # Open an RGBA image
-                im = Image.open(os.path.join(
-                    os.path.dirname(__file__),
-                    os.path.basename(request.url)))
-                self.assertEqual(im.mode, "RGBA")
-                imgstream = StringIO()
-                im.save(imgstream, "png")
-                imgstream.seek(0)
-                response = tornado.httpclient.HTTPResponse(request, 200,
-                                                           buffer=imgstream)
-            else:
-                response = self._success_http_side_effect(request,
-                                                          *args, **kwargs)
-            return response
-        
-        mock_img_download.side_effect = _handle_img_download 
         yield self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
@@ -1651,112 +1607,16 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         vals = {'thumbnails' : [data]}
         response = yield self.put_request(url, vals, self.api_key, jsonheader=True)
-        self.assertEqual(response.code, 202) 
-
-        # Get all thumbnails, check custom_upload & verify in DB
-        # Verify Thumbnail in videometadata obj
-        i_vid = self.api_key + "_" + vid
-        vmdata = neondata.VideoMetadata.get(i_vid)
-        thumbs = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
-        c_thumb = None
-        for thumb in thumbs:
-            if thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD:
-                c_thumb = thumb
-        self.assertIsNotNone(c_thumb)
-        self.assertEqual(c_thumb.type, neondata.ThumbnailType.CUSTOMUPLOAD)
-        self.assertIsNotNone(c_thumb.phash)
-        self.assertEqual(c_thumb.urls, 
-                         ['http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
-                          re.sub('_', '/', c_thumb.key),
-                          'http://custom_thumbnail.jpg'])
-        
-        s_url = neondata.ThumbnailServingURLs.get(c_thumb.key)
-        self.assertIsNotNone(s_url)
-        s3httpRe = re.compile('http://n[0-9].neon-images.com/([a-zA-Z0-9\-\._/]+)')
-        serving_url = s_url.get_serving_url(160, 120)
-        self.assertRegexpMatches(serving_url, s3httpRe)
-        serving_key = s3httpRe.search(serving_url).group(1)
-
-        # Make sure that image is in S3 both for serving and main
-        self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
-            re.sub('_', '/', c_thumb.key) + '.jpg'))
-        # TODO(Sunil) Enable when redirection is fixed
-        #self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
-        #    "%s/%s/customupload0.jpg" % (self.api_key, vid)))
-        self.assertIsNotNone(conn.get_bucket('n3.neon-images.com').get_key(
-            serving_key))
-
-        # RGBA image
-        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
-                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
-        data = {
-                "created_time": time.time(),
-                "type": "custom_upload",
-                "urls": ["http://rgba.png"]
-                }
-        vals = {'thumbnails' : [data]}
-        response = yield self.put_request(url, vals, self.api_key, jsonheader=True)
         self.assertEqual(response.code, 202)
 
-        # Check that the image is converted to RGB
-        i_vid = self.api_key + "_" + vid
-        vmdata = neondata.VideoMetadata.get(i_vid)
-        thumbs = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
-        for thumb in thumbs:
-            if thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD:
-                s3key = conn.get_bucket('host-thumbnails').get_key(
-                    re.sub('_', '/', thumb.key) + '.jpg')
-                self.assertIsNotNone(s3key)
-                buf = StringIO()
-                s3key.get_contents_to_file(buf)
-                buf.seek(0)
-                im = Image.open(buf)
-                self.assertEqual(im.mode, 'RGB')
-
-        # Check that the ranks decrease for custom uploads
-        # TODO(Sunil) Enable when redirection is fixed
-        #self.assertIsNotNone(conn.get_bucket('host-thumbnails').get_key(
-        #    "%s/%s/customupload-1.jpg" % (self.api_key, vid)))
-        
-    
-        # Image download error
-        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
-                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
-        data = {
-                "created_time": time.time(),
-                "type": "custom_upload",
-                "urls": ["http://error_image.jpg"]
-                }
-
-        vals = {'thumbnails' : [data]}
-        with self.assertRaises(HTTPError) as e:
-            yield self.put_request(url, vals, self.api_key, jsonheader=True)
-        self.assertEqual(e.exception.code, 400)
-
-        # cloudinary error 
-        mock_cloudinary.send_request.side_effect = \
-          lambda x, callback: callback(
-              tornado.httpclient.HTTPResponse(x, 200, buffer=StringIO(
-                  '{"error": "fake error"}')))
-        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
-                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
-        data = {
-                "created_time": time.time(),
-                "type": "custom_upload",
-                "urls": ["http://custom_thumbnail.jpg"]
-                }
-
-        vals = {'thumbnails' : [data]}
-        response = yield self.put_request(url, vals, self.api_key, jsonheader=True)
-        self.assertEqual(response.code, 202) 
-
-        # Make sure that there are 3 custom thumbs now
-        i_vid = self.api_key + "_" + vid
-        vmdata = neondata.VideoMetadata.get(i_vid)
-        thumbs = neondata.ThumbnailMetadata.get_many(vmdata.thumbnail_ids)
-        self.assertEqual(
-            len([x for x in thumbs 
-                 if x.type == neondata.ThumbnailType.CUSTOMUPLOAD]), 3)
+        self.assertEquals(self.mock_cmsapiv2.call_count, 1)
+        cargs, kwargs = self.mock_cmsapiv2.call_args
+        self.assertEquals(cargs[0].url, '/api/v2/%s/thumbnails' % self.api_key)
+        self.assertEquals(cargs[0].method, 'POST')
+        self.assertEquals(json.loads(cargs[0].body),
+                          { 'video_id': vid,
+                            'url' : 'http://custom_thumbnail.jpg'
+                            })
 
     @tornado.testing.gen_test
     def test_invalid_upload_custom_thumbnail(self):
