@@ -1121,7 +1121,7 @@ class VideoProcessor(object):
         except Exception as e:
             rv = False  
             statemon.state.increment('unable_to_send_email')
-            _log.error('Unexcepted error %s when sending email' % e)  
+            _log.exception('Unexcepted error %s when sending email' % e)  
         finally: 
             raise tornado.gen.Return(rv) 
 
