@@ -706,7 +706,8 @@ update_table_build_times = PythonOperator(
     dag=clicklogs,
     trigger_rule='all_done',
     provide_context=True,
-    python_callable=_update_table_build_times)
+    python_callable=_update_table_build_times,
+    depends_on_past=True)
 update_table_build_times.set_upstream(load_impala_tables)
 
 hdfs_maintenance = PythonOperator(
