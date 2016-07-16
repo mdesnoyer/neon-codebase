@@ -44,9 +44,10 @@ def main():
             if is_alive:
             	try:
                     _log.info("cluster is alive, restart airflow scheduler service")                	
-                    subprocess.check_output(['service',
-                                             'airflow-scheduler', 'restart'],
-                                             stderr=subprocess.STDOUT,
+                    subprocess.Popen(['service',
+                                      'airflow-scheduler', 'restart'],
+                                       stdout=subprocess.STDOUT,
+                                       stderr=subprocess.STDOUT,
                         env=os.environ)
                 except subprocess.CalledProcessError as e:
                     _log.error('Error restarting airflow scheduler service: %s' % e.output)
