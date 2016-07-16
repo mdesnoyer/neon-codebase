@@ -44,7 +44,7 @@ def main():
             if is_alive:
             	try:
                     _log.info("cluster is alive, restart airflow scheduler service")                	
-                    subprocess.check_output(['sudo', 'service',
+                    subprocess.check_output(['service',
                                              'airflow-scheduler', 'restart'],
                                              stderr=subprocess.STDOUT,
                         env=os.environ)
