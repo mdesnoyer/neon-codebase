@@ -47,8 +47,7 @@ def main():
                     subprocess.Popen(['service',
                                       'airflow-scheduler', 'restart'],
                                        stdout=subprocess.STDOUT,
-                                       stderr=subprocess.STDOUT,
-                        env=os.environ)
+                                       stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError as e:
                     _log.error('Error restarting airflow scheduler service: %s' % e.output)
 
