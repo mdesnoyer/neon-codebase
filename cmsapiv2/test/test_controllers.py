@@ -3833,6 +3833,42 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(thumbnail.video_id, _video_id)
 
     @tornado.testing.gen_test
+    def test_add_new_thumbnail_with_some_there(self):
+        video_id = 'tn_test_vid1'
+        _video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key, video_id)
+        rand_thumb = neondata.ThumbnailMetadata(
+            '{}_rand'.format(video_id),
+            ttype=neondata.ThumbnailType.RANDOM,
+            rank=1,
+            urls=['rand.jpg'])
+        rand_thumb.save()
+        neondata.VideoMetadata.modify(
+            _video_id,
+            lambda x: x.thumbnail_ids.append(rand_thumb.key))
+        
+        thumbnail_ref = 'kevin'
+        image_url = 'blah.jpg'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}&url={}'.format(
+            self.account_id_api_key, video_id, thumbnail_ref, 'blah.jpg'))
+        response = yield self.http_client.fetch(
+            url,
+            body='',
+            method='POST')
+        self.assertEquals(response.code, 202)
+        video = neondata.VideoMetadata.get(_video_id)
+
+        self.assertEquals(len(video.thumbnail_ids), 2)
+        self.assertEquals(self.im_download_mock.call_args[0][0], 'blah.jpg')
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+           video.thumbnail_ids[1],
+           async=True)
+        self.assertEquals(thumbnail.external_id, 'kevin')
+        self.assertEquals(thumbnail.video_id, _video_id)
+        self.assertEquals(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
+        self.assertEquals(thumbnail.rank, 0)
+
+    @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body(self):
         video_id = 'tn_test_vid1'
         thumbnail_ref = 'kevin'
@@ -3863,7 +3899,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(thumbnail.external_id, 'kevin')
         self.assertEquals(thumbnail.video_id, _video_id)
         self.assertEquals(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
-        self.assertEquals(thumbnail.rank, 1)
+        self.assertEquals(thumbnail.rank, 0)
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body_no_video(self):

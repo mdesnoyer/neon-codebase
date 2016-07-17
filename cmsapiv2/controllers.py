@@ -1058,9 +1058,10 @@ class ThumbnailHandler(APIV2Handler):
             async=True)
 
         # Calculate new thumbnail's rank: one less than everything else
-        # or default value 1 if no other thumbnail.
-        rank = min([t.rank for t in thumbs
-            if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]) - 1 if thumbs else 1
+        # or default value 0 if no other thumbnail.
+        existing_thumbs = [t.rank for t in thumbs
+                           if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]
+        rank = min(existing_thumbs) - 1 if existing_thumbs else 0
 
         # Save the image file and thumbnail data object.
         yield self._set_thumb(rank)
