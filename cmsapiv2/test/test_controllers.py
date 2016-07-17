@@ -4092,7 +4092,7 @@ class TestThumbnailHandler(TestControllersBase):
             'featonly',
             urls=['http://asdf.com/1.jpg'],
             model_score=None,
-            model_version='20160707-test',
+            model_version='20160713-test',
             features=features
         ).save()
         url = '/api/v2/%s/thumbnails?thumbnail_id=featonly' % (
