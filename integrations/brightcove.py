@@ -219,7 +219,9 @@ class CMSAPIIntegration(BrightcoveIntegration):
                 brightcove_api.BrightcoveApiNotAuthorizedError,
                 brightcove_api.BrightcoveApiError) as e:
             statemon.state.increment('bc_apiclient_errors')
-            _log.error('Brightcove Error occurred trying to get videos : %s' % e)
+            _log.error('Brightcove Error occurred trying to get videos '
+                       '(integration %s): %s' % (
+                           self.platform.integration_id, e))
             self.video_iter = iter([]) 
             pass  
 
