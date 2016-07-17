@@ -44,8 +44,8 @@ def main():
 
             if is_alive:
             	try:
-                    _log.info("cluster is alive, restarting the airflow scheduler service")                	
-                    sh.sudo("service", "airflow-scheduler", "restart")
+                    _log.info("cluster is alive, restarting the airflow scheduler service")               	
+                    sh.sudo("service", "airflow-scheduler", "restart", _bg=True)
                 except Exception as e:
                     _log.error('Error restarting airflow scheduler service: %s' % e.output)
 
