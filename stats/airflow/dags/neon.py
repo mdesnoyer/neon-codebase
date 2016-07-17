@@ -245,7 +245,7 @@ def _get_s3_staging_prefix(dag, execution_date, prefix=''):
     :return type: str
     """
     return _do_s3_prefix_fixup(os.path.join(prefix,
-                                            execution_date.strftime("%Y/%m/%d"), ''))
+                                            execution_date.strftime("%Y/%m/%d/%H"), ''))
 
 
 def _get_s3_tais(input_path):
