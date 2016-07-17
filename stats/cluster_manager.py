@@ -19,6 +19,7 @@ import subprocess
 import time
 import utils.neon
 import utils.monitor
+import sh
 
 import logging
 _log = logging.getLogger(__name__)
@@ -43,12 +44,9 @@ def main():
 
             if is_alive:
             	try:
-                    _log.info("cluster is alive, restart airflow scheduler service")                	
-                    subprocess.Popen(['service',
-                                      'airflow-scheduler', 'restart'],
-                                       stdout=subprocess.STDOUT,
-                                       stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError as e:
+                    _log.info("cluster is alive, restarting the airflow scheduler service")                	
+                    sh.sudo("service", "airflow-scheduler", "restart")
+                except Exception as e:
                     _log.error('Error restarting airflow scheduler service: %s' % e.output)
 
             if not is_alive:
