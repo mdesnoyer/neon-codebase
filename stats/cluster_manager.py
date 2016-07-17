@@ -42,12 +42,12 @@ def main():
             is_alive = cluster.is_alive()
             statemon.state.cluster_is_alive = 1 if is_alive else 0
 
-            if is_alive:
-            	try:
-                    _log.info("cluster is alive, restarting the airflow scheduler service")               	
-                    sh.sudo("service", "airflow-scheduler", "restart", _bg=True)
-                except Exception as e:
-                    _log.error('Error restarting airflow scheduler service: %s' % e.output)
+            # if is_alive:
+            # 	try:
+            #         _log.info("cluster is alive, restarting the airflow scheduler service")               	
+            #         sh.sudo("service", "airflow-scheduler", "restart", _bg=True)
+            #     except Exception as e:
+            #         _log.error('Error restarting airflow scheduler service: %s' % e.output)
 
             if not is_alive:
                 _log.error(
