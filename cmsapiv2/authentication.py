@@ -67,37 +67,47 @@ class AuthenticateHandler(APIV2Handler):
         password = args.get('password')
 
         api_accessor = yield neondata.User.get(username, async=True)
-        access_token, refresh_token = AccountHelper.get_auth_tokens(
-            {'username': username})
+        if not api_accessor:
+            # To hide if a user is registered, return the same response
+            # as if the password were wrong.
+
+            # Do a throwaway crypt verify to protect against
+            # a timing attack.
+            bad_hash = '$5$rounds=50000$eeIigX/W4vORw0EC$cUg.kW.ZwTapSwfpXkBMOiuybqNTSwZGSQWQlml7PZ5'
+            sha256_crypt.verify(password, bad_hash)
+            raise NotAuthorizedError('User is Not Authorized')
+
+        if not sha256_crypt.verify(password, api_accessor.password_hash):
+            statemon.state.increment('failed_authenticates')
+            raise NotAuthorizedError('User is Not Authorized')
+
+        if not api_accessor.is_email_verified():
+            raise NotAuthorizedError('Email needs verification')
+
+        account_ids = yield api_accessor.get_associated_account_ids(async=True)
+        if not account_ids:
+            raise HTTPError('User has no associated account')
+
+        access_token, refresh_token = AccountHelper.get_auth_tokens({
+            'username': username,
+            'account_id': account_ids[0]})
 
         def _update_tokens(x):
             x.access_token = access_token
             x.refresh_token = refresh_token
+        user = yield neondata.User.modify(username,
+            _update_tokens,
+            async=True)
+        user_rv = yield self.db2api(user)
 
-        result = None
-        if api_accessor:
-            if not api_accessor.is_email_verified():
-                raise NotAuthorizedError('Email needs verification')
+        result = {
+            'access_token' : access_token,
+            'refresh_token' : refresh_token,
+            'account_ids' : account_ids,
+            'user_info' : user_rv}
 
-            if sha256_crypt.verify(password, api_accessor.password_hash):
-                user = yield neondata.User.modify(username,
-                    _update_tokens,
-                    async=True)
-                user_rv = yield self.db2api(user)
-                account_ids = yield api_accessor.get_associated_account_ids(
-                    async=True)
-                result = {
-                           'access_token' : access_token,
-                           'refresh_token' : refresh_token,
-                           'account_ids' : account_ids,
-                           'user_info' : user_rv
-                         }
-        if result:
-            statemon.state.increment('successful_authenticates')
-            self.success(json.dumps(result))
-        else:
-            statemon.state.increment('failed_authenticates')
-            raise NotAuthorizedError('User is Not Authorized')
+        statemon.state.increment('successful_authenticates')
+        self.success(json.dumps(result))
 
     @classmethod
     def _get_default_returned_fields(cls):
@@ -624,11 +634,11 @@ class UserHandler(APIV2Handler):
             Required('username'): CustomVoluptuousTypes.Email(),
             Required('password'): All(Coerce(str), Length(min=8, max=64)),
             'access_level' : All(Coerce(int), Range(min=1, max=31)),
-            'first_name': All(Coerce(str), Length(min=1, max=256)),
-            'last_name': All(Coerce(str), Length(min=1, max=256)),
-            'secondary_email': All(Coerce(str), Length(min=1, max=256)),
+            'first_name': All(Coerce(unicode), Length(min=1, max=256)),
+            'last_name': All(Coerce(unicode), Length(min=1, max=256)),
+            'secondary_email': CustomVoluptuousTypes.Email(),
             'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
-            'title': All(Coerce(str), Length(min=1, max=32))
+            'title': All(Coerce(unicode), Length(min=1, max=32))
         })
 
         args = self.parse_args()
@@ -642,10 +652,13 @@ class UserHandler(APIV2Handler):
 
         # Get the account in the authorization token payload.
         payload = JWTHelper.decode_token(self.access_token)
-        account_id = payload['account_id']
-        account = yield neondata.NeonUserAccount.get(account_id, async=True)
-        if not account:
-            raise NotAuthorizedError('This requires an account.')
+        try:
+            account_id = payload['account_id']
+            account = yield neondata.NeonUserAccount.get(account_id, async=True)
+            if not account:
+                raise NotAuthorizedError('This requires an account.')
+        except KeyError:
+            raise NotAuthorizedError('invalid token')
 
         # Instantiate a user to store in the verification payload.
         user = neondata.User(

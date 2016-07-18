@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# encoding: utf-8
+
 import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
@@ -768,6 +770,50 @@ class TestAuthUserHandler(TestAuthenticationBase):
         user = json.loads(verification.extra_info['user'])
         self.assertEqual('867-5309', user['_data']['cell_phone_number'])
         self.assertEqual('rocking@invalid.com', user['_data']['secondary_email'])
+
+    @tornado.testing.gen_test
+    def test_create_user_with_utf8(self):
+        username = 'gianna@gmail.com'
+        first_name = '전지현'
+        params = json.dumps({
+            'username': username,
+            'password': 'passw0rd',
+            'first_name': first_name})
+        yield neondata.NeonUserAccount(None, 'a0').save(async=True)
+        yield neondata.User('a0').save(async=True)
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer %s' % token}
+        url = '/api/v2/users'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body=params,
+                                                method='POST',
+                                                headers=headers)
+        verification = yield neondata.Verification.get(username, async=True)
+        self.assertIsNotNone(verification)
+
+        username = 'lucia@gmail.com'
+        first_name = 'Lucía'
+        params = json.dumps({
+            'username': username,
+            'password': 'passw0rd',
+            'first_name': first_name})
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer %s' % token}
+
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body=params,
+                                                method='POST',
+                                                headers=headers)
+        verification = yield neondata.Verification.get(username, async=True)
+        self.assertIsNotNone(verification)
 
     def test_post_user_exceptions(self):
         exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')
@@ -5073,6 +5119,11 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         TestAuthenticationHandler.first_name = 'kevin'
         TestAuthenticationHandler.last_name = 'keviniii'
         TestAuthenticationHandler.title = 'blah'
+        TestAuthenticationHandler.account_id = 'test_account'
+        self.account = neondata.NeonUserAccount(
+            TestAuthenticationHandler.account_id,
+            users=[TestAuthenticationHandler.username])
+        self.account.save()
         self.user = neondata.User(username=TestAuthenticationHandler.username,
             password=TestAuthenticationHandler.password,
             first_name=TestAuthenticationHandler.first_name,
@@ -5164,6 +5215,10 @@ class TestAuthenticationHandler(TestAuthenticationBase):
             async=True)
         self.assertEquals(user.access_token, rjson['access_token'])
         self.assertEquals(user.refresh_token, rjson['refresh_token'])
+        a_payload = JWTHelper.decode_token(user.access_token)
+        self.assertEqual(self.account.get_api_key(), a_payload['account_id'])
+        r_payload = JWTHelper.decode_token(user.refresh_token)
+        self.assertEqual(self.account.get_api_key(), r_payload['account_id'])
         user_info = rjson['user_info']
         self.assertEquals(user_info['first_name'],
             TestAuthenticationHandler.first_name)
@@ -5223,9 +5278,6 @@ class TestAuthenticationHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test
     def test_account_ids_returned_single(self):
-        new_account_one = neondata.NeonUserAccount('test_account1')
-        new_account_one.users.append(self.user.username)
-        yield new_account_one.save(async=True)
 
         url = '/api/v2/authenticate'
         params = json.dumps({'username': TestAuthenticationHandler.username,
@@ -5239,7 +5291,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         account_ids = rjson['account_ids']
         self.assertEquals(1, len(account_ids))
         a_id = account_ids[0]
-        self.assertEquals(a_id, new_account_one.neon_api_key)
+        self.assertEquals(a_id, self.account.get_api_key())
 
     @tornado.testing.gen_test
     def test_account_ids_returned_multiple(self):
@@ -5261,24 +5313,9 @@ class TestAuthenticationHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         account_ids = rjson['account_ids']
-        self.assertEquals(2, len(account_ids))
+        self.assertEquals(3, len(account_ids))
         self.assertTrue(new_account_one.neon_api_key in account_ids)
         self.assertTrue(new_account_two.neon_api_key in account_ids)
-
-    @tornado.testing.gen_test
-    def test_account_ids_returned_empty(self):
-        url = '/api/v2/authenticate'
-        params = json.dumps({'username': TestAuthenticationHandler.username,
-                             'password': TestAuthenticationHandler.password})
-        header = { 'Content-Type':'application/json' }
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body=params,
-                                                method='POST',
-                                                headers=header)
-        rjson = json.loads(response.body)
-        account_ids = rjson['account_ids']
-        account_ids = rjson['account_ids']
-        self.assertEquals(0, len(account_ids))
 
 
 class TestRefreshTokenHandler(TestAuthenticationBase):
