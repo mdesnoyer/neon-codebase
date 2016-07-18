@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# encoding: utf-8
+
 import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
@@ -768,6 +770,50 @@ class TestAuthUserHandler(TestAuthenticationBase):
         user = json.loads(verification.extra_info['user'])
         self.assertEqual('867-5309', user['_data']['cell_phone_number'])
         self.assertEqual('rocking@invalid.com', user['_data']['secondary_email'])
+
+    @tornado.testing.gen_test
+    def test_create_user_with_utf8(self):
+        username = 'gianna@gmail.com'
+        first_name = '전지현'
+        params = json.dumps({
+            'username': username,
+            'password': 'passw0rd',
+            'first_name': first_name})
+        yield neondata.NeonUserAccount(None, 'a0').save(async=True)
+        yield neondata.User('a0').save(async=True)
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer %s' % token}
+        url = '/api/v2/users'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body=params,
+                                                method='POST',
+                                                headers=headers)
+        verification = yield neondata.Verification.get(username, async=True)
+        self.assertIsNotNone(verification)
+
+        username = 'lucia@gmail.com'
+        first_name = 'Lucía'
+        params = json.dumps({
+            'username': username,
+            'password': 'passw0rd',
+            'first_name': first_name})
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer %s' % token}
+
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body=params,
+                                                method='POST',
+                                                headers=headers)
+        verification = yield neondata.Verification.get(username, async=True)
+        self.assertIsNotNone(verification)
 
     def test_post_user_exceptions(self):
         exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')
