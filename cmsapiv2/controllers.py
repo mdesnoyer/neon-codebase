@@ -1305,8 +1305,10 @@ class ThumbnailHelper(object):
             return None
         model_name = obj.model_version
         predictor = model.predictor.DemographicSignatures(obj.model_version)
-        importance = predictor.compute_feature_importance(gender, age)
-        return zip(*(importance.index, importance.scores))
+        importance = predictor.compute_feature_importance(obj.features,
+                                                          gender, age)
+        return [(neondata.Feature.create_key(model_name, idx), val)
+                 for idx, val in importance.iteritems()]
 
     @staticmethod
     def renditions_of(urls_obj):

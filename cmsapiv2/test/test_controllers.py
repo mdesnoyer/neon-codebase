@@ -3773,12 +3773,13 @@ class TestThumbnailHandler(TestControllersBase):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
+        np.random.seed(2341235)
         neondata.ThumbnailMetadata(
             'testingtid', 
             width=500, 
             urls=['s'], 
-            features=np.array([1.0,2.0,3.0,4.0]), 
-            model_version='kfmodel').save()
+            features=np.random.rand(1024), 
+            model_version='20160713-test').save()
         self.test_video = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid1')).save()
@@ -4010,15 +4011,32 @@ class TestThumbnailHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
         url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&fields=%s' % (
-            self.account_id_api_key, 'thumbnail_id,width,feature_ids')
+            self.account_id_api_key, 'thumbnail_id,width')
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEquals('kfmodel_0', rjson['feature_ids'][0])
-        self.assertEquals('kfmodel_1', rjson['feature_ids'][1])
-        self.assertEquals('kfmodel_2', rjson['feature_ids'][2])
-        self.assertEquals('kfmodel_3', rjson['feature_ids'][3])
         self.assertEquals(rjson['width'], 500)
         self.assertEquals(rjson['thumbnail_id'], 'testingtid')
+
+    @tornado.testing.gen_test
+    def test_feature_ids(self):
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&fields=%s' % (
+            self.account_id_api_key, 'thumbnail_id,feature_ids')
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+
+        feature_ids = rjson['feature_ids']
+        self.assertEquals(len(feature_ids), 1024)
+        self.assertEquals(len(feature_ids[0]), 2)
+        self.assertEquals(feature_ids, sorted(feature_ids, reverse=True,
+                                              key=lambda x: x[1]))
+
+        # Check the format of the keys
+        splits = feature_ids[0][0].split('_')
+        self.assertEquals(len(splits), 2)
+        self.assertEquals(splits[0], '20160713-test')
+        self.assertGreaterEqual(int(splits[1]), 0)
+        self.assertLess(int(splits[1]), 1024)
+        
 
     @tornado.testing.gen_test
     def test_score_map(self):
