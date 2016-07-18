@@ -624,11 +624,11 @@ class UserHandler(APIV2Handler):
             Required('username'): CustomVoluptuousTypes.Email(),
             Required('password'): All(Coerce(str), Length(min=8, max=64)),
             'access_level' : All(Coerce(int), Range(min=1, max=31)),
-            'first_name': All(Coerce(str), Length(min=1, max=256)),
-            'last_name': All(Coerce(str), Length(min=1, max=256)),
-            'secondary_email': All(Coerce(str), Length(min=1, max=256)),
+            'first_name': All(Coerce(unicode), Length(min=1, max=256)),
+            'last_name': All(Coerce(unicode), Length(min=1, max=256)),
+            'secondary_email': CustomVoluptuousTypes.Email(),
             'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
-            'title': All(Coerce(str), Length(min=1, max=32))
+            'title': All(Coerce(unicode), Length(min=1, max=32))
         })
 
         args = self.parse_args()
