@@ -774,7 +774,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
     @tornado.testing.gen_test
     def test_create_user_with_utf8(self):
         username = 'gianna@gmail.com'
-        first_name = '전지현'
+        first_name = u'전지현'
         params = json.dumps({
             'username': username,
             'password': 'passw0rd',
@@ -793,10 +793,11 @@ class TestAuthUserHandler(TestAuthenticationBase):
                                                 method='POST',
                                                 headers=headers)
         verification = yield neondata.Verification.get(username, async=True)
-        self.assertIsNotNone(verification)
+        verif_user = json.loads(verification.extra_info['user'])
+        self.assertEqual(first_name, verif_user['_data']['first_name'])
 
         username = 'lucia@gmail.com'
-        first_name = 'Lucía'
+        first_name = u'Lucía'
         params = json.dumps({
             'username': username,
             'password': 'passw0rd',
@@ -813,7 +814,8 @@ class TestAuthUserHandler(TestAuthenticationBase):
                                                 method='POST',
                                                 headers=headers)
         verification = yield neondata.Verification.get(username, async=True)
-        self.assertIsNotNone(verification)
+        verif_user = json.loads(verification.extra_info['user'])
+        self.assertEqual(first_name, verif_user['_data']['first_name'])
 
     def test_post_user_exceptions(self):
         exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')

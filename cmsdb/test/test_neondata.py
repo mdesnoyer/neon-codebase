@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# encoding: utf-8
 
 import os.path
 import sys
@@ -2747,6 +2748,24 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
         f2 = fs[1] 
         self.assertEquals(f1.index, 1)  
         self.assertEquals(f2.index, 2)  
+
+
+class TestStoredObject(test_utils.neontest.AsyncTestCase):
+
+
+    def test_to_json_utf8(self):
+
+        class SomeClass(neondata.StoredObject):
+            def __init__(self, key, utf_property):
+                self.utf_property = utf_property
+                super(SomeClass, self).__init__(key)
+
+        key = 'key'
+        given = u'Lucía'
+        obj = SomeClass(key, given)
+        result = json.loads(obj.to_json())
+        self.assertEqual(given, result['_data']['utf_property'])
+
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
