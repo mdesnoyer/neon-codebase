@@ -2911,7 +2911,7 @@ class ExperimentStrategy(DefaultedStoredObject):
         return ExperimentStrategy.__name__
 
 class Feature(DefaultedStoredObject):
-    def __init__(self, key, name='unknown', variance_explained=0.0):
+    def __init__(self, key, name=None, variance_explained=0.0):
         super(Feature, self).__init__(key)
         splits = self.get_id().split('_') 
         if self.get_id() and len(splits) != 2:
