@@ -2161,9 +2161,7 @@ class LiftStatsHandler(ShareableContentHandler):
         self.success(rv)
 
     def get_access_levels(self):
-        return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ,
-            'account_required': [HTTPVerbs.GET]}
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
 
 '''*********************************************************************
