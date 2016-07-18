@@ -9,6 +9,7 @@ if sys.path[0] != __base_path__:
 from apiv2 import *
 import api.brightcove_api
 import dateutil.parser
+import model.predictor
 import numpy as np
 import PIL.Image
 import io
@@ -1058,9 +1059,10 @@ class ThumbnailHandler(APIV2Handler):
             async=True)
 
         # Calculate new thumbnail's rank: one less than everything else
-        # or default value 1 if no other thumbnail.
-        rank = min([t.rank for t in thumbs
-            if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]) - 1 if thumbs else 1
+        # or default value 0 if no other thumbnail.
+        existing_thumbs = [t.rank for t in thumbs
+                           if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]
+        rank = min(existing_thumbs) - 1 if existing_thumbs else 0
 
         # Save the image file and thumbnail data object.
         yield self._set_thumb(rank)
@@ -1251,7 +1253,9 @@ class ThumbnailHandler(APIV2Handler):
             urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
             retval = ThumbnailHelper.renditions_of(urls)
         elif field == 'feature_ids': 
-            retval = ThumbnailHelper.get_feature_ids(obj) 
+            retval = ThumbnailHelper.get_feature_ids(obj,
+                                                     age=age,
+                                                     gender=gender) 
         else:
             raise BadRequestError('invalid field %s' % field)
 
@@ -1294,17 +1298,17 @@ class ThumbnailHelper(object):
         raise tornado.gen.Return(rv)
 
     @staticmethod 
-    def get_feature_ids(obj): 
-        # TODO order these by importance 
-        # load in pkl file, and multiply, order by index
+    def get_feature_ids(obj, gender=None, age=None): 
         if not obj.features: 
             return None 
         if not obj.model_version: 
             return None
         model_name = obj.model_version
-        rv = [ neondata.Feature.create_key(
-            model_name, i[0]) for i, x in np.ndenumerate(obj.features) ]
-        return rv 
+        predictor = model.predictor.DemographicSignatures(obj.model_version)
+        importance = predictor.compute_feature_importance(obj.features,
+                                                          gender, age)
+        return [(neondata.Feature.create_key(model_name, idx), val)
+                 for idx, val in importance.iteritems()]
 
     @staticmethod
     def renditions_of(urls_obj):

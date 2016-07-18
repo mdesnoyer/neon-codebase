@@ -3773,12 +3773,13 @@ class TestThumbnailHandler(TestControllersBase):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
+        np.random.seed(2341235)
         neondata.ThumbnailMetadata(
             'testingtid', 
             width=500, 
             urls=['s'], 
-            features=np.array([1.0,2.0,3.0,4.0]), 
-            model_version='kfmodel').save()
+            features=np.random.rand(1024), 
+            model_version='20160713-test').save()
         self.test_video = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid1')).save()
@@ -3833,6 +3834,42 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(thumbnail.video_id, _video_id)
 
     @tornado.testing.gen_test
+    def test_add_new_thumbnail_with_some_there(self):
+        video_id = 'tn_test_vid1'
+        _video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key, video_id)
+        rand_thumb = neondata.ThumbnailMetadata(
+            '{}_rand'.format(video_id),
+            ttype=neondata.ThumbnailType.RANDOM,
+            rank=1,
+            urls=['rand.jpg'])
+        rand_thumb.save()
+        neondata.VideoMetadata.modify(
+            _video_id,
+            lambda x: x.thumbnail_ids.append(rand_thumb.key))
+        
+        thumbnail_ref = 'kevin'
+        image_url = 'blah.jpg'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}&url={}'.format(
+            self.account_id_api_key, video_id, thumbnail_ref, 'blah.jpg'))
+        response = yield self.http_client.fetch(
+            url,
+            body='',
+            method='POST')
+        self.assertEquals(response.code, 202)
+        video = neondata.VideoMetadata.get(_video_id)
+
+        self.assertEquals(len(video.thumbnail_ids), 2)
+        self.assertEquals(self.im_download_mock.call_args[0][0], 'blah.jpg')
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+           video.thumbnail_ids[1],
+           async=True)
+        self.assertEquals(thumbnail.external_id, 'kevin')
+        self.assertEquals(thumbnail.video_id, _video_id)
+        self.assertEquals(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
+        self.assertEquals(thumbnail.rank, 0)
+
+    @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body(self):
         video_id = 'tn_test_vid1'
         thumbnail_ref = 'kevin'
@@ -3863,7 +3900,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(thumbnail.external_id, 'kevin')
         self.assertEquals(thumbnail.video_id, _video_id)
         self.assertEquals(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
-        self.assertEquals(thumbnail.rank, 1)
+        self.assertEquals(thumbnail.rank, 0)
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body_no_video(self):
@@ -3974,15 +4011,32 @@ class TestThumbnailHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
         url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&fields=%s' % (
-            self.account_id_api_key, 'thumbnail_id,width,feature_ids')
+            self.account_id_api_key, 'thumbnail_id,width')
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
-        self.assertEquals('kfmodel_0', rjson['feature_ids'][0])
-        self.assertEquals('kfmodel_1', rjson['feature_ids'][1])
-        self.assertEquals('kfmodel_2', rjson['feature_ids'][2])
-        self.assertEquals('kfmodel_3', rjson['feature_ids'][3])
         self.assertEquals(rjson['width'], 500)
         self.assertEquals(rjson['thumbnail_id'], 'testingtid')
+
+    @tornado.testing.gen_test
+    def test_feature_ids(self):
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&fields=%s' % (
+            self.account_id_api_key, 'thumbnail_id,feature_ids')
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+
+        feature_ids = rjson['feature_ids']
+        self.assertEquals(len(feature_ids), 1024)
+        self.assertEquals(len(feature_ids[0]), 2)
+        self.assertEquals(feature_ids, sorted(feature_ids, reverse=True,
+                                              key=lambda x: x[1]))
+
+        # Check the format of the keys
+        splits = feature_ids[0][0].split('_')
+        self.assertEquals(len(splits), 2)
+        self.assertEquals(splits[0], '20160713-test')
+        self.assertGreaterEqual(int(splits[1]), 0)
+        self.assertLess(int(splits[1]), 1024)
+        
 
     @tornado.testing.gen_test
     def test_score_map(self):
@@ -4092,7 +4146,7 @@ class TestThumbnailHandler(TestControllersBase):
             'featonly',
             urls=['http://asdf.com/1.jpg'],
             model_score=None,
-            model_version='20160707-test',
+            model_version='20160713-test',
             features=features
         ).save()
         url = '/api/v2/%s/thumbnails?thumbnail_id=featonly' % (

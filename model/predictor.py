@@ -22,7 +22,6 @@ import numpy as np
 import pandas
 from PIL import Image
 import os
-import pandas as pd
 import pyflann
 import random
 import time
@@ -171,30 +170,40 @@ class DemographicSignatures(object):
             _log.error('Could not read a valid model bias file at %s: %s' % 
                        (bias_fn, e))
             statemon.state.increment('unknown_model')
-            raise KeyError(model_name)  
+            raise KeyError(model_name)
 
-    def compute_score_for_demo(self, X, gender=None, age=None):
-        '''Returns the score for gender `gender` and age `age` derived from
-        feature vector X (a numpy array)
-        '''
-        X = np.array(X)
-        X = X.reshape(1, -1)
+    def _safe_get_weights(self, gender, age):
         if gender is None:
             gender = 'None'
         if age is None:
             age = 'None'
         try:
-            W = self.weights[gender, age]
+            return self.weights[gender, age]
         except KeyError as e:
-            _log.error('Unknown Demographic for weights file: %s,%s' % (gender, age))
+            _log.error_n('Unknown Demographic for weights file: %s,%s' % (gender, age))
             statemon.state.increment('unknown_demographic')
-            raise KeyError(e)
+            raise
+
+    def _safe_get_bias(self, gender, age):
+        if gender is None:
+            gender = 'None'
+        if age is None:
+            age = 'None'
         try:
-            b = self.bias[gender, age]
-        except KeyEror as e:
-            _log.error('Unknown Demographic for bias file: %s,%s' % (gender, age))
+            return self.bias[gender, age]
+        except KeyError as e:
+            _log.error_n('Unknown Demographic for bias file: %s,%s' % (gender, age))
             statemon.state.increment('unknown_demographic')
-            raise KeyError(e)
+            raise
+
+    def compute_score_for_demo(self, X, gender=None, age=None):
+        '''Returns the score for gender `gender` and age `age` derived from
+        feature vector X (a numpy array)
+        '''
+        X = pandas.Series(X)
+
+        b = self._safe_get_bias(gender, age)
+        W = self._safe_get_weights(gender, age)
         try:
             score = X.dot(W) + b
         except ValueError as e:
@@ -206,20 +215,37 @@ class DemographicSignatures(object):
         return float(score)
 
     def get_scores_for_all_demos(self, X):
-        '''Returns the scores for all demographics given feature vector
-        X as a pandas multiindex'''
-        X = X.reshape(1, -1)
+        '''Returns the scores for all demographics.
+
+        Inputs: X - feature vector reprsenting an image
+        
+        Returns: A pandas Series with a multiindex for all the demographics
+        '''
+
+        X = pandas.Series(X)
         try:
             scores = X.dot(self.weights) + self.bias
         except ValueError as e:
             _log.error('Improper feature vector size: %s' % e.message)
             raise ValueError(e)
-        # return scores
-        # for now, we're nto going to return the scores as multiindex 
-        # series objects, but simply as numpy arrays.
-        return np.array(score)
+        return scores
 
+    def compute_feature_importance(self, X, gender=None, age=None):
+        '''Returns the importance of each feature for a given image.
 
+        Inputs:
+        X - feature vector representing an image
+
+        Returns: 
+        An importance score for each feature as a pandas Series with the 
+        index being the index into X. Sorted by importance descending.
+        '''
+        X = pandas.Series(X)
+        W = self._safe_get_weights(gender, age)
+
+        importance = W * X
+        return importance.sort(ascending=False, inplace=False)
+    
 class Predictor(object):
     '''An abstract valence predictor.
 
