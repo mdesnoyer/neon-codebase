@@ -14,12 +14,85 @@ from model.aquila_inference_pb2 import AquilaRequest, AquilaResponse
 import model.predictor
 import numpy as np
 import numpy.testing
+import pandas as pd
 import test_utils.neontest
 import tornado.testing
 import unittest
 import utils.neon
 
 _log = logging.getLogger(__name__)
+
+class TestDemographicSignatures(test_utils.neontest.TestCase):
+    def setUp(self):
+        self.predictor = model.predictor.DemographicSignatures('20160713-test')
+    
+    def test_unknown_model(self):
+        with self.assertRaises(KeyError) as e:
+            model.predictor.DemographicSignatures('unknown-model')
+
+    def test_unknown_demographic(self):
+        features = np.random.rand(1024)
+
+        with self.assertRaises(KeyError) as e:
+            self.predictor.compute_score_for_demo(features, gender='alien')
+
+        with self.assertRaises(KeyError) as e:
+            self.predictor.compute_score_for_demo(features, age='babies')
+
+        with self.assertRaises(KeyError) as e:
+            self.predictor.compute_feature_importance(features, gender='alien')
+
+        with self.assertRaises(KeyError) as e:
+            self.predictor.compute_feature_importance(features, age='babies')
+
+    def test_compute_score_for_demo(self):
+        features = np.random.rand(1024)
+
+        men_score = self.predictor.compute_score_for_demo(features, 'M',
+                                                          '30-39')
+        woman_score = self.predictor.compute_score_for_demo(features, 'F')
+        float(men_score)
+        self.assertNotEquals(men_score, woman_score)
+
+        list_score = self.predictor.compute_score_for_demo(list(features),
+                                                           'M', '30-39')
+        self.assertEquals(list_score, men_score)
+
+        pandas_score = self.predictor.compute_score_for_demo(
+            pd.Series(features), 'M', '30-39')
+        self.assertEquals(pandas_score, men_score)
+
+    def test_compute_feature_importance(self):
+        features = pd.Series(np.random.rand(1024), index=range(1024))
+
+        men_score = self.predictor.compute_feature_importance(features, 'M',
+                                                              '30-39')
+        self.assertEquals(len(men_score), 1024)
+        self.assertTrue(all(men_score == sorted(men_score, reverse=True)))
+        self.assertEquals(max(men_score.index), 1023)
+        
+        woman_score = self.predictor.compute_feature_importance(features, 'F')
+        self.assertFalse(all(men_score == woman_score))
+
+        list_score = self.predictor.compute_feature_importance(list(features),
+                                                           'M', '30-39')
+        self.assertTrue(all(list_score == men_score))
+
+        pandas_score = self.predictor.compute_feature_importance(
+            pd.Series(features), 'M', '30-39')
+        self.assertTrue(all(pandas_score == men_score))
+
+    def test_scores_for_all_demos(self):
+        features = np.random.rand(1024)
+
+        scores = self.predictor.get_scores_for_all_demos(features)
+
+        self.assertNotEquals(float(scores['M', 'None']),
+                             float(scores['F', 'None']))
+        self.assertGreater(len(scores['M']), 0)
+        self.assertEquals(float(scores['M']['20-29']),
+                          float(scores['M', '20-29']))
+        
 
 class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
     '''Tests the Deepnet Predictor but assumes connection is good.
