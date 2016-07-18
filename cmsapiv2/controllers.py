@@ -9,6 +9,7 @@ if sys.path[0] != __base_path__:
 from apiv2 import *
 import api.brightcove_api
 import dateutil.parser
+import model.predictor
 import numpy as np
 import PIL.Image
 import io
@@ -1252,7 +1253,9 @@ class ThumbnailHandler(APIV2Handler):
             urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
             retval = ThumbnailHelper.renditions_of(urls)
         elif field == 'feature_ids': 
-            retval = ThumbnailHelper.get_feature_ids(obj) 
+            retval = ThumbnailHelper.get_feature_ids(obj,
+                                                     age=age,
+                                                     gender=gender) 
         else:
             raise BadRequestError('invalid field %s' % field)
 
@@ -1295,17 +1298,15 @@ class ThumbnailHelper(object):
         raise tornado.gen.Return(rv)
 
     @staticmethod 
-    def get_feature_ids(obj): 
-        # TODO order these by importance 
-        # load in pkl file, and multiply, order by index
+    def get_feature_ids(obj, gender=None, age=None): 
         if not obj.features: 
             return None 
         if not obj.model_version: 
             return None
         model_name = obj.model_version
-        rv = [ neondata.Feature.create_key(
-            model_name, i[0]) for i, x in np.ndenumerate(obj.features) ]
-        return rv 
+        predictor = model.predictor.DemographicSignatures(obj.model_version)
+        importance = predictor.compute_feature_importance(gender, age)
+        return zip(*(importance.index, importance.scores))
 
     @staticmethod
     def renditions_of(urls_obj):
