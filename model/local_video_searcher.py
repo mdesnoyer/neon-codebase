@@ -1828,8 +1828,7 @@ class LocalSearcher(object):
                 _item = (-frame_score, _res)
                 if len(self.worst_results) < self.m_thumbs:
                     heapq.heappush(self.worst_results, _item)
-                elif frame_score < self.worst_results[0][0]:
-                    heapq.heapreplace(self.worst_results, _item)
+                _ = heapq.heappushpop(self.worst_results, _item)
 
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
