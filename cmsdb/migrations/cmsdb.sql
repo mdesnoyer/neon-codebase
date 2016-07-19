@@ -361,7 +361,7 @@ COPY brightcoveplayer (_data, _type) FROM stdin;
 --
 
 COPY billingplans (_data, _type) FROM stdin;
-{"key": "demo", "plan_type": "demo", "max_video_posts": 10, "seconds_to_refresh_video_posts":123456789, "max_video_size":900.0}	BillingPlans
+{"key": "demo", "plan_type": "demo", "max_video_posts": 25, "seconds_to_refresh_video_posts":123456789, "max_video_size":900.0}	BillingPlans
 {"key": "pro_monthly", "plan_type": "pro_monthly", "max_video_posts": 100, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
 {"key": "pro_yearly", "plan_type": "pro_yearly", "max_video_posts": 100, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
 {"key": "premeire", "plan_type": "premeire", "max_video_posts": 500000, "seconds_to_refresh_video_posts":1800, "max_video_size":500000.0}	BillingPlans

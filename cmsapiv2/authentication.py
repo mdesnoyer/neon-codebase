@@ -30,6 +30,8 @@ _successful_logouts_ref = statemon.state.get_ref('successful_logouts')
 statemon.define('post_account_oks', int)
 statemon.define('bad_password_reset_attempts', int)
 
+statemon.define('user_signup_warning', int)
+
 class CommunicationTypes(object):
     EMAIL = 'email'
     SECONDARY_EMAIL = 'secondary_email'
@@ -418,7 +420,21 @@ class AccountHelper(object):
             raise AlreadyExists('User with that email already exists.')
 
         # Save other user objects (ExperimentStrategy, AccountLimits, etc.).
-        yield AccountHelper.save_default_objects(account)
+        account_limits, _, _, _ = yield AccountHelper.save_default_objects(account)
+
+        # Increase a user account video limit if it's below the demo amount.
+        limit_minimum = neondata.AccountLimits.MAX_VIDEOS_ON_DEMO_SIGNUP
+        if account_limits.max_video_posts < limit_minimum:
+            def _modify(limits):
+                limits.max_video_posts = neondata.AccountLimits.MAX_VIDEOS_ON_DEMO_SIGNUP
+            limit_success = yield neondata.AccountLimits.modify(
+                account.get_id(),
+                _modify,
+                async=True)
+            if not limit_success:
+                _log.warn('Did not modify demo account limits for %s' %
+                    account.get_id())
+                statemon.state.increment('user_signup_warning')
 
         # Save account and return it.
         account.users.append(user.get_id())
@@ -451,14 +467,12 @@ class AccountHelper(object):
 
         # Set account to have the demo billing plan and limits.
         billing_plan = yield neondata.BillingPlans.get(
-            'demo',
+            neondata.BillingPlans.PLAN_DEMO,
             async=True)
         account_limits = neondata.AccountLimits(account.neon_api_key)
         account_limits.populate_with_billing_plan(billing_plan)
         try:
-            yield account_limits.save(
-                overwrite_existing_object=False,
-                async=True)
+            yield account_limits.save(async=True)
         except neondata.psycopg2.IntegrityError:
             pass
 
@@ -471,6 +485,13 @@ class AccountHelper(object):
                 async=True)
         except neondata.psycopg2.IntegrityError:
             pass
+
+        raise tornado.gen.Return((
+            account_limits,
+            experiment_strategy,
+            tracker_p_aid_mapper,
+            tracker_s_aid_mapper
+        ))
 
     @staticmethod
     @tornado.gen.coroutine
