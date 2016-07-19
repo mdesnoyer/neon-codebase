@@ -480,6 +480,7 @@ def _load_impala_table(**kwargs):
     task = kwargs['task_instance_key_str']
     event = kwargs['event']
 
+    cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
     if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
@@ -491,7 +492,6 @@ def _load_impala_table(**kwargs):
                                             prefix=output_prefix)
 
     _log.info("{task}: Loading data!".format(task=task))
-    cluster = ClusterGetter.get_cluster()
     
     try:
         _log.info("Path to build for impala is %s" % os.path.join('s3://', output_bucket, cleaned_prefix))
