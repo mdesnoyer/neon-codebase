@@ -154,8 +154,6 @@ def _create_tables(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
-    _log.info("Airflow start date is %s" % clicklogs.default_args['start_date'].strftime("%Y/%m/%d"))
-
     builder = stats.impala_table.ImpalaTableBuilder(cluster, event)
     builder.run()
 
@@ -386,6 +384,10 @@ def _stage_files(**kwargs):
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
 
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+        _log.info("This is first run, skipping of stage files as none would exist")
+        return
+
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
 
@@ -423,11 +425,14 @@ def _run_mr_cleaning_job(**kwargs):
     task = kwargs['task_instance_key_str']
 
     _log.info("execution date is %s" % execution_date.strftime("%Y/%m/%d"))
-    _log.info("execution date test is %s" % execution_date.strftime("%Y/%m/%d/%H"))
 
     if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
-        _log.info("This is first run, skipping mr job as o/p file should have already be available in S3")
-        return
+        if execution_date.strftime("%H") == '00':
+            pass
+        else:
+            _log.info("mr job not required to be run for this run hour %s" %
+                      execution_date.strftime("%Y/%m/%d/%H"))
+            return
 
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
@@ -457,6 +462,12 @@ def _run_mr_cleaning_job(**kwargs):
     jar_path = os.path.join(os.path.dirname(__file__), '..', '..', 'java',
                             'target', options.mr_jar)
     try:
+        if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+            cleaning_job_input_path='s3://neon-tracker-logs-v2/v2.2/*/*/*/*'
+            cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
+
+        _log.info("cleaning job ip path is %s" % cleaning_job_input_path)
+
         cluster.run_map_reduce_job(jar_path,
                                    'com.neon.stats.RawTrackerMR',
                                    cleaning_job_input_path,
@@ -485,9 +496,15 @@ def _load_impala_table(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
+    # The first run is going to be big. So provision sufficient number of task instances to enable
+    # faster completion. Bring down the number of task instances to zero later on when complete
     if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
-        _log.info("This is first run, bumping up the num of instances")
-        cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
+        if execution_date.strftime("%H") == '00':
+            _log.info("This is first & big run, bumping up the num of task instances")
+            cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
+        else:
+            _log.info("Not required to build impala tables for this run hour %s" 
+                      % execution_date.strftime("%Y/%m/%d/%H"))
 
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
     cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
@@ -522,6 +539,10 @@ def _delete_staging_files(**kwargs):
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
 
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+        _log.info("This is first run, skipping delete of stage files as none would exist")
+        return
+
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
 
     staging_full_prefix = _get_s3_staging_prefix(dag, execution_date,
@@ -544,6 +565,15 @@ def _execution_date_has_input_files(**kwargs):
 
     input_path = kwargs['input_path']
 
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+        if execution_date.strftime("%H") == '00':
+            _log.info("This is first run, skipping the check for existence of files")
+            return 'stage_files'
+        else:
+            _log.info("Not required to check for existence of files for this run hour %s" 
+                      % execution_date.strftime("%Y/%m/%d/%H"))
+            return 'no_input_files'
+
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
 
     _log.info(("{task}: checking for input files for the execution date "
@@ -556,8 +586,20 @@ def _execution_date_has_input_files(**kwargs):
         return 'no_input_files'
 
 def _update_table_build_times(**kwargs):
+
+    execution_date = kwargs['execution_date']
+
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
+
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+        if execution_date.strftime("%H") == '00':
+            _log.info("First & big run is complete, bring down the num of task instances to zero")
+            cluster.change_instance_group_size(group_type='TASK', new_size=0)
+        else:
+            _log.info("Not required to build impala tables for this run hour %s" 
+                      % execution_date.strftime("%Y/%m/%d/%H"))
+
     stats.impala_table.update_table_build_times(cluster)
 
 
@@ -703,9 +745,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        on_failure_callback=_check_compute_cluster_capacity,
-        on_success_callback=_check_compute_cluster_capacity,
-        on_retry_callback=_check_compute_cluster_capacity)
+        priority_weight=10)
     op.set_upstream([create_op, mr_cleaning_job])
     load_impala_tables.append(op)
 
