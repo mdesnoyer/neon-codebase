@@ -1194,25 +1194,45 @@ class ThumbnailHandler(APIV2Handler):
 
         schema = Schema({
           Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('thumbnail_id'): Any(str, unicode, Length(min=1, max=512)),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+          Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+          'gender': In(['M', 'F', None]),
+          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        thumbnail_id = args['thumbnail_id']
-        thumbnail = yield neondata.ThumbnailMetadata.get(
-            thumbnail_id,
-            async=True)
-        if not thumbnail:
-            raise NotFoundError('thumbnail does not exist with id = %s' %
-                                (thumbnail_id))
-        statemon.state.increment('get_thumbnail_oks')
+
+        query_tids = args['thumbnail_id'].split(',')
         fields = args.get('fields', None)
+        gender = args.get('gender', None) 
+        age = args.get('age', None) 
+
         if fields:
             fields = set(fields.split(','))
-        thumbnail = yield self.db2api(thumbnail, fields)
-        self.success(thumbnail)
+
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            query_tids,
+            async=True)
+ 
+        thumbnails = yield [
+            ThumbnailHandler.db2api(
+                x, 
+                gender=gender,
+                age=age, 
+                fields=fields) for x in thumbs if x is not None]
+
+        if not thumbnails:
+            raise NotFoundError('thumbnails do not exist with ids = %s' %
+                                (query_tids))
+
+        # TODO not sure if this is right thing to do 
+        #if len(thumbnails) == 1: 
+        #    rv = thumbnails[0]
+        #else:  
+        rv = { 'thumb_count': len(thumbnails), 'thumbnails': thumbnails } 
+        statemon.state.increment('get_thumbnail_oks')
+        self.success(rv)
 
     @classmethod
     def get_access_levels(self):
