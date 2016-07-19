@@ -599,6 +599,7 @@ def _update_table_build_times(**kwargs):
         else:
             _log.info("Not required to build impala tables for this run hour %s" 
                       % execution_date.strftime("%Y/%m/%d/%H"))
+            return
 
     stats.impala_table.update_table_build_times(cluster)
 
