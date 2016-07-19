@@ -480,6 +480,8 @@ def _load_impala_table(**kwargs):
     task = kwargs['task_instance_key_str']
     event = kwargs['event']
 
+    cluster.connect()
+
     if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
         _log.info("This is first run, bumping up the num of instances")
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
@@ -490,7 +492,7 @@ def _load_impala_table(**kwargs):
 
     _log.info("{task}: Loading data!".format(task=task))
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    
     try:
         _log.info("Path to build for impala is %s" % os.path.join('s3://', output_bucket, cleaned_prefix))
 
