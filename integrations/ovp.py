@@ -300,6 +300,7 @@ class OVPIntegration(object):
             'callback_url': callback_url,
             'custom_data': custom_data,
             'duration': duration,
+            'integration_id': self.platform.integration_id,  
             'publish_date': publish_date
         }
         headers = {"Content-Type": "application/json"}
