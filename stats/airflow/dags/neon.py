@@ -480,6 +480,10 @@ def _load_impala_table(**kwargs):
     task = kwargs['task_instance_key_str']
     event = kwargs['event']
 
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+        _log.info("This is first run, bumping up the num of instances")
+        cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
+
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
     cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                             prefix=output_prefix)
@@ -694,7 +698,10 @@ for event in __EVENTS:
         python_callable=_load_impala_table,
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
-        retry_delay=timedelta(seconds=random.randrange(30,300,step=30)))
+        retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
+        on_failure_callback=_check_compute_cluster_capacity,
+        on_success_callback=_check_compute_cluster_capacity,
+        on_retry_callback=_check_compute_cluster_capacity)
     op.set_upstream([create_op, mr_cleaning_job])
     load_impala_tables.append(op)
 
