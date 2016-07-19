@@ -90,7 +90,7 @@ options.define('cleaning_mr_memory', default=2048, type=int,
                help='Memory in MB needed for the map of the cleaning job')
 options.define('clicklog_period', default=3, type=int,
                help='How often to run the clicklog job in hours')
-options.define('max_task_instances', default=10, type=int,
+options.define('max_task_instances', default=30, type=int,
                help='Maximum number of task instances to request')
 options.define('full_run_input_path', default='s3://neon-tracker-logs-v2/v2.2/*/*/*/*',
                 type=str, help='input path for first run')
@@ -356,6 +356,20 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     if folder_key:
         folder_key.delete()
 
+def check_first_run():
+    """
+    Check if this is the first run and return true if it is. Also return true if it is the first instance
+    of the run
+    """
+    first_run=False
+    first_instance_run=False
+
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+        first_run=True
+        if execution_date.strftime("%H") == '00':
+            first_instance_run=True
+
+    return first_run, first_instance_run
 
 # ----------------------------------
 # PythonOperator callables
@@ -386,7 +400,9 @@ def _stage_files(**kwargs):
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
 
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run()
+    if is_first_run:
         _log.info("This is first run, skipping of stage files as none would exist")
         return
 
@@ -426,10 +442,11 @@ def _run_mr_cleaning_job(**kwargs):
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
 
-    _log.info("execution date is %s" % execution_date.strftime("%Y/%m/%d"))
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run()
 
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
-        if execution_date.strftime("%H") == '00':
+    if is_first_run:
+        if is_first_instance_run:
             pass
         else:
             _log.info("mr job not required to be run for this run hour %s" %
@@ -464,7 +481,7 @@ def _run_mr_cleaning_job(**kwargs):
     jar_path = os.path.join(os.path.dirname(__file__), '..', '..', 'java',
                             'target', options.mr_jar)
     try:
-        if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+        if is_first_run:
             cleaning_job_input_path=options.full_run_input_path
             cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
 
@@ -498,10 +515,13 @@ def _load_impala_table(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run()
+
     # The first run is going to be big. So provision sufficient number of task instances to enable
     # faster completion. Bring down the number of task instances to zero later on when complete
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
-        if execution_date.strftime("%H") == '00':
+    if is_first_run:
+        if is_first_instance_run:
             _log.info("This is first & big run, bumping up the num of task instances")
             cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
         else:
@@ -541,8 +561,11 @@ def _delete_staging_files(**kwargs):
     dag = kwargs['dag']
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
+    
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run()
 
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+    if is_first_run:
         _log.info("This is first run, skipping delete of stage files as none would exist")
         return
 
@@ -567,9 +590,12 @@ def _execution_date_has_input_files(**kwargs):
     task = kwargs['task_instance_key_str']
 
     input_path = kwargs['input_path']
+    
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run()
 
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
-        if execution_date.strftime("%H") == '00':
+    if is_first_run:
+        if is_first_instance_run:
             _log.info("This is first run, skipping the check for existence of files")
             return 'stage_files'
         else:
@@ -594,9 +620,12 @@ def _update_table_build_times(**kwargs):
 
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
+    
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run()
 
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
-        if execution_date.strftime("%H") == '00':
+    if is_first_run:
+        if is_first_instance_run:
             _log.info("First & big run is complete, bring down the num of task instances to zero")
             cluster.change_instance_group_size(group_type='TASK', new_size=0)
         else:
