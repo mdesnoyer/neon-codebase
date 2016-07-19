@@ -113,8 +113,10 @@ utils.monitor.start_agent()
 # NEON HELPER METHODS
 # ----------------------------------
 
-__EVENTS = ['ImageLoad', 'ImageVisible','ImageClick', 'AdPlay', 'VideoPlay',
-          'VideoViewPercentage', 'EventSequence']
+# __EVENTS = ['ImageLoad', 'ImageVisible','ImageClick', 'AdPlay', 'VideoPlay',
+#           'VideoViewPercentage', 'EventSequence']
+
+__EVENTS = ['VideoPlay', 'EventSequence']
 
 # Tracker Account Ids: alpha-numeric string 3-15 chars long
 TAI = re.compile(r'^[\w]{3,15}$')  
@@ -442,22 +444,11 @@ def _run_mr_cleaning_job(**kwargs):
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
 
-    # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run()
-
-    if is_first_run:
-        if is_first_instance_run:
-            pass
-        else:
-            _log.info("mr job not required to be run for this run hour %s" %
-                      execution_date.strftime("%Y/%m/%d/%H"))
-            return
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
 
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
-
-    cluster = ClusterGetter.get_cluster()
-    cluster.connect()
 
     staging_prefix = _get_s3_staging_prefix(dag=dag,
                                             execution_date=execution_date,
@@ -467,26 +458,38 @@ def _run_mr_cleaning_job(**kwargs):
 
     cleaning_job_input_path = os.path.join("s3://", staging_bucket,
                                            staging_prefix, '*')
+
     cleaning_job_output_path = os.path.join("s3://", output_bucket,
                                             cleaned_prefix)
 
     _delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
                                      output_path=kwargs['output_path'])
 
+    jar_path = os.path.join(os.path.dirname(__file__), '..', '..', 'java',
+                            'target', options.mr_jar)
+
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run()
+
+    if is_first_run:
+        if is_first_instance_run:
+            hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
+            hdfs_dir = 'mnt/cleaned'
+            cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
+            #cleaning_job_input_path = options.full_run_input_path
+            cleaning_job_input_path = "s3://neon-tracker-logs-v2/v2.2/2089095449/2016/07/*/*"
+            cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
+        else:
+            _log.info("mr job not required to be run for this run hour %s" %
+                      execution_date.strftime("%Y/%m/%d/%H"))
+            return
+
+    _log.info("Output of clean up job goes to %s" % cleaning_job_output_path)
+    _log.info("Input for clean up job is %s" % cleaning_job_input_path)
     _log.info("{task}: calling Neon Map/Reduce clicklogs cleaning job".format(
         task=task))
 
-    _log.info("Output of clean up job goes to %s" % cleaning_job_output_path)
-
-    jar_path = os.path.join(os.path.dirname(__file__), '..', '..', 'java',
-                            'target', options.mr_jar)
     try:
-        if is_first_run:
-            cleaning_job_input_path=options.full_run_input_path
-            cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
-
-        _log.info("cleaning job ip path is %s" % cleaning_job_input_path)
-
         cluster.run_map_reduce_job(jar_path,
                                    'com.neon.stats.RawTrackerMR',
                                    cleaning_job_input_path,
@@ -657,9 +660,42 @@ def _hdfs_maintenance(**kwargs):
                           tmp_dir=tmp_dir)
     _run_cluster_command(remove_old_tmp)
 
+
 def _clear_all_tasks(operators=None, **kwargs):
     for op in operators:
         op.clear(**kwargs)
+
+
+def _checkpoint_hdfs_to_s3(**kwargs):
+    """
+    Copy the output of the first run from hdfs to S3
+    """
+
+    execution_date = kwargs['execution_date']
+
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+
+    hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
+    hdfs_dir = 'mnt/cleaned'
+    hdfs_path_to_copy = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
+
+    output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
+    cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                            prefix=output_prefix)
+
+    s3_path_to_copy = os.path.join('s3://', output_bucket, cleaned_prefix)
+
+    try:
+        jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
+
+        cluster.checkpoint_hdfs_to_s3(jar_location,
+                                      hdfs_path_to_copy,
+                                      s3_path_to_copy,
+                                      timeout=kwargs['timeout'])
+    except Exception as e:
+        _log.error('Copy from hdfs to S3 failed: %s' % e)
+        raise
 
 
 # ----------------------------------
@@ -667,10 +703,10 @@ def _clear_all_tasks(operators=None, **kwargs):
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
-    'start_date': datetime(2016, 7, 18),
+    'start_date': datetime.datetime.utcnow() - datetime.timedelta(days=1),
     'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
-    'email_on_retry': False,
+    'email_on_retry': True,
     'retries': 3,
     'retry_delay': timedelta(minutes=1),
 
@@ -756,6 +792,17 @@ mr_cleaning_job = PythonOperator(
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
 
+# Check if this is the first run and take appropriate action
+is_first_run, is_first_instance_run = check_first_run()
+
+if first_run:
+    s3copy = PythonOperator(
+        task_id='copy_hdfs_to_s3',
+        dag=clicklogs,
+        python_callable=_checkpoint_hdfs_to_s3,
+        op_kwargs=dict(timeout=60 * 600))
+    s3copy.set_upstream(mr_cleaning_job)
+
 # Load the cleaned files from Map/Reduce into Impala
 load_impala_tables = []
 for event in __EVENTS:
@@ -776,7 +823,7 @@ for event in __EVENTS:
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
         priority_weight=10)
-    op.set_upstream([create_op, mr_cleaning_job])
+    op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
 
 # Delete the staging files once the Map/Reduce job is done
