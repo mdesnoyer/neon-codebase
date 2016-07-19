@@ -92,6 +92,8 @@ options.define('clicklog_period', default=3, type=int,
                help='How often to run the clicklog job in hours')
 options.define('max_task_instances', default=10, type=int,
                help='Maximum number of task instances to request')
+options.define('full_run_input_path', default='s3://neon-tracker-logs-v2/v2.2/*/*/*/*',
+                type=str, help='input path for first run')
 
 # Use Neon's options module for configuration parsing
 try:
@@ -463,7 +465,7 @@ def _run_mr_cleaning_job(**kwargs):
                             'target', options.mr_jar)
     try:
         if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
-            cleaning_job_input_path='s3://neon-tracker-logs-v2/v2.2/*/*/*/*'
+            cleaning_job_input_path=options.full_run_input_path
             cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
 
         _log.info("cleaning job ip path is %s" % cleaning_job_input_path)
@@ -719,9 +721,9 @@ mr_cleaning_job = PythonOperator(
     python_callable=_run_mr_cleaning_job,
     provide_context=True,
     op_kwargs=dict(staging_path=options.staging_path,
-                   output_path=options.output_path, timeout=60 * 300),
+                   output_path=options.output_path, timeout=60 * 600),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
-    execution_timeout=timedelta(minutes=300))
+    execution_timeout=timedelta(minutes=600))
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
 
