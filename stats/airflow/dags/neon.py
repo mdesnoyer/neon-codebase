@@ -310,18 +310,18 @@ def _run_cluster_command(cmd, **kwargs):
     ssh_conn.execute_remote_command(cmd)
 
 
-def _check_compute_cluster_capacity(op_kwargs):
-    """
+# def _check_compute_cluster_capacity(op_kwargs):
+#     """
 
-    :return:
-    """
-    ti = op_kwargs['task_instance']
-    cluster = ClusterGetter.get_cluster()
-    cluster.connect()
-    if False:
-        cluster.change_instance_group_size(group_type='TASK', incr_amount=1)
-    # else:
-    #     cluster.change_instance_group_size(group_type='TASK', new_size=2)
+#     :return:
+#     """
+#     ti = op_kwargs['task_instance']
+#     cluster = ClusterGetter.get_cluster()
+#     cluster.connect()
+#     if False:
+#         cluster.change_instance_group_size(group_type='TASK', incr_amount=1)
+#     # else:
+#     #     cluster.change_instance_group_size(group_type='TASK', new_size=2)
 
 
 def _delete_previously_cleaned_files(dag, execution_date, output_path):
@@ -720,10 +720,7 @@ mr_cleaning_job = PythonOperator(
     op_kwargs=dict(staging_path=options.staging_path,
                    output_path=options.output_path, timeout=60 * 300),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
-    execution_timeout=timedelta(minutes=300),
-    on_failure_callback=_check_compute_cluster_capacity,
-    on_success_callback=_check_compute_cluster_capacity,
-    on_retry_callback=_check_compute_cluster_capacity)
+    execution_timeout=timedelta(minutes=300))
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
 
