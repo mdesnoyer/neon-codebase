@@ -739,7 +739,8 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
             url, '/api/v2/a1/videos')
         self.assertEquals(
             submission,
-            {'external_video_ref': '123456789',
+            {'integration_id' : self.integration.platform.integration_id, 
+             'external_video_ref': '123456789',
              'url': 'http://video.mp4',
              'title': 'Some video',
              'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
@@ -793,7 +794,8 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
 
         # Try a video with a reference id
         job_id = yield self.integration.submit_one_video_object(
-            { 'id' : 'v1',
+            { 'integration_id': self.platform.integration_id, 
+              'id' : 'v1',
               'referenceId': 'video_ref',
               'name' : 'Some video',
               'length' : 100,
@@ -813,7 +815,8 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         url, submission = self._get_video_submission()
         self.assertDictEqual(
             submission,
-            {'external_video_ref': '465972',
+            {'integration_id': self.platform.integration_id, 
+             'external_video_ref': '465972',
              'url': 'http://video.mp4',
              'title': 'Some video',
              'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
