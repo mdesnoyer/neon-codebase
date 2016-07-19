@@ -7815,13 +7815,13 @@ class TestFeatureHandler(TestControllersBase):
         self.assertEquals(rjson['feature_count'], 2)
         f1 = rjson['features'][0]  
         self.assertEquals(f1['index'], 1) 
-        self.assertEquals(f1['name'], 'unknown') 
+        self.assertEquals(f1['name'], None) 
         self.assertEquals(f1['variance_explained'], 0.0) 
         self.assertEquals(f1['model_name'], 'kfmodel')
  
         f2 = rjson['features'][1]  
         self.assertEquals(f2['index'], 2) 
-        self.assertEquals(f2['name'], 'unknown') 
+        self.assertEquals(f2['name'], None) 
         self.assertEquals(f2['variance_explained'], 0.0) 
         self.assertEquals(f2['model_name'], 'kfmodel')
  
@@ -7839,13 +7839,13 @@ class TestFeatureHandler(TestControllersBase):
         self.assertEquals(rjson['feature_count'], 2)
         f1 = rjson['features'][0]  
         self.assertEquals(f1['index'], 2) 
-        self.assertEquals(f1['name'], 'unknown') 
+        self.assertEquals(f1['name'], None) 
         self.assertEquals(f1['variance_explained'], 0.0) 
         self.assertEquals(f1['model_name'], 'kfmodel')
  
         f2 = rjson['features'][1]  
         self.assertEquals(f2['index'], 1) 
-        self.assertEquals(f2['name'], 'unknown') 
+        self.assertEquals(f2['name'], None) 
         self.assertEquals(f2['variance_explained'], 0.0) 
         self.assertEquals(f2['model_name'], 'kfmodel')
  
