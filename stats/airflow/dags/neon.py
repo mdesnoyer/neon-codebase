@@ -423,7 +423,7 @@ def _run_mr_cleaning_job(**kwargs):
     _log.info("execution date is %s" % execution_date.strftime("%Y/%m/%d"))
     _log.info("execution date test is %s" % execution_date.strftime("%Y/%m/%d/%H"))
 
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d")
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
         _log.info("This is first run, skipping mr job as o/p file should have already be available in S3")
         return
 
