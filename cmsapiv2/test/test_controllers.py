@@ -223,6 +223,43 @@ class TestControllersBase(TestBase):
     def get_app(self):
         return controllers.application
 
+class TestAPIV2(test_utils.neontest.AsyncHTTPTestCase):
+
+    def setUp(self):
+        pass
+
+    def tearDown(self):
+        pass
+
+    def test_write_error_io_error(self):
+        app = MagicMock()
+        req = MagicMock()
+        handler = APIV2Handler(app, req)
+        handler.error = MagicMock()
+
+        exc_info = (None, IOError())
+        handler.write_error(500, exc_info=exc_info)
+        handler.error.assert_called_with('', code=500)
+
+        # Uses the message prop in exception.
+        exc_info = (None, IOError('problem'))
+        handler.write_error(500, exc_info=exc_info)
+        handler.error.assert_called_with('problem', code=500)
+
+        # Uses the errno in exception if set.
+        exc_info = (None, IOError(501, 'with status code'))
+        handler.write_error(500, exc_info=exc_info)
+        handler.error.assert_called_with('with status code', code=501)
+
+        # Uses the errno only if it is a valid http status code.
+        exc_info = (None, IOError(4444, 'invalid status code'))
+        handler.write_error(500, exc_info=exc_info)
+        handler.error.assert_called_with('invalid status code', code=500)
+
+        # Doesn't use a filename.
+        exc_info = (None, IOError(401, 'filename ignored', 'ignore'))
+        handler.write_error(500, exc_info=exc_info)
+        handler.error.assert_called_with('filename ignored', code=401)
 
 class TestNewAccountHandler(TestAuthenticationBase):
     def setUp(self):

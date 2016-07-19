@@ -682,8 +682,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             self.error('failed to download thumbnail',
                        extra_data=get_exc_message(exception))
         elif isinstance(exception, IOError):
-            self.set_status(exception.errno)
-            self.error(exception.strerror, code=self.get_status())
+            if exception.errno in tornado.httputil.responses:
+                self.set_status(exception.errno)
+            message = exception.strerror or exception.message
+            self.error(message, code=self.get_status())
         else:
             _log.exception(''.join(traceback.format_tb(kwargs['exc_info'][2])))
             statemon.state.increment(ref=_internal_server_errors_ref,
