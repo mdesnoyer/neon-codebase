@@ -90,6 +90,8 @@ options.define('cleaning_mr_memory', default=2048, type=int,
                help='Memory in MB needed for the map of the cleaning job')
 options.define('clicklog_period', default=3, type=int,
                help='How often to run the clicklog job in hours')
+options.define('max_task_instances', default=10, type=int,
+               help='Maximum number of task instances to request')
 
 # Use Neon's options module for configuration parsing
 try:
