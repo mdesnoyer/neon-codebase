@@ -505,6 +505,7 @@ def _load_impala_table(**kwargs):
         else:
             _log.info("Not required to build impala tables for this run hour %s" 
                       % execution_date.strftime("%Y/%m/%d/%H"))
+            return
 
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
     cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
