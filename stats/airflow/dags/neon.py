@@ -420,6 +420,13 @@ def _run_mr_cleaning_job(**kwargs):
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
 
+    _log.info("execution date is %s" % execution_date.strftime("%Y/%m/%d"))
+    _log.info("execution date test is %s" % execution_date.strftime("%Y/%m/%d/%H"))
+
+    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d")
+        _log.info("This is first run, skipping mr job as o/p file should have already be available in S3")
+        return
+
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
 
@@ -577,7 +584,7 @@ def _clear_all_tasks(operators=None, **kwargs):
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
-    'start_date': datetime(2016, 7, 13),
+    'start_date': datetime(2016, 7, 18),
     'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
     'email_on_retry': False,
