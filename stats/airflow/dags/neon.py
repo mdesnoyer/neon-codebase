@@ -806,7 +806,7 @@ s3copy = PythonOperator(
     dag=clicklogs,
     python_callable=_checkpoint_hdfs_to_s3,
     provide_context=True,
-    op_kwargs=dict(timeout=60 * 600))
+    op_kwargs=dict(output_path=options.output_path, timeout=60 * 600))
 s3copy.set_upstream(mr_cleaning_job)
 
 # Load the cleaned files from Map/Reduce into Impala
