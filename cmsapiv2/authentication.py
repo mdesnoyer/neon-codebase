@@ -400,13 +400,16 @@ class AccountHelper(object):
         # Instantiate account and user from payload in verifier.
         account = neondata.NeonUserAccount.create(
             verifier.extra_info['account'])
-        # Enable this for Mastermind serving.
-        account.serving_enabled = True
         user_json = json.loads(verifier.extra_info['user'])
         user = neondata.User._create(
             user_json['_data']['key'],
             user_json)
         user.email_verified = True
+
+        # Enable this for Mastermind serving.
+        account.serving_enabled = True
+        # Bump up the processing priority
+        account.processing_priority = 1
 
         # Let database confirm email's uniqueness.
         try:

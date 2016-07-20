@@ -19,11 +19,10 @@ import copy
 from datetime import datetime
 import dateutil.parser
 import happybase
-import impala.dbapi
-import impala.error
 import logging
 import pandas
 import re
+import stats.cluster
 import stats.metrics
 from stats import statutils
 import struct
@@ -31,13 +30,13 @@ import utils.neon
 from utils.options import options, define
 import utils.prod
 
-define("stats_host", default="127.0.0.1",
-        type=str, help="Host to connect to the stats db on.")
-define("stats_port", default=21050, type=int,
-       help="Port to connect to the stats db on")
 define("pub_id", default=None, type=str,
        help=("Publisher, in the form of the tracker account id to get the "
              "data for"))
+define("impressions", default='views',
+       help='Type of metric to consider an impression')
+define("conversions", default='clicks',
+       help='Type of metric to consider a click')
 define("start_time", default=None, type=str,
        help=("If set, the time of the earliest data to pay attention to in "
              "ISO UTC format"))
@@ -52,7 +51,7 @@ define("output", default=None, type=str,
        help="Output file. If not set, outputs to STDOUT")
 define("min_impressions", default=1000,
        help="Minimum number of impressions for a thumbnail for it to be included.")
-define("baseline_types", default="centerframe",
+define("baseline_types", default="default",
        help="Comma separated list of thumbnail type to treat as baseline")
 define("do_mobile", default=0, type=int,
        help="Only collect mobile data if 1")
@@ -67,106 +66,26 @@ define("video_ids", default=None, type=str,
        help="File containing video ids to analyze, one per line")
 define("use_realtime_data", default=0, type=int,
        help="If 1, use the realtime data instead of the cleaned Impala data")
+define("hbase_host", default="hbase3",
+       help="Hostname of the HBase machine")
+define("stack_name", default=None, type=str,
+       help="Stack name to limit search for hosts to")
 define("show_bad_experiment_vids", default=0, type=int,
        help=("If 1, include videos where there either is not a Neon thumb or"
              " there is not a baseline"))
 
 _log = logging.getLogger(__name__)
 
-class MetricTypes:
-    LOADS = 'loads'
-    VIEWS = 'views'
-    CLICKS = 'clicks'
-    PLAYS = 'plays'
-
-impala_col_map = {
-    MetricTypes.LOADS: 'imloadclienttime',
-    MetricTypes.VIEWS: 'imvisclienttime',
-    MetricTypes.CLICKS: 'imclickclienttime'
-    }
-
-def connect():
-    return impala.dbapi.connect(host=options.stats_host,
-                                port=options.stats_port,
-                                timeout=10000)
-
-def filter_video_objects(videos):
-    _log.info('Loading video info')
-    requests = neondata.NeonApiRequest.get_many([(x.job_id, x.get_account_id())
-                                                 for x in videos if x.job_id])
-    retval = []
-    start_video_time = None
-    end_video_time = None
-    if options.start_video_time is not None:
-        start_video_time = dateutil.parser.parse(options.start_video_time)
-    if options.end_video_time is not None:
-        end_video_time = dateutil.parser.parse(options.end_video_time)
-    for video, request in zip(videos, requests):
-        if video is None or request is None:
-            continue
-
-        if start_video_time:
-            if video.publish_date is None:
-                if (request.publish_date is None or
-                    dateutil.parser.parse(request.publish_date) < 
-                    start_video_time):
-                    continue
-            elif (dateutil.parser.parse(video.publish_date) < 
-                  start_video_time):
-                continue
-
-        if end_video_time:
-            if video.publish_date is None:
-                if (request.publish_date is None or
-                    dateutil.parser.parse(request.publish_date) > 
-                    end_video_time):
-                    continue
-            elif (dateutil.parser.parse(video.publish_date) > 
-                  end_video_time):
-                continue
-
-        retval.append(video)
-    return retval
-    
-
-def get_video_objects(impression_metric):
-    
-    if options.video_ids:
-        _log.info('Using video ids from %s' % options.video_ids)
-        with open(options.video_ids) as f:
-            video_ids = [x.strip() for x in f]
-    else:
-        _log.info('Querying for video ids')
-        conn = connect()
-        cursor = conn.cursor()
-        cursor.execute(
-        """select distinct regexp_extract(thumbnail_id, 
-        '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from eventsequences where 
-        thumbnail_id is not NULL and
-        %s is not null and
-        tai='%s' %s""" % (impala_col_map[impression_metric],
-                          options.pub_id, 
-                          statutils.get_time_clause(options.start_time,
-                                                    options.end_time)))
-
-        vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-]+)')
-        video_ids = [vidRe.match(x[0]).group(2) for 
-                     x in cursor if vidRe.match(x[0])]
-
-    videos = neondata.VideoMetadata.get_many(video_ids)
-    videos = [x for x in videos if x is not None]
-
-    return filter_video_objects(videos)
 
 def get_time_range(video_ids):
     '''For a list of video ids get the (min, max) time range in floats.'''
-    conn = connect()
+    conn = statutils.impala_connect()
     cursor = conn.cursor()
     cursor.execute(
         """select min(servertime), max(servertime) 
            from eventsequences where
            tai='%s' and 
-           regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+           regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_',
            1) in (%s)
         """ % (options.pub_id,
                ','.join(["'%s'" % x for x in video_ids])))
@@ -181,12 +100,12 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
 
     start_time, end_time = get_time_range(video_info.keys())
     
-    conn = connect()
+    conn = statutils.impala_connect()
     cursor = conn.cursor()
 
     _log.info('Getting all the %s and %s counts' % (impression_metric,
                                                     conversion_metric))
-    if conversion_metric == MetricTypes.PLAYS:
+    if conversion_metric == statutils.MetricTypes.PLAYS:
         query = (
             """select 
             cast(floor(servertime/3600)*3600 as timestamp) as hr,
@@ -198,15 +117,15 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             from EventSequences where tai='%s' and 
             hr is not null and
             %s is not null and
-            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_',
             1) in (%s)
             %s
             %s
             %s
             %s
             group by thumbnail_id, hr""" %
-            (impala_col_map[impression_metric], options.pub_id,
-             impala_col_map[impression_metric],
+            (statutils.impala_col_map[impression_metric], options.pub_id,
+             statutils.impala_col_map[impression_metric],
              ','.join(["'%s'" % x for x in video_info.keys()]),
              statutils.get_time_clause(start_time, end_time),
              statutils.get_mobile_clause(options.do_mobile),
@@ -220,16 +139,16 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             EventSequences
             where tai='%s' and 
             %s is not null and
-            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_',
             1) in (%s) 
             %s
             %s
             %s
             %s
             group by thumbnail_id, hr
-            """ % (impala_col_map[impression_metric],
-                   impala_col_map[conversion_metric],
-                   options.pub_id, impala_col_map[impression_metric],
+            """ % (statutils.impala_col_map[impression_metric],
+                   statutils.impala_col_map[conversion_metric],
+                   options.pub_id, statutils.impala_col_map[impression_metric],
                    ','.join(["'%s'" % x for x in video_info.keys()]),
                    statutils.get_time_clause(start_time, end_time),
                    statutils.get_mobile_clause(options.do_mobile),
@@ -250,10 +169,10 @@ def get_hourly_stats_from_hbase(video_info, thumbnail_info, impression_metric,
     Returns a pandas DataFrame with columns of hr, imp, conv and thumbnail_id
     '''
     col_map = {
-        MetricTypes.LOADS: 'il',
-        MetricTypes.VIEWS: 'iv',
-        MetricTypes.CLICKS: 'ic',
-        MetricTypes.PLAYS: 'vp'
+        statutils.MetricTypes.LOADS: 'il',
+        statutils.MetricTypes.VIEWS: 'iv',
+        statutils.MetricTypes.CLICKS: 'ic',
+        statutils.MetricTypes.PLAYS: 'vp'
         }
     start_time, end_time = get_time_range(video_info.keys())
         
@@ -276,7 +195,7 @@ def get_hourly_stats_from_hbase(video_info, thumbnail_info, impression_metric,
                                        row_stop=end_key,
                                        columns=['evts']):
                 garb1, garb, hr = key.rpartition('_')
-                hr = datetime.strptime(hr, 'Y-%m-%dT%H')
+                hr = datetime.strptime(hr, '%Y-%m-%dT%H')
                 cur_counts = dict([(k.partition(':')[2],
                                     struct.unpack('>q', v)[0])
                                     for k, v in row.iteritems()])
@@ -294,8 +213,8 @@ def get_hourly_stats_from_hbase(video_info, thumbnail_info, impression_metric,
     return pandas.DataFrame(data)
 
 def collect_stats(thumb_info, video_info,
-                  impression_metric=MetricTypes.LOADS,
-                  conversion_metric=MetricTypes.CLICKS):
+                  impression_metric=statutils.MetricTypes.LOADS,
+                  conversion_metric=statutils.MetricTypes.CLICKS):
     '''Grabs the stats counts from the database and some calculations.
 
     Inputs:
@@ -361,56 +280,34 @@ def collect_stats(thumb_info, video_info,
             cross_stats['revlift'])
 
         # Find the baseline thumb
-        baseline_types = options.baseline_types.split(',')
-        base_thumb = None
-        base_rank = None
         cum_impr_all = impressions.cumsum().fillna(method='ffill')
-        for baseline_type in baseline_types:
-            for thumb_id in video.thumbnail_ids:
-                cur_thumb = thumb_info[thumb_id]
-                impr_count = cum_impr_all.iloc[-1].get(thumb_id, None)
-                if (cur_thumb.type == baseline_type and impr_count is not None
-                    and impr_count > options.min_impressions):
-                    if base_rank is None or cur_thumb.rank < base_rank:
-                        base_thumb = cur_thumb
-                        base_rank = cur_thumb.rank
-            if base_thumb is not None:
-                break
-        found_neon = any([thumb_info[x].type == 'neon' 
-                          for x in video.thumbnail_ids])
-        if (not options.show_bad_experiment_vids and 
-            (base_thumb is None or 
-             (not found_neon) or
-             (not(extra_conv[base_thumb.key] != 0).any()))):
-            # We don't want to include videos without a baseline or an
-            # entry in the experiment
-            continue
+        base_thumb_id = statutils.get_baseline_thumb(
+            thumb_info,
+            cum_impr_all.iloc[-1],
+            options.baseline_types.split(','),
+            options.min_impressions)
+        found_neon = any(thumb_info['type'] == 'neon')
 
         thumb_stats = pandas.DataFrame({
             'impr' : cum_impr.iloc[-1],
             'conv' : cum_conv.iloc[-1],
             'ctr' : cum_conv.iloc[-1] / cum_impr.iloc[-1]})
         thumb_stats = thumb_stats[thumb_stats['impr'] > options.min_impressions]
-        thumb_meta_info = dict([
-            (x.key,
-             {
-                 'is_base': False if base_thumb is None else x.key == base_thumb.key,
-                 'type' : x.type,
-                 'rank': x.rank
-                 }) for tid in video.thumbnail_ids 
-                 for x in [thumb_info[tid]]])
+
+        thumb_meta_info = thumb_info[thumb_info['video_id'] == video_id]
+        thumb_info['is_base'] = thumb_meta_info.index == base_thumb_id
         thumb_stats = pandas.concat([
             thumb_stats,
-            pandas.DataFrame(thumb_meta_info).transpose()],
+            thumb_meta_info],
             axis=1,
             join='inner')
 
-        if base_thumb is not None and base_thumb.key in impressions.columns:
+        if base_thumb_id in impressions.columns:
             thumb_stats = pandas.concat([
                 thumb_stats,
-                cross_stats.minor_xs(base_thumb.key),
+                cross_stats.minor_xs(base_thumb_id),
                 pandas.DataFrame({'extra_conversions':
-                                  extra_conv[base_thumb.key]})],
+                                  extra_conv[base_thumb_id]})],
                 axis=1,
                 join='inner')
 
@@ -448,30 +345,6 @@ def collect_stats(thumb_info, video_info,
         lambda x: x.sort(['type', 'lift'], ascending=False))
     results = results.set_index(index_names)
     return results
-
-def get_video_titles(video_ids):
-    '''Returns the video titles for a list of video id'''
-    retval = []
-    video_datas = neondata.VideoMetadata.get_many(video_ids)
-
-    request_keys = [(x.job_id, x.get_account_id()) for x in video_datas if 
-                    x is not None]
-    requests = neondata.NeonApiRequest.get_many(request_keys)
-    requests = dict([(x.job_id, x) for x in requests if x is not None])
-    
-    for video_data, video_id in zip(video_datas, video_ids):
-        if video_data is None:
-            _log.error('Could not find title for video id %s' % video_id)
-            retval.append('')
-            continue
-    
-        api_request = requests.get(video_data.job_id, None)
-        if api_request is None:
-            _log.error('Could not find job for video id %s' % video_id)
-            retval.append('')
-            continue
-        retval.append(api_request.video_title.encode('utf-8'))
-    return retval
 
 def calculate_aggregate_stats(video_stats):
     '''Calculates the aggregates stats for some videos.
@@ -539,37 +412,6 @@ def calculate_aggregate_stats(video_stats):
     agg_data = agg_data.sortlevel()
     return agg_data
 
-def calculate_raw_stats():
-    _log.info('Calculating some raw stats')
-    conn = connect()
-    cursor = conn.cursor()
-    cursor.execute(
-        '''select count(imloadclienttime), count(imvisclienttime),
-           count(imclickclienttime), count(adplayclienttime),
-           count(videoplayclienttime) from eventsequences where 
-           tai='%s' %s''' %(options.pub_id,
-                            statutils.get_time_clause(options.start_time,
-                                                      options.end_time)))
-    stat_rows = cursor.fetchall()
-
-    cursor.execute(
-         '''select cast(min(servertime) as timestamp),
-         cast(max(servertime) as timestamp) 
-         from eventsequences where 
-         tai='%s' %s''' %(options.pub_id,
-                            statutils.get_time_clause(options.start_time,
-                                                      options.end_time)))
-    time_rows = cursor.fetchall()
-    
-    return pandas.Series({
-        'loads': stat_rows[0][0],
-        'views' : stat_rows[0][1],
-        'clicks' : stat_rows[0][2],
-        'ads' : stat_rows[0][3],
-        'video plays' : stat_rows[0][4],
-        'start time' : time_rows[0][0],
-        'end time' : time_rows[0][1]})
-
 def calculate_cmsdb_stats():
     _log.info('Getting some stats from the CMSDB')
     api_key, typ = neondata.TrackerAccountIDMapper.get_neon_account_id(
@@ -578,7 +420,8 @@ def calculate_cmsdb_stats():
     videos = list(neondata.NeonUserAccount(
         None, api_key=api_key).iterate_all_videos())
 
-    videos = filter_video_objects(videos)
+    videos = statutils.filter_video_objects(videos, options.start_video_time,
+                                            options.end_video_time)
 
     return pandas.Series({
         'Video Counts' : len(videos),
@@ -589,57 +432,55 @@ def calculate_cmsdb_stats():
         
 def main():    
     _log.info('Getting metadata about the videos.')
-    video_info = get_video_objects(MetricTypes.VIEWS)
+    video_info = statutils.get_video_objects(statutils.MetricTypes.VIEWS,
+                                             options.pub_id,
+                                             options.start_time,
+                                             options.end_time,
+                                             options.start_video_time,
+                                             options.end_video_time,
+                                             options.video_ids
+                                             )
     video_info = dict([(x.key, x) for x in video_info if x is not None])
 
     _log.info('Getting metadata about the thumbnails.')
     thumbnail_info = neondata.ThumbnailMetadata.get_many(
         reduce(lambda x, y: x | y,
                [set(x.thumbnail_ids) for x in video_info.itervalues()]))
-    thumbnail_info = dict([(x.key, x) for x in thumbnail_info
-                           if x is not None])
 
-    _log.info('Getting urls and video titles')
-    titles = get_video_titles([x.video_id for x in thumbnail_info.values() if
-	                       x.video_id is not None])
-    urls = dict(
-        [((video_info[x.video_id].integration_id, x.video_id, x.type, x.rank
-           if x.type =='neon' else 0, x.key),
-          [x.urls[0] if x.urls is not None else x.url,
-           title]) 
-         for x, title in zip(thumbnail_info.values(), titles)])
-    url_index = pandas.MultiIndex.from_tuples(
-        urls.keys(), names=['integration_id', 'video_id', 'type', 'rank', 'thumbnail_id'])
-    urls = pandas.DataFrame(
-        urls.values(), index=url_index,
-        columns=pandas.MultiIndex.from_tuples([('', 'url'), ('', 'title')]))
-    urls.sortlevel()
+    thumbnail_info = statutils.get_thumb_metadata(video_info.values())
+    thumbnail_info = thumbnail_info.set_index(['integration_id', 'video_id',
+                                               'type',
+                                               'rank', 'thumbnail_id'])
+    thumbnail_info.sortlevel()
     
     # Collect the count data for the metrics we care about. This will
     # index by integration id, video_id, type and rank
     _log.info('Calculating per video statistics')
     video_stats = {
+        'CTR' : collect_stats(thumbnail_info, video_info,
+                              options.impressions,
+                              options.conversions),
         #'CTR (Loads)' : collect_stats(thumbnail_info, video_info,
-        #                              MetricTypes.LOADS,
-        #                              MetricTypes.CLICKS),
-        'CTR (Views)' : collect_stats(thumbnail_info, video_info,
-                                      MetricTypes.VIEWS,
-                                      MetricTypes.CLICKS),
+        #                              statutils.MetricTypes.LOADS,
+        #                              statutils.MetricTypes.CLICKS),
+        #'CTR (Views)' : collect_stats(thumbnail_info, video_info,
+        #                              statutils.MetricTypes.VIEWS,
+        #                              statutils.MetricTypes.CLICKS),
         #'PTR (Loads)' : collect_stats(thumbnail_info, video_info,
-        #                              MetricTypes.LOADS,
-        #                              MetricTypes.PLAYS),
+        #                              statutils.MetricTypes.LOADS,
+        #                              statutils.MetricTypes.PLAYS),
         #'PTR (Views)' : collect_stats(thumbnail_info, video_info,
-        #                              MetricTypes.VIEWS,
-        #                              MetricTypes.PLAYS),
+        #                              statutils.MetricTypes.VIEWS,
+        #                              statutils.MetricTypes.PLAYS),
         #'VTR' : collect_stats(thumbnail_info, video_info,
-        #                      MetricTypes.LOADS,
-        #                      MetricTypes.VIEWS),           
+        #                      statutils.MetricTypes.LOADS,
+        #                      statutils.MetricTypes.VIEWS),           
         }
     video_data = pandas.concat(video_stats.values(),
                                keys=video_stats.keys(),
                                axis=1)
 
-    video_data = pandas.merge(video_data, urls, how='left',
+    video_data = pandas.merge(video_data, thumbnail_info, how='left',
                               left_index=True, right_index=True, sort=False)
     #video_data = video_data.sortlevel()
     
@@ -647,7 +488,7 @@ def main():
     _log.info('Calculating aggregate statistics')
     aggregate_sheets = {}
     aggregate_sheets['Overall'] = calculate_aggregate_stats(video_stats)
-    aggregate_sheets['Raw Stats']= pandas.DataFrame(calculate_raw_stats())
+    aggregate_sheets['Raw Stats']= pandas.DataFrame(stats.statutils.calculate_raw_stats(options.start_time, options.end_time()))
     aggregate_sheets['CMSDB Stats'] = pandas.DataFrame(calculate_cmsdb_stats())
 
 
