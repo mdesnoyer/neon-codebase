@@ -552,6 +552,7 @@ def _load_impala_table(**kwargs):
 
     except:
         statemon.state.increment('impala_table_load_failure')
+        raise
     return "Impala tables loaded"
 
 
@@ -711,8 +712,7 @@ def _checkpoint_hdfs_to_s3(**kwargs):
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
-    # 'start_date': (datetime.utcnow() - timedelta(days=1)),
-    'start_date': datetime(2016, 7, 19),
+    'start_date': datetime.combine((datetime.date(datetime.utcnow()) - timedelta(days=1)), datetime.min.time()),
     'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
     'email_on_retry': True,
@@ -828,7 +828,8 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        priority_weight=10)
+        priority_weight=10,
+        depends_on_past=True)
     op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
 
