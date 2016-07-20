@@ -358,7 +358,7 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     if folder_key:
         folder_key.delete()
 
-def check_first_run():
+def check_first_run(execution_date):
     """
     Check if this is the first run and return true if it is. Also return true if it is the first instance
     of the run
@@ -403,7 +403,7 @@ def _stage_files(**kwargs):
     task = kwargs['task_instance_key_str']
 
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run()
+    is_first_run, is_first_instance_run = check_first_run(execution_date)
     if is_first_run:
         _log.info("This is first run, skipping of stage files as none would exist")
         return
@@ -469,7 +469,7 @@ def _run_mr_cleaning_job(**kwargs):
                             'target', options.mr_jar)
 
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run()
+    is_first_run, is_first_instance_run = check_first_run(execution_date)
 
     if is_first_run:
         if is_first_instance_run:
@@ -519,7 +519,7 @@ def _load_impala_table(**kwargs):
     cluster.connect()
 
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run()
+    is_first_run, is_first_instance_run = check_first_run(execution_date)
 
     # The first run is going to be big. So provision sufficient number of task instances to enable
     # faster completion. Bring down the number of task instances to zero later on when complete
@@ -566,7 +566,7 @@ def _delete_staging_files(**kwargs):
     task = kwargs['task_instance_key_str']
     
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run()
+    is_first_run, is_first_instance_run = check_first_run(execution_date)
 
     if is_first_run:
         _log.info("This is first run, skipping delete of stage files as none would exist")
@@ -595,7 +595,7 @@ def _execution_date_has_input_files(**kwargs):
     input_path = kwargs['input_path']
     
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run()
+    is_first_run, is_first_instance_run = check_first_run(execution_date)
 
     if is_first_run:
         if is_first_instance_run:
@@ -625,7 +625,7 @@ def _update_table_build_times(**kwargs):
     cluster.connect()
     
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run()
+    is_first_run, is_first_instance_run = check_first_run(execution_date)
 
     if is_first_run:
         if is_first_instance_run:
@@ -672,6 +672,15 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     """
 
     execution_date = kwargs['execution_date']
+
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_first_instance_run = check_first_run(execution_date)
+
+    if first_run and is_first_instance_run:
+        pass
+    else:
+        _log.info("S3 copy not applicable for this run")
+        return
 
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
@@ -792,10 +801,7 @@ mr_cleaning_job = PythonOperator(
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
 
-# Check if this is the first run and take appropriate action
-is_first_run, is_first_instance_run = check_first_run()
-
-if first_run and is_first_instance_run:
+if is_first_run and is_first_instance_run:
     s3copy = PythonOperator(
         task_id='copy_hdfs_to_s3',
         dag=clicklogs,
