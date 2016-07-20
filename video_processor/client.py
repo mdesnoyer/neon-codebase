@@ -1117,7 +1117,9 @@ class VideoProcessor(object):
                 rv = False
              
         except AttributeError: 
-            pass 
+            pass
+        except tornado.gen.Return:
+            raise
         except Exception as e:
             rv = False  
             statemon.state.increment('unable_to_send_email')

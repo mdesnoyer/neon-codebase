@@ -1160,6 +1160,17 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
                 rv = yield self.vprocessor.send_notification_email(api_request)
 
     @tornado.testing.gen_test
+    def test_send_email_notification_no_email(self):
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        api_request.save()
+
+        with self.assertLogNotExists(logging.ERROR, 'Unexpected error'):
+            rv = yield self.vprocessor.send_notification_email(api_request,
+                                                               None)
+
+        self.assertTrue(rv)
+
+    @tornado.testing.gen_test
     def test_default_process(self):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         api_request.callback_email = 'test@invalid.xxx' 
