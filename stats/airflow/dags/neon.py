@@ -675,7 +675,7 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
 
-    if first_run and is_first_instance_run:
+    if is_first_run and is_first_instance_run:
         pass
     else:
         _log.info("S3 copy not applicable for this run")
