@@ -17,8 +17,10 @@ import boto.exception
 import concurrent.futures
 import functools
 import itertools
+import json
 import logging
 import random
+import re
 import threading
 import tornado.ioloop
 import tornado.gen
@@ -32,6 +34,7 @@ import urllib2
 define('refresh_rate', default=120.0, type=float,
        help=('Rate (in seconds) at which to refresh autoscale info '
              'automatically'))
+define('fallback_ip_list', default='s3://neon-test/prod-aquilaips.json')
 
 statemon.define('ip_list_connection_lost', int)
 
@@ -136,11 +139,49 @@ class AutoScaleGroup(object):
                 boto.exception.BotoServerError) as e:
             _log.error('Could not refresh autoscale data: %s' % e)
             statemon.state.ip_list_connection_lost = 1
+            yield self._get_fallback_iplist()
             return
             
         with self._lock:
             self._instance_info = instance_info
-            
+
+    @tornado.gen.coroutine
+    def _get_fallback_iplist(self):
+        '''Looks for a file in S3 with the following JSON structure:
+
+        { <group_name> : [{ "ip" : <ip_address>, "zone" : <avail_zone> }]}
+        '''
+        s3re = re.compile('s3://([a-zA-Z0-9\-_\.]+)/(.+)')
+        try:
+            match = s3re.search(options.fallback_ip_list)
+            if match:
+                bucket_name, key_name = match.groups()
+                s3conn = yield self._executor.submit(boto.connect_s3)
+                bucket = yield self._executor.submit(s3conn.get_bucket,
+                                                     bucket_name)
+                key = yield self._executor.submit(bucket.get_key, key_name)
+                if key is None:
+                    return
+                raw_data = yield self._executor.submit(
+                    key.get_contents_as_string)
+                try:
+                    ip_info = json.loads(raw_data)
+                    instance_info = ip_info.get(self.name)
+                    if instance_info:
+                        _log.info('Using fallback ips from: %s' % 
+                                  options.fallback_ip_list)
+                        with self._lock:
+                            self._instance_info = instance_info
+                            return
+                except Exception as e:
+                    _log.error('%s is invalid JSON' % options.fallback_ip_list)
+                    return
+
+        except (urllib2.URLError, boto.exception.BotoClientError,
+                boto.exception.BotoServerError) as e:
+            _log.error('Could not get autoscale data from %s: %s' % 
+                       (options.fallback_ip_list, e))
+            return
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
