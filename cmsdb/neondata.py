@@ -5213,6 +5213,10 @@ class Verification(StoredObject):
         return Verification.__name__
 
 class AccountLimits(StoredObject):
+
+    # A limit of videos uploaded for a non-paid, signed up account.
+    MAX_VIDEOS_ON_DEMO_SIGNUP = 50
+
     '''
     Class schema for AccountLimits
 
@@ -5284,6 +5288,13 @@ class AccountLimits(StoredObject):
         return AccountLimits.__name__
 
 class BillingPlans(StoredObject):
+
+    # These match key and plan_type of a billing plan record.
+    PLAN_DEMO = 'demo'
+    PLAN_PRO_MONTHLY = 'pro_monthly'
+    PLAN_PRO_YEARLY = 'pro_yearly'
+    PLAN_PREMEIRE = 'premeire'
+
     '''
     Class schema for BillingPlans
 

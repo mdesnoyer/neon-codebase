@@ -323,6 +323,9 @@ class TestNewAccountHandler(TestAuthenticationBase):
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id)
         self.assertEquals(limits.video_posts, 0)
+        # An account with an email register has a certain video limit.
+        expect_limit = neondata.AccountLimits.MAX_VIDEOS_ON_DEMO_SIGNUP
+        self.assertEqual(expect_limit, limits.max_video_posts)
 
         exps = yield neondata.ExperimentStrategy.get(account_id, async=True)
         self.assertEquals(exps.get_id(), account_id)
@@ -376,6 +379,8 @@ class TestNewAccountHandler(TestAuthenticationBase):
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id)
         self.assertEquals(limits.video_posts, 0)
+        expect_limit = neondata.AccountLimits.MAX_VIDEOS_ON_DEMO_SIGNUP
+        self.assertEqual(expect_limit, limits.max_video_posts)
 
         exps = yield neondata.ExperimentStrategy.get(account_id, async=True)
         self.assertEquals(exps.get_id(), account_id)
@@ -486,7 +491,12 @@ class TestNewAccountHandler(TestAuthenticationBase):
         mappers = neondata.TrackerAccountIDMapper.get_all()
         self.assertEqual(2, len(mappers))
         (self.assertEqual(account_id, mapper.value) for mapper in mappers)
-        self.assertIsNotNone(neondata.AccountLimits.get(account_id))
+
+        # Check their limits against the demo plan.
+        limits = neondata.AccountLimits.get(account_id)
+        expect_plan = neondata.BillingPlans.get(neondata.BillingPlans.PLAN_DEMO)
+        self.assertEqual(expect_plan.max_video_posts, expect_plan.max_video_posts)
+
         self.assertIsNotNone(neondata.ExperimentStrategy.get(account_id))
         account = neondata.NeonUserAccount.get(account_id)
         self.assertFalse(account.serving_enabled)
