@@ -169,7 +169,7 @@ class ImpalaTable(object):
             _log.exception("Error connecting to Hive")
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
-            raise
+            raise ExecutionError
 
     def _connect_to_impala(self):
         """Connect to Impala on the EMR cluster
@@ -185,7 +185,7 @@ class ImpalaTable(object):
             _log.exception("Error connecting to Impala")
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
-            raise
+            raise ImpalaError
 
     def _schema_path(self):
         """Render the Avro schema path"""
@@ -211,7 +211,7 @@ class ImpalaTable(object):
             _log.exception('Error uploading the schema %s to s3' % self.event)
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
-            raise
+            raise SchemaUploadError
 
     def _avro_table(self, execution_date):
         """
@@ -257,7 +257,7 @@ class ImpalaTable(object):
             _log.error("Error creating event %s Avro table %s" % (self.event, table))
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
-            raise
+            raise ExecutionError
 
     def drop_avro_table(self, execution_date):
         """
@@ -274,7 +274,7 @@ class ImpalaTable(object):
         except:
             _log.error('Error dropping Avro table {table}'.format(table=table))
             self.status = 'ERROR'
-            raise
+            raise ExecutionError
 
     def create_parquet_table(self):
         """Create the Impala Parquet-format table"""
@@ -294,7 +294,7 @@ class ImpalaTable(object):
             _log.error('Error creating event %s Parquet table %s' % (self.event, table))
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
-            raise
+            raise ImpalaError
 
     def load_parquet_table(self, execution_date, hour_interval=1):
         '''Load data into the Parquet table from the external Avro table
@@ -314,19 +314,25 @@ class ImpalaTable(object):
 
             _log.info('Loading to Impala Parquet-format table {parq} from '
                       '{avro}'.format(parq=parq_table, avro=avro_table))
-            heap_size = int(options.parquet_memory * 0.8)
+            heap_size = int(options.parquet_memory * 0.9)
+
+            _log.info('memory set for map/reduce in mb is %s' % options.parquet_memory)
+            _log.info('heap size calculated is %s' % heap_size)
+
             self.hive.execute('SET hive.exec.compress.output=true')
             self.hive.execute('SET avro.output.codec=snappy')
             self.hive.execute('SET parquet.compression=SNAPPY')
             self.hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
+            self.hive.execute('SET hive.exec.max.created.files=500000')
+            self.hive.execute('SET hive.exec.max.dynamic.partitions.pernode=200')
 
             self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
                               options.parquet_memory)
-            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm' %
+            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
             self.hive.execute('SET mapreduce.map.memory.mb=%d' %
                               options.parquet_memory)
-            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm' %
+            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
 
             # Hour calculation is used with Airflow and maps to a DAGs
@@ -357,7 +363,7 @@ class ImpalaTable(object):
             _log.error("Error loading event %s Parquet table %s" % (self.event, parq_table))
             statemon.state.increment('impala_table_creation_failure')
             self.status = 'ERROR'
-            raise
+            raise ImpalaTableLoadError
 
 
 class ImpalaTableBuilder(threading.Thread):
@@ -461,7 +467,6 @@ class ImpalaTableLoader(threading.Thread):
                 _log.error("Avro table for event '%s' exists: %s" % 
                            (self.event, avro_table))
             else:
-                _log.info("Entering to create avro tables")
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
 
@@ -484,7 +489,7 @@ class ImpalaTableLoader(threading.Thread):
                            self.event)
             if self._drop_avro_on_failure:
                 self.table.drop_avro_table(self.execution_date)
-            raise
+            raise ImpalaTableLoadError
 
         finally:
             _log.debug("Closing Impala connection")
