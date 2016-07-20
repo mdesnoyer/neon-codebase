@@ -7,178 +7,144 @@ time. When an object is added to the queue, it is instantly available, making te
 of the SQSConnection class for testing purposes. This is only desirable if the application you are writing is tolerant of the delays inherent in SQS. If not, you should
 use something like RabbitMQ instead. 
 
-Modified by Sunil 
+Modified by Sunil
+Modified by Ahmaidan
 
 '''
-import os
-import pickle
-import tempfile
+from boto.sqs.message import Message
+import copy
+import random
+from random import randrange
 import threading
+import uuid
 
-class SQSQueueMock:
+import logging
+_log = logging.getLogger(__name__)
+
+class SQSQueueMock(object):
     '''
     SQS Mock Queue class
-    NOTE: Currently only supports creation & testing of a single Queue
     '''
-    name = None
-    def __init__(self, filename, create=False):
+    name = None  
+    def __init__(self, name):
         self.lock = threading.RLock()
+        self.name = name
 
-        self.attributes = {}
-
-        try:
-            open(filename)
-        except IOError:
-            if create:
-                self.tempfile = tempfile.NamedTemporaryFile()
-                open(self.tempfile.name, 'w')
-            else:
-                raise SyntaxError("Queue %s does not exist" % filename)
-        self.name = filename
+        self.message_queue = []
         
+    #Deprecated function           
     def clear(self, page_size=10, vtimeout=10):
         try:
-            open(self.tempfile.name, 'w').close()
+            del self.message_queue[:]
         except EOFError:
             return False
         return True
-    
+           
     def count(self, page_size=10, vtimeout=10):
-        try:
-            with self.lock:
-                prev_data = pickle.load(open(self.tempfile.name, 'r'))
-        except EOFError:
-            return 0
-        return len(prev_data)
-        
+        count = len(self.message_queue)
+        return count
+               
     def count_slow(self, page_size=10, vtimeout=10):
-        return count(page_size=10, vtimeout=10)
-        
+        return self.count(page_size=10, vtimeout=10)
+       
     def delete(self):
-        try:
-            os.remove(self.tempfile.name)
-        except OSError:
-            # What happens here?
-            return False
-        return True
-
+        raise NotImplementedError()
+      
     def delete_message(self, message):
         with self.lock:
-            prev_data = pickle.load(open(self.tempfile.name, 'r'))
-        for data in prev_data:
-            if data.get_body() == message.get_body():
-                try:
-                    prev_data.remove(data)
-                    break
-                except ValueError:
-                    return False
-        try:
-            with self.lock:
-                pickle.dump(prev_data, open(self.tempfile.name, 'w'))
-        except IOError:
-            return False
-        
-        return True
-
-    def get_messages(self, num_messages=1, visibility_timeout=None, attributes=None):
-        attributes_to_return = []
-        if attributes is not None:
-            attributes_to_return = attributes.split(',')
-        messages = []
-        try:
-            with self.lock:
-                prev_data = pickle.load(open(self.tempfile.name, 'r'))
-        except EOFError:
-            prev_data = []
-        i = 0
-        while i < num_messages and len(prev_data) > 0:
             try:
-                msg = prev_data[i]
-                for attr in attributes_to_return:
-                    try:
-                        msg.attributes[attr] = self.attributes[attr]
-                    except KeyError:
-                        pass
-                messages.append(msg)
-            except IndexError:
-                pass
-            i += 1
+                for x in range(0, len(self.message_queue)):
+                    if(message.receipt_handle == self.message_queue[x].receipt_handle):
+                        message = self.message_queue.pop(x)
+                        return True
+            except ValueError:
+                return False
+        return False
+       
+    def get_messages(self, num_messages=1, visibility_timeout=None, attributes=None):
+        messages = []
+
+        i = 0
+        while i < num_messages:
+            with self.lock:
+                try:
+                    msg = self.message_queue[i]
+                    messages.append(msg)
+                except IndexError:
+                    pass
+                i += 1
         return messages
-
-    def read(self, visibility_timeout=None):
+       
+    def read(self, visibility_timeout=None, message_attributes=None):
         with self.lock:
-            prev_data = pickle.load(open(self.tempfile.name, 'r'))
-        try:
-            return prev_data.pop(0)
-        except IndexError:
-            # Is this the real action?
-            return None
-
-    def write(self, message):
-        # Should do some error checking
-        # read in all the data in the queue first
-        try:
-            with self.lock:
-                prev_data = pickle.load(open(self.tempfile.name, 'r'))
-        except EOFError:
-            prev_data = []
-
-        prev_data.append(message)
-        
-        try:
-            with self.lock:
-                pickle.dump(prev_data, open(self.tempfile.name, 'w'))
-        except IOError:
-            return False
-            
-        return True
+            if self.message_queue:
+                msg = copy.deepcopy(self.message_queue[0])
+                all_attrs = msg.message_attributes
+                msg.message_attributes = {}
+                if (message_attributes and
+                    message_attributes[0] != 'All' and
+                    message_attributes[0] != ['.*']):
+                    for attr in message_attributes:
+                        msg.message_attributes[attr] = all_attrs[attr]
+                else:
+                    msg.message_attributes = all_attrs
+                return msg
+                        
+            else:
+                return None
     
-class SQSConnectionMock:
-    # TODO(Sunil): Needs to support tempfile to use the queue methods here except for the create Q one
-    def get_queue(self, queue):
+    def write(self, message):
         try:
-            queue_file = open(queue + ".sqs")
-        except IOError:
-            return None
+            with self.lock:
+                message.receipt_handle = uuid.uuid4()
+                self.message_queue.append(message)
+        except IndexError:
+            raise Exception()
+        return message
+    
+class SQSConnectionMock(object):
+    def __init__(self):
+        self.queue_dict = {}
+        self.regions = ['us-east-1', 'us-west-2', 'us-west-1',
+                        'eu-west-1', 'eu-central-1', 'ap-southeast-1',
+                        'ap-southeast-2', 'ap-northeast-1', 'sa-east-1']
+
+    def get_queue(self, queue_name):
         try:
-            return SQSQueueMock(queue)
+            return self.queue_dict[queue_name]
         except SyntaxError:
             return None
-            
+        except KeyError:
+            return None
+             
     def get_all_queues(self, prefix=""):
-        queue_list = []
-        files = os.listdir(".")
-        for f in files:
-            if f[-4:] == '.sqs':
-                if prefix != "":
-                    if f[0:len(prefix)] == prefix:
-                        try:
-                            # Try to make the queue. If there's something wrong, just move on.
-                            q = SQSQueueMock(f)
-                        except SyntaxError:
-                            continue
-                        queue_list.append(q)
-                else:
-                    try:
-                        # Try to make the queue. If there's something wrong, just move on.
-                        q = SQSQueueMock(f[:-4])
-                    except SyntaxError:
-                        print 'err', f
-                        continue
-                    queue_list.append(q)
-        return queue_list
-
-    def delete_queue(self, queue, force_deletion=False):
-        q = self.get_queue(queue)
-        #print 'type', type(q)
-        if q.count() != 0:
-            # Can only delete empty queues
-            return False
-        return q.delete()
+        return self.queue_dict.values()
         
+    def delete_queue(self, queue, force_deletion=False):
+        try:
+            del self.queue_dict[queue.name]
+        except KeyError:
+            pass
+                
     def delete_message(self, queue, message):
         return queue.delete_message(message)
-        
+               
     def create_queue(self, name, visibility_timeout=None):
-        a = SQSQueueMock(name, create=True)
-        return a
+        try:
+            q = self.queue_dict[name]
+        except KeyError as e:
+            q = SQSQueueMock(name)
+        self.queue_dict[name] = q
+        return q
+
+    def lookup(self, name):
+        return self.queue_dict.get(name, None)
+
+    #TODO: change this so it can actually approximate the functionality        
+    def change_message_visibility(self, queue, receipt_handle, timeout):
+        if queue not in self.queue_dict.values():
+            raise ValueError('Must be a known queue')
+        elif not isinstance(receipt_handle, basestring):
+            raise ValueError('Must be a valid receipt handle')
+        float(timeout)
+        return True

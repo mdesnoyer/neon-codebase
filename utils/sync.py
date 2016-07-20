@@ -16,6 +16,7 @@ import logging
 import threading
 import time
 import tornado.gen
+import tornado.httpclient
 import tornado.ioloop
 
 _log = logging.getLogger(__name__)

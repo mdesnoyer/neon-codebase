@@ -19,16 +19,38 @@ import random
 import re
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
-import test_utils.redis
+import test_utils.postgresql 
 import tornado.testing
 import unittest
 from tools import backfill_cdn
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from cvutils.imageutils import PILImageUtils
+from utils.options import options
 
 _log = logging.getLogger(__name__)
 
-class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
+class ServerAsyncPostgresTest(test_utils.neontest.AsyncTestCase):
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(ServerAsyncPostgresTest, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(ServerAsyncPostgresTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(ServerAsyncPostgresTest, cls).tearDownClass() 
+
+class TestBackfillCDN(ServerAsyncPostgresTest):
     ''' 
     '''
     def setUp(self):
@@ -62,9 +84,6 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         
         self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
 
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
-
         super(TestBackfillCDN, self).setUp()
     
     
@@ -72,7 +91,6 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         self.s3_patcher.stop()
         self.http_call_patcher.stop()
         self.imdownload_patcher.stop()
-        self.redis.stop()
         super(TestBackfillCDN, self).tearDown()
 
     # TODO: Add error tests

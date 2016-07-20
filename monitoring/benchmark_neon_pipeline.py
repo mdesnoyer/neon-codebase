@@ -16,10 +16,10 @@ import datetime
 import functools
 import json
 import re
-import redis
 import signal
 import time
 import tornado
+import tornado.httpserver
 import tornado.web
 import utils.http
 import utils.neon

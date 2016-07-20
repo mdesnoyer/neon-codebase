@@ -57,8 +57,6 @@ from utils import statemon
 statemon.define("master_connection_error", int)
 statemon.define("cluster_creation_error", int)
 
-s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
-
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
 class MasterMissingError(ClusterInfoError): pass
@@ -66,6 +64,8 @@ class ClusterConnectionError(ClusterException): pass
 class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
 class MapReduceError(ExecutionError): pass
+
+s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
     '''Function that iterates through the responses to list_* functions
@@ -229,8 +229,7 @@ class Cluster():
                 self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path, map_memory_mb=None,
-                           timeout=None, name='Raw Tracker Data Cleaning'):
+                           output_path, extra_ops, timeout=None, name='Raw Tracker Data Cleaning'):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -251,156 +250,15 @@ class Cluster():
             budget_time = datetime.datetime.now() + \
               datetime.timedelta(seconds=timeout)
         
-        # Define extra options for the job
-        extra_ops = {
-            'mapreduce.output.fileoutputformat.compress' : 'true',
-            'avro.output.codec' : 'snappy',
-            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
-            'mapreduce.task.timeout' : 1800000,
-            'mapreduce.reduce.speculative': 'false',
-            'mapreduce.map.speculative': 'false',
-            'io.file.buffer.size': 65536
-        }
-
-        # If the requested map memory is different, set it
-        if map_memory_mb is not None:
-            extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
-            extra_ops['mapreduce.map.java.opts'] = (
-                '-Xmx%im' % int(map_memory_mb * 0.8))
-            
-        
-        # Figure out the number of reducers to use by aiming for files
-        # that are 1GB on average.
-        input_data_size = 0
-        s3AddrMatch = s3AddressRe.match(input_path)
-        if s3AddrMatch:
-
-            # First figure out the size of the data
-            bucket_name, key_name = s3AddrMatch.groups()
-            s3conn = S3Connection()
-            prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
-            for key in s3conn.get_bucket(bucket_name).list(prefix):
-                input_data_size += key.size
-
-            n_reducers = math.ceil(input_data_size / (1073741824. / 2))
-            extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
-        
-        # If the cluster's core has larger instances, the memory
-        # allocated in the reduce can get very large. However, we max
-        # out the reduce to 1GB, so limit the reducer to use at most
-        # 5GB of memory.
-        core_group = self._get_instance_group_info('CORE')
-        if core_group is None:
-            raise ClusterInfoError('Could not find the CORE instance group')
-        if (output_path.startswith("s3") and 
-            core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
-                                        'r3.8xlarge', 'i2.8xlarge',
-                                        'i2.4xlarge', 'cr1.8xlarge']):
-            extra_ops['mapreduce.reduce.memory.mb'] = 5000
-            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
-        
         self.connect()
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
                                           input_path, output_path)
 
-        trackURLRe = re.compile(
-            r"Tracking URL: https?://(\S+):[0-9]*/proxy/(\S+)/")
-        jobidRe = re.compile(r"Job ID: (\S+)")
-        url_parse = trackURLRe.search(stdout)
-        if not url_parse:
-            raise MapReduceError(
-                "Could not find the tracking url. Stdout was: \n%s" % stdout)
-        application_id = url_parse.group(2)
-        host = url_parse.group(1)
-
-        job_id_parse = jobidRe.search(stdout)
-        if not job_id_parse:
-            raise MapReduceError(
-                "Could not find the job id. Stdout was: \n%s" % stdout)
-        job_id = job_id_parse.group(1)
-
-        _log.info('Running map reduce job %s. Tracking URL is %s' %
-                  (job_id, url_parse.group(0)))
-
-        # Sleep so that the job tracker has time to come up
-        time.sleep(60)
-
-        # Now poll the job status until it is done
-        error_count = 0
-        job_status = None
-        while True:
-            if timeout is not None and budget_time < datetime.datetime.now():
-                raise MapReduceError("Map Reduce Job timed out.")
-                
-            try:
-                if job_status != 'RUNNING':
-                    response = self.query_resource_manager(
-                        '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
-                    latest_app_time = None
-                    for app in response['apps']['app']:
-                        if (app['name'] == name and (
-                            latest_app_time is None or 
-                            latest_app_time < app['startedTime'])):
-                            latest_app_time = app['startedTime']
-                            job_status = app['state']
-                    if job_status != 'RUNNING':
-                        time.sleep(60)
-                        continue
-                
-                url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
-                       "jobs/{job_id}").format(
-                           host=host, 
-                           port=options.mapreduce_status_port, 
-                           app_id=application_id, 
-                           job_id=job_id)
-                response = urllib2.urlopen(url)
-
-                if url != response.geturl():
-                    # The job is probably done, so we need to look at the
-                    # job history server
-                    data = self.query_history_manager(
-                        '/ws/v1/history/mapreduce/jobs/%s' %
-                        job_id)
-                else:
-                    data = json.load(response)
-
-                data = data['job']
-
-                # Send monitoring data
-                for key, value in data.iteritems():
-                    utils.monitor.send_data('batch_processor.%s' % key, value)
-
-                if data['state'] == 'SUCCEEDED':
-                    _log.info('Map reduce job %s complete. Results: %s' % 
-                              (main_class, 
-                               json.dumps(data, indent=4, sort_keys=True)))
-                    return
-                elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
-                    msg = ('Map reduce job %s failed: %s' %
-                               (main_class,
-                                json.dumps(data, indent=4, sort_keys=True)))
-                    _log.error(msg)
-                    raise MapReduceError(msg)
-
-                error_count = 0
-
-                time.sleep(60)
-            except urllib2.URLError as e:
-                _log.error("Error getting job information: %s" % e)
-                statemon.state.increment('master_connection_error')
-                error_count = error_count + 1
-                if error_count > 5:
-                    _log.error("Tried 5 times and couldn't get there so stop")
-                    raise
-                time.sleep(30)
-            except socket.error as e:
-                _log.error("Error getting job information: %s" % e)
-                statemon.state.increment('master_connection_error')
-                error_count = error_count + 1
-                if error_count > 5:
-                    _log.error("Tried 5 times and couldn't get there so stop")
-                    raise
-                time.sleep(30)
+        self.monitor_job_progress_hadoop(stdout, 
+                                        budget_time,
+                                        timeout,
+                                        main_class,
+                                        name='Raw Tracker Data Cleaning')
 
     def send_job_to_cluster(self, jar, main_class, extra_ops, input_path,
                             output_path):
@@ -453,45 +311,11 @@ class Cluster():
                                      step_args)
         res = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = res.stepids[0].value
-        _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
-                  step_id)
+
+        timeout_step = 80
+        self.monitor_job_progress_emr(step_id, emrconn, timeout_step);
 
         ssh_conn = ClusterSSHConnection(self)
-
-        # Wait until it is "done". When it is "done" it has actually
-        # only sucessfully loaded the job into the resource manager
-        wait_count = 0
-        while (emrconn.describe_step(self.cluster_id, step_id).status.state in
-               ['PENDING', 'RUNNING']):
-            if wait_count > 80:
-                _log.error('Timeout when waiting for EMR to send the job %s '
-                           'to Haddop' % step_id)
-                _log.error('stderr was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
-                _log.error('stdout was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
-                _log.error('syslog was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
-                raise MapReduceError('Timeout when waiting for EMR to send '
-                                     'job %s to Hadoop' % step_id)
-            time.sleep(15.0)
-            wait_count += 1
-
-        job_state = emrconn.describe_step(self.cluster_id,
-                                          step_id).status.state
-        if (job_state != 'COMPLETED'):
-            _log.error('EMR job could not be added to Hadoop. It is state %s'
-                       % job_state)
-
-            # Get the logs from the cluster
-            _log.error('stderr was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
-            _log.error('stdout was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
-            _log.error('syslog was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
-            raise MapReduceError('Error loading job into Hadoop. '
-                                 'See earlier logs for job logs')
 
         # Get the stdout from the job being loaded up
         return self.get_emr_logfile(ssh_conn, step_id, 'stdout')
@@ -822,7 +646,7 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.log-aggregation-enable=true',
                  '--yarn-key-value',
-                 'yarn.scheduler.maximum-allocation-mb=16000'])]
+                 'yarn.scheduler.maximum-allocation-mb=24000'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]
@@ -902,7 +726,7 @@ class Cluster():
         #    'us-east-1d' : 'subnet-53fa1901' 
         #}
         avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'} 
+                                    'us-east-1d' : 'subnet-abf214f2'}
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
@@ -961,7 +785,213 @@ class Cluster():
         avg_price = total_cost / (timestamps[-1] - timestamps[0]) * 3600.0
         cur_price = prices[-1]
         return cur_price, avg_price
+
+    def checkpoint_hdfs_to_s3(self, jar_path, hdfs_path_to_copy, s3_path, timeout=None):
+        #Does checkpoint of hdfs data from mapreduce output to S3.
+
+        if timeout is not None:
+            budget_time = datetime.datetime.now() + \
+              datetime.timedelta(seconds=timeout)
+
+        emrconn = boto.emr.EmrConnection()
+        ssh_conn = ClusterSSHConnection(self)
+        
+        name_step = 'S3DistCp'
+
+        step_arg = []
+        step_arg.append('--src')
+        step_arg.append(hdfs_path_to_copy)
+        step_arg.append('--dest')
+        step_arg.append(s3_path)
+
+        _log.info("Copying data from %s to %s in cluster %s" % (hdfs_path_to_copy,s3_path,self.cluster_id))
+
+        step = boto.emr.step.JarStep(name=name_step,
+                                     jar=jar_path,
+                                     step_args=step_arg,
+                                     action_on_failure='CONTINUE')
+
+        jobid = emrconn.add_jobflow_steps(self.cluster_id, [step])
+        step_id = jobid.stepids[0].value
+
+        # The tracking URL for S3DistCp is going to syslog, so grab it from there
+        # Wait until syslog is created and grab the beginning portion of it which 
+        # has the tracking URL
+        syslog = ' '
+        while True:
+            try:
+                syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+                if syslog == ' ':
+                    _log.info('Syslog is not populated yet')
+                else:
+                    break
+            except IOError:
+                _log.info('Syslog file is not created yet')
             
+            time.sleep(60)
+
+
+        _log.info("Syslog from s3distcp step is : %s" % syslog)
+
+        timeout_step = 9000
+        self.monitor_job_progress_emr(step_id, emrconn, timeout_step)
+
+        self.monitor_job_progress_hadoop(syslog, 
+                                         budget_time,
+                                         timeout,
+                                         main_class='S3DistCp',
+                                         name='S3DistCp')
+    
+    def monitor_job_progress_hadoop(self, stdout, budget_time, timeout, main_class, name):
+
+        trackURLRe = re.compile(
+            r"https?://(\S+):[0-9]*/proxy/(\S+)/")
+        jobidRe = re.compile(r"Job ID: (\S+)")
+        jobidRe_s3distcp = re.compile(r"Running job: (\S+)")
+        url_parse = trackURLRe.search(stdout)
+        if not url_parse:
+            raise MapReduceError(
+                "Could not find the tracking url. Stdout was: \n%s" % stdout)
+        application_id = url_parse.group(2)
+        host = url_parse.group(1)
+
+        if name == 'Raw Tracker Data Cleaning':
+            job_id_parse = jobidRe.search(stdout)
+        else:
+            job_id_parse = jobidRe_s3distcp.search(stdout)
+
+        if not job_id_parse:
+            raise MapReduceError(
+                "Could not find the job id. Stdout was: \n%s" % stdout)
+        job_id = job_id_parse.group(1)
+
+        _log.info('Running map reduce job %s. Tracking URL is %s' %
+                  (job_id, url_parse.group(0)))
+
+        # Sleep so that the job tracker has time to come up
+        time.sleep(60)
+
+        # Now poll the job status until it is done
+        error_count = 0
+        job_status = None
+        while True:
+            if timeout is not None and budget_time < datetime.datetime.now():
+                raise MapReduceError("Map Reduce Job timed out.")
+                
+            try:
+                if job_status != 'RUNNING' and job_status != 'FINISHED':
+                    response = self.query_resource_manager(
+                        '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
+                    latest_app_time = None
+                    for app in response['apps']['app']:
+                        if (name in app['name'] and (
+                            latest_app_time is None or 
+                            latest_app_time < app['startedTime'])):
+                            latest_app_time = app['startedTime']
+                            job_status = app['state']
+                    if job_status != 'RUNNING' and job_status != 'FINISHED':
+                        time.sleep(60)
+                        continue
+
+                url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
+                       "jobs/{job_id}").format(
+                           host=host, 
+                           port=options.mapreduce_status_port, 
+                           app_id=application_id, 
+                           job_id=job_id)
+                response = urllib2.urlopen(url)
+
+                if url != response.geturl():
+                    # The job is probably done, so we need to look at the
+                    # job history server
+                    data = self.query_history_manager(
+                        '/ws/v1/history/mapreduce/jobs/%s' %
+                        job_id)
+                else:
+                    data = json.load(response)
+
+                data = data['job']
+
+                # Send monitoring data
+                for key, value in data.iteritems():
+                    utils.monitor.send_data('batch_processor.%s' % key, value)
+
+                if data['state'] == 'SUCCEEDED':
+                    _log.info('Map reduce job %s complete. Results: %s' % 
+                              (main_class, 
+                               json.dumps(data, indent=4, sort_keys=True)))
+                    return
+                elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
+                    msg = ('Map reduce job %s failed: %s' %
+                               (main_class,
+                                json.dumps(data, indent=4, sort_keys=True)))
+                    _log.error(msg)
+                    raise MapReduceError(msg)
+
+                error_count = 0
+
+                time.sleep(60)
+            except urllib2.URLError as e:
+                _log.error("Error getting job information: %s" % e)
+                statemon.state.increment('master_connection_error')
+                error_count = error_count + 1
+                if error_count > 5:
+                    _log.error("Tried 5 times and couldn't get there so stop")
+                    raise
+                time.sleep(30)
+            except socket.error as e:
+                _log.error("Error getting job information: %s" % e)
+                statemon.state.increment('master_connection_error')
+                error_count = error_count + 1
+                if error_count > 5:
+                    _log.error("Tried 5 times and couldn't get there so stop")
+                    raise
+                time.sleep(30)
+
+    def monitor_job_progress_emr(self, step_id, emrconn, timeout_step):
+
+        _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
+                  step_id)
+
+        ssh_conn = ClusterSSHConnection(self)
+
+        # Wait until it is "done". When it is "done" it has actually
+        # only sucessfully loaded the job into the resource manager
+        # For S3 Copy, the step will be running till mapreduce job completes
+        # so keep polling till then
+        wait_count = 0
+        while (emrconn.describe_step(self.cluster_id, step_id).status.state in
+                ['PENDING', 'RUNNING']):
+            if wait_count > timeout_step:
+                _log.error('Timeout when waiting for EMR to send the job %s '
+                           'to Haddop' % step_id)
+                _log.error('stderr was:\n %s' %
+                           self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
+                _log.error('stdout was:\n %s' %
+                           self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
+                _log.error('syslog was:\n %s' %
+                           self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
+                raise MapReduceError('Timeout when waiting for EMR to send '
+                                     'job %s to Hadoop' % step_id)
+            time.sleep(15.0)
+            wait_count += 1
+
+        job_state = emrconn.describe_step(self.cluster_id,
+                                          step_id).status.state
+        if (job_state != 'COMPLETED'):
+            _log.error('EMR job could not be added to Hadoop. It is state %s'
+                       % job_state)
+
+            # Get the logs from the cluster
+            _log.error('stderr was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
+            _log.error('stdout was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
+            _log.error('syslog was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
+            raise MapReduceError('Error loading job into Hadoop. '
+                                 'See earlier logs for job logs')
+
 
 class ClusterSSHConnection:
     '''Class that allows an ssh connection to the master cluster node.'''

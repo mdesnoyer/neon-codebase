@@ -411,6 +411,8 @@ class VideoDBWatcher(threading.Thread):
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
 
+        self._account_last_updated_time = {} 
+
     def __del__(self):
         self.stop()
         del self._video_updater
@@ -516,10 +518,23 @@ class VideoDBWatcher(threading.Thread):
                 account.neon_api_key,
                 neondata.ExperimentStrategy.get(account.neon_api_key))
 
-            for video_id in account.get_internal_video_ids():
+            video_id = None
+            akey = account.neon_api_key
+            since = self._account_last_updated_time.get(
+                akey, 
+                None) 
+ 
+            for video_id in account.get_internal_video_ids(
+                 since=since):
                 self._schedule_video_update(video_id)
  
-            self.process_queued_video_updates() 
+            self.process_queued_video_updates()
+
+            if video_id: 
+                # pull the last video, it will be the most recent one 
+                video = neondata.VideoMetadata.get(video_id)
+                if video:  
+                    self._account_last_updated_time[akey] = video.updated
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
@@ -1540,27 +1555,33 @@ class DirectivePublisher(threading.Thread):
                        xrange(0, len(video_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
-            self._incr_pending_modify(len(video_ids))
-            videos = yield neondata.VideoMetadata.get_many(
-                         video_ids, 
-                         async=True) 
-            videos = [x for x in videos if x]
-            job_ids = [(v.job_id, v.get_account_id())  
-                          for v in videos]
-            requests = yield neondata.NeonApiRequest.get_many(
-                           job_ids,
-                           async=True)
- 
-            for video, request in zip(videos, requests):
-                if video is None or \
-                   request is None or \
-                   request.state != neondata.RequestState.FINISHED: 
-                    self._incr_pending_modify(-1)
-                    continue 
-                tornado.ioloop.IOLoop.current().spawn_callback( 
-                    functools.partial(self._enable_video_and_request, 
-                        video, request))
-                        
+            try: 
+                videos = yield neondata.VideoMetadata.get_many(
+                             video_ids, 
+                             async=True) 
+                videos = [x for x in videos if x]
+                job_ids = [(v.job_id, v.get_account_id())  
+                              for v in videos]
+                requests = yield neondata.NeonApiRequest.get_many(
+                    job_ids,
+                    async=True)
+     
+                for video, request in zip(videos, requests):
+                    self._incr_pending_modify(1)
+                    if video is None or \
+                       request is None or \
+                       request.state != neondata.RequestState.FINISHED: 
+                        self._incr_pending_modify(-1)
+                        continue 
+                    tornado.ioloop.IOLoop.current().spawn_callback( 
+                        functools.partial(self._enable_video_and_request, 
+                            video, request))
+            except Exception as e: 
+                statemon.state.increment('unexpected_db_update_error')
+                _log.exception('Unexpected error when getting information to'
+                               'enable videos in database %s' % e)
+                pass 
+
             # Throttle the callback spawning
             yield tornado.gen.sleep(5.0)
   
