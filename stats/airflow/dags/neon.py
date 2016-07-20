@@ -670,7 +670,6 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     """
     Copy the output of the first run from hdfs to S3
     """
-
     execution_date = kwargs['execution_date']
 
     # Check if this is the first run and take appropriate action
@@ -806,6 +805,7 @@ s3copy = PythonOperator(
     task_id='copy_hdfs_to_s3',
     dag=clicklogs,
     python_callable=_checkpoint_hdfs_to_s3,
+    provide_context=True,
     op_kwargs=dict(timeout=60 * 600))
 s3copy.set_upstream(mr_cleaning_job)
 
