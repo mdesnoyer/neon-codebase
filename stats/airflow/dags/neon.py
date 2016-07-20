@@ -795,7 +795,7 @@ mr_cleaning_job.set_upstream(stage_files)
 # Check if this is the first run and take appropriate action
 is_first_run, is_first_instance_run = check_first_run()
 
-if first_run:
+if first_run and is_first_instance_run:
     s3copy = PythonOperator(
         task_id='copy_hdfs_to_s3',
         dag=clicklogs,
