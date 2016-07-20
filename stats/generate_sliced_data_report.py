@@ -78,6 +78,8 @@ define("total_video_conversions", default=None,
 define("time_block", default=3600, type=int,
        help=("When backsolving when the thumbs turned off, what's the "
              "bucket size in seconds"))
+define("sequences_table", default="EventSequences",
+       help=("Table where the data is stored"))
 
 
 def get_video_statuses(video_ids):
@@ -224,7 +226,7 @@ def estimate_key_timepoints_from_data(video_id, thumb_info):
       thumbnail_id,
       count({imp_type}) as imp,
       count({conv_type}) as conv
-      from EventSequences where tai='{tai}' and
+      from {table} where tai='{tai}' and
       {imp_type} is not null and
       servertime is not null and
       thumbnail_id like '{video_id}%'
@@ -233,7 +235,8 @@ def estimate_key_timepoints_from_data(video_id, thumb_info):
                video_id=video_id,
                block_size=options.time_block,
                imp_type=statutils.impala_col_map[options.impressions],
-               conv_type=statutils.impala_col_map[options.conversions])
+               conv_type=statutils.impala_col_map[options.conversions],
+               table=options.sequences_table)
     data = get_query_results(query)
 
     if data is None:
@@ -375,7 +378,7 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
     query = (
         """select
         {select_cols}
-        from EventSequences
+        from {table}
         where {null_metric} is not NULL and
         tai='{pub_id}' and
         thumbnail_id like '{video_id}_%'
@@ -388,7 +391,8 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
             video_id=video_id,
             url_clause=url_clause,
             time_clause=statutils.get_time_clause(min_time, max_time),
-            groupby_clauses=','.join(groupby_clauses)))
+            groupby_clauses=','.join(groupby_clauses),
+            table=options.sequences_table))
 
     data = get_query_results(query)
 
