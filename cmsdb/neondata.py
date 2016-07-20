@@ -405,11 +405,16 @@ class PostgresDB(tornado.web.RequestHandler):
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a connection')
 
-        def get_insert_json_query_tuple(self, obj):
+        def get_insert_json_query_tuple(self, 
+                                        obj, 
+                                        fields='(_data, _type)',
+                                        values='VALUES(%s, %s)',
+                                        extra_params=None):
             query = "INSERT INTO " + obj._baseclass_name().lower() + \
-                     " (_data, _type) " \
-                     " VALUES(%s, %s)"  
+                    " " + fields + " " + values
             params = (obj.get_json_data(), obj.__class__.__name__)
+            if extra_params:
+                params = params + extra_params 
             return (query, params)
 
         def get_update_json_query_tuple(self, obj):
@@ -441,9 +446,8 @@ class PostgresDB(tornado.web.RequestHandler):
                 query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
                 return (query, tuple(param_list))  
             except KeyError: 
-                return 
-            
-    
+                return
+ 
     instance = None 
     
     def __new__(cls): 
@@ -1380,9 +1384,9 @@ class MetricType:
     PLAYS = 'plays'
 
 class IntegrationType(object): 
-    BRIGHTCOVE = 'brightcove'
-    OOYALA = 'ooyala'
-    OPTIMIZELY = 'optimizely'
+    BRIGHTCOVE = 'brightcoveintegration'
+    OOYALA = 'ooyalaintegration'
+    OPTIMIZELY = 'optimizelyintegration'
 
 class DefaultSizes(object): 
     WIDTH = 160 
@@ -1395,11 +1399,18 @@ class AccessLevels(object):
     NONE = 0 
     READ = 1 
     UPDATE = 2 
-    CREATE = 4 
-    DELETE = 8
-    ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE 
-    ADMIN = 16 
-    GLOBAL_ADMIN = 32
+    CREATE = 4
+    DELETE = 8 
+    ACCOUNT_EDITOR = 16 
+    INTERNAL_ONLY_USER = 32 
+    GLOBAL_ADMIN = 64
+    
+    # Helpers  
+    ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE
+    ADMIN = ALL_NORMAL_RIGHTS | ACCOUNT_EDITOR
+    EVERYTHING = ALL_NORMAL_RIGHTS |\
+                 ACCOUNT_EDITOR | INTERNAL_ONLY_USER |\
+                 GLOBAL_ADMIN
 
 class PythonNaNStrings(object): 
     INF = 'Infinite' 
@@ -1417,7 +1428,6 @@ class StoredObject(object):
     ''' 
     def __init__(self, key):
         self.key = str(key)
-        self.created = self.updated = str(datetime.datetime.utcnow()) 
 
     def __str__(self):
         return "%s: %s" % (self.__class__.__name__, self.__dict__)
@@ -1487,15 +1497,16 @@ class StoredObject(object):
                     obj[key] = PythonNaNStrings.NAN
             return obj
         obj = _json_fixer(self.to_dict()['_data']) 
-        return json.dumps(obj)
+        def json_serial(obj):
+            if isinstance(obj, datetime.datetime):
+                serial = obj.isoformat()
+            return serial
+        return json.dumps(obj, default=json_serial)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save(self, overwrite_existing_object=True):
         '''Save the object to the database.'''
-        if not hasattr(self, 'created'): 
-            self.created = str(datetime.datetime.utcnow())
-        self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
         if self.key is None:
             raise ValueError("key not set")
@@ -1512,7 +1523,9 @@ class StoredObject(object):
                 # we need to do an update here
                 if overwrite_existing_object: 
                     query_tuple = db.get_update_json_query_tuple(self)
-                    result = yield conn.execute(query_tuple[0], query_tuple[1]) 
+                    result = yield conn.execute(query_tuple[0], query_tuple[1])
+                else: 
+                    raise  
             except Exception as e: 
                 rv = False
                 _log.exception('an unknown error occurred when saving an object %s' % e) 
@@ -1556,7 +1569,20 @@ class StoredObject(object):
                 # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
-            
+
+            # throw created updated on the object if its there 
+            try:
+                for k in ['created_time_pg', 'updated_time_pg']:
+                    if isinstance(obj_dict[k], datetime.datetime): 
+                        data_dict[k.split('_')[0]] = obj_dict[k].strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                    elif isinstance(obj_dict[k], str): 
+                        data_dict[k.split('_')[0]] = datetime.datetime.strptime(
+                            obj_dict[k], "%Y-%m-%dT%H:%M:%S.%f").strftime(
+                                "%Y-%m-%d %H:%M:%S.%f")
+            except KeyError: 
+                pass
+ 
             # create basic object using the "default" constructor
             obj = classtype(key)
 
@@ -1619,7 +1645,9 @@ class StoredObject(object):
             conn = yield db.get_connection()
 
             obj = None 
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
 
@@ -1686,7 +1714,9 @@ class StoredObject(object):
             results = [] 
             db = PostgresDB()
             conn = yield db.get_connection()
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type, \
+                           created_time AS created_time_pg,\
+                           updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 
@@ -1719,7 +1749,10 @@ class StoredObject(object):
             db = PostgresDB()
             conn = yield db.get_connection()
             baseclass_name = cls._baseclass_name().lower()
-            query = "SELECT _data, _type FROM " + baseclass_name + \
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg FROM "\
+                        + baseclass_name + \
                     " WHERE _data->>'key' LIKE %s"
 
             params = ['%'+key_portion+'%']
@@ -1754,7 +1787,9 @@ class StoredObject(object):
             # do this manually 
             yield conn.execute("BEGIN")
  
-            query = "DECLARE get_many CURSOR FOR SELECT _data, _type \
+            query = "DECLARE get_many CURSOR FOR SELECT _data, _type, \
+                         created_time AS created_time_pg, \
+                         updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
@@ -1886,7 +1921,9 @@ class StoredObject(object):
             for key in keys: 
                 key_to_object[key] = None
  
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type,\
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
@@ -1905,8 +1942,12 @@ class StoredObject(object):
                         _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
+                    def json_serial(obj):
+                        if isinstance(obj, datetime.datetime):
+                            serial = obj.isoformat()
+                        return serial
                     # hack we need two copies of the object, copy won't work here
-                    item_one = json.loads(json.dumps(item))
+                    item_one = json.loads(json.dumps(item, default=json_serial))
                     cur_obj = create_class._create(key, item_one)
 
                 mappings[key] = cur_obj 
@@ -1918,7 +1959,17 @@ class StoredObject(object):
                 for key, obj in mappings.iteritems():
                    original_object = key_to_object.get(key, None)
                    if obj is not None and original_object is None: 
-                       query_tuple = db.get_insert_json_query_tuple(obj)
+                       created = datetime.datetime.utcnow()
+                       updated = datetime.datetime.utcnow()
+                       obj.__dict__['created'] = created.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       obj.__dict__['updated'] = updated.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       query_tuple = db.get_insert_json_query_tuple(
+                           obj, 
+                           fields='(_data, _type, created_time, updated_time)',
+                           values='VALUES(%s, %s, %s, %s)', 
+                           extra_params=(created, updated))  
                        insert_statements.append(query_tuple) 
                    elif obj is not None and obj != original_object:
                        update_objs.append(obj)
@@ -2030,7 +2081,6 @@ class StoredObject(object):
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
             for obj in objects:
-                obj.updated = str(datetime.datetime.utcnow())
                 data[obj.key] = obj.to_json()
                 key_sets[obj._set_keyname()].append(obj.key)
     
@@ -2258,6 +2308,70 @@ class StoredObject(object):
     @classmethod
     def format_subscribe_pattern(cls, pattern):
         return cls.format_key(pattern)
+
+    @classmethod 
+    @tornado.gen.coroutine
+    def get_and_execute_select_query(cls, 
+                                     fields, 
+                                     where_clause=None,
+                                     table_name=None, 
+                                     wc_params=[],
+                                     limit_clause=None,
+                                     order_clause=None, 
+                                     group_clause=None,  
+                                     cursor_factory=psycopg2.extensions.cursor): 
+        ''' helper function to build up a select query
+
+               fields : an array of the fields you want 
+               where_clause : the portion of the query following WHERE 
+               table_name : defaults to _baseclass_name, but this populates 
+                            the from portion of the query 
+               wc_params : any params you need in the where clause
+
+ 
+               eg fields = ["_data->>'neon_api_key'", 
+                            "_data->>'key'"] 
+                  object_type = neonuseraccount 
+                  where_clause = "_data->'users' ? %s" 
+                  params = [user1] 
+               would execute 
+                  SELECT _data->>'neon_api_key', _data->>'key' 
+                   FROM neonuseraccount 
+                  WHERE _data->'users' ? user1 
+            returns the result array from the query 
+
+            be nice, this will do a fetchall, which can be 
+            memory intensive -- TODO make an option that 
+            operates like get_many does currently 
+        '''
+        
+        db = PostgresDB() 
+        conn = yield db.get_connection()
+        if table_name is None: 
+            table_name = cls._baseclass_name().lower()
+
+        csl_fields = ",".join("{0}".format(f) for f in fields) 
+        query = "SELECT " + csl_fields + \
+                " FROM " + table_name
+        
+        if where_clause:
+            query += " WHERE " + where_clause
+
+        if order_clause: 
+            query += " " + order_clause
+
+        if group_clause: 
+            query += " " + group_clause  
+ 
+        if limit_clause: 
+            query += " " + limit_clause 
+ 
+        cursor = yield conn.execute(query, 
+                                    wc_params,
+                                    cursor_factory=cursor_factory)
+        rv = cursor.fetchall()
+        db.return_connection(conn) 
+        raise tornado.gen.Return(rv) 
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -2770,7 +2884,10 @@ class User(NamespacedStoredObject):
     def __init__(self, 
                  username, 
                  password='password', 
-                 access_level=AccessLevels.ALL_NORMAL_RIGHTS):
+                 access_level=AccessLevels.ALL_NORMAL_RIGHTS, 
+                 first_name=None,
+                 last_name=None,
+                 title=None):
  
         super(User, self).__init__(username)
 
@@ -2778,7 +2895,7 @@ class User(NamespacedStoredObject):
         self.user_id = uuid.uuid1().hex
 
         # the users username, chosen by them, redis key 
-        self.username = username
+        self.username = username.lower()
 
         # the users password_hash, we don't store plain text passwords 
         self.password_hash = sha256_crypt.encrypt(password)
@@ -2792,8 +2909,29 @@ class User(NamespacedStoredObject):
         self.refresh_token = None
 
         # access level granted to this user, uses class AccessLevels 
-        self.access_level = access_level 
+        self.access_level = access_level
+
+        # the first name of the user 
+        self.first_name = first_name 
  
+        # the last name of the user 
+        self.last_name = last_name 
+ 
+        # the title of the user 
+        self.title = title  
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_associated_account_ids(self):
+        results = yield self.get_and_execute_select_query(
+                    [ "_data->>'neon_api_key'" ], 
+                    "_data->'users' ? %s", 
+                    table_name='neonuseraccount', 
+                    wc_params=[self.username])
+ 
+        rv = [i[0] for i in results]
+        raise tornado.gen.Return(rv) 
+        
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -2819,9 +2957,10 @@ class NeonUserAccount(NamespacedStoredObject):
                  default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
                  name=None, 
                  abtest=True, 
-                 serving_enabled=True, 
+                 serving_enabled=False, 
                  serving_controller=ServingControllerType.IMAGEPLATFORM, 
-                 users=[]):
+                 users=None, 
+                 email=None):
 
         # Account id chosen/or generated by the api when account is created 
         self.account_id = a_id 
@@ -2864,7 +3003,10 @@ class NeonUserAccount(NamespacedStoredObject):
 
         # What users are privy to the information assoicated to this NeonUserAccount
         # simply a list of usernames 
-        self.users = users
+        self.users = users or [] 
+
+        # email address associated with this account 
+        self.email = email 
         
     @classmethod
     def _baseclass_name(cls):
@@ -2933,6 +3075,31 @@ class NeonUserAccount(NamespacedStoredObject):
 
         retval = yield calls
         raise tornado.gen.Return(retval)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_integrations(self):
+        rv = [] 
+
+        # due to old data, these could either have account_id or api_key
+        # as account_id
+        results = yield self.get_and_execute_select_query(
+                    [ "_data", 
+                      "_type", 
+                      "created_time AS created_time_pg", 
+                      "updated_time AS updated_time_pg"], 
+                    "_data->>'account_id' IN(%s, %s)", 
+                    table_name='abstractintegration', 
+                    wc_params=[self.neon_api_key, 
+                               self.account_id],
+                    group_clause = "ORDER BY _type",  
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        for result in results:
+            obj = self._create(result['_data']['key'], result)
+            rv.append(obj)
+
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     def get_ovp(cls):
@@ -3201,7 +3368,9 @@ class ProcessingStrategy(DefaultedStoredObject):
     def __init__(self, account_id, processing_time_ratio=2.5,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
-                 startend_clip=0.1, adapt_improve=True, analysis_crop=None):
+                 startend_clip=0.1, adapt_improve=True, analysis_crop=None,
+                 filter_text=True, text_filter_params=None, 
+                 filter_text_thresh=0.04):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -3288,6 +3457,48 @@ class ProcessingStrategy(DefaultedStoredObject):
         #         would specify [0., 0., .3333, 0.]
         self.analysis_crop = analysis_crop
 
+        # filter_text is a boolean indicating whether or not frames should
+        # filtered on the basis of detected text.
+        self.filter_text = filter_text
+
+        # text_filter_params defines the 9 parameters required to
+        # instantiate the text detector (in order):
+        # classifier xml 1 
+        #     - (str) The first level classifier filename. Must be
+        #             located in options.text_model_path (see local search)
+        # classifier xml 2 
+        #     - (str) The second level classifier filename. Must be
+        #             located in options.text_model_path (see local search)
+        # threshold delta [def: 16]
+        #     - (int) the number of steps for MSER 
+        # min area [def: 0.00015]
+        #     - (float) minimum ratio of the detection area to the
+        #     total area of the image for acceptance as a text region.
+        # max area [def: 0.003]
+        #     - (float) maximum ratio of the detection area to the
+        #     total area of the image for acceptance as a text region.
+        # min probability, step 1 [def: 0.8]
+        #     - (float) minimum probability for step 1 to proceed.
+        # non max suppression [def: True]
+        #     - (bool) whether or not to use non max suppression.
+        # min probability difference [def: 0.5]
+        #     - (float) minimum probability difference for 
+        #     classification to proceed.
+        # min probability, step 2 [def: 0.9]
+        #     - (float) minimum probability for step 2 to proceed.
+        if text_filter_params is None:
+            tcnm1 = 'trained_classifierNM1.xml'
+            tcnm2 = 'trained_classifierNM2.xml'
+            text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8, 
+                                  True, 0.5, 0.9]
+        self.text_filter_params = text_filter_params
+
+        # filter_text_thresh is the maximum allowable ratio of the area 
+        # occupied by the bounding boxes of detected text to the area of
+        # the entire image. If the ratio is greater than this, and
+        # filter_text is true, the frame will be filtered.
+        self.filter_text_thresh = filter_text_thresh
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -3305,6 +3516,7 @@ class ExperimentStrategy(DefaultedStoredObject):
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
                  min_conversion = 50,
+                 min_impressions = 500,
                  frac_adjust_rate = 0.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
@@ -3331,6 +3543,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         # minimum combined conversion numbers before calling an experiment
         # complete
         self.min_conversion = min_conversion
+
+        # minimum number of impressions on a single thumb to declare a winner
+        self.min_impressions = min_impressions
 
         # Fraction adjusting power rate. When this number is 0, it is
         # equivalent to all the serving fractions being the same,
@@ -3724,8 +3939,7 @@ class AbstractIntegration(NamespacedStoredObject):
     def __init__(self, integration_id=None, enabled=True, 
                        video_submit_retries=0):
         
-        if integration_id is None: 
-            integration_id = uuid.uuid1().hex
+        integration_id = integration_id or uuid.uuid4().hex
         super(AbstractIntegration, self).__init__(integration_id)
         self.integration_id = integration_id
         
@@ -4072,39 +4286,65 @@ class BrightcoveIntegration(AbstractIntegration):
 
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
-    
-    def __init__(self, i_id=None, a_id='', p_id=None, 
-                rtoken=None, wtoken=None,
-                last_process_date=None, abtest=False, callback_url=None,
-                uses_batch_provisioning=False,
-                id_field=BRIGHTCOVE_ID,
-                enabled=True,
-                serving_enabled=True,
-                oldest_video_allowed=None, 
-                video_submit_retries=0):
+
+    def __init__(self, a_id='', p_id=None,
+                 rtoken=None, wtoken=None,
+                 last_process_date=None, abtest=False, callback_url=None,
+                 uses_batch_provisioning=False,
+                 id_field=BRIGHTCOVE_ID,
+                 enabled=True,
+                 serving_enabled=True,
+                 oldest_video_allowed=None,
+                 video_submit_retries=0,
+                 application_client_id=None,
+                 application_client_secret=None,
+                 uses_bc_thumbnail_api=False,
+                 uses_bc_videojs_player=False,
+                 uses_bc_smart_player=False,
+                 uses_bc_gallery=False):
 
         ''' On every request, the job id is saved '''
 
-        super(BrightcoveIntegration, self).__init__(i_id, enabled)
+        super(BrightcoveIntegration, self).__init__(None, enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
+
+        # The application settings allow the publisher to grant
+        # Neon access via OAuth2 to the BC Player Management API
+        # These are made in the API access page in Video Cloud.
+        self.application_client_id = application_client_id
+        self.application_client_secret = application_client_secret
+
         #The publish date of the last processed video - UTC timestamp seconds
-        self.last_process_date = last_process_date 
+        self.last_process_date = last_process_date
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
         self.playlist_feed_ids = []
-        # the url that will be called when a video is finished processing 
+        # the url that will be called when a video is finished processing
         self.callback_url = callback_url
 
         # Does the customer use batch provisioning (i.e. FTP
         # uploads). If so, we cannot rely on the last modified date of
         # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
         self.uses_batch_provisioning = uses_batch_provisioning
+
+        # Configuration for the Video.js player event tracking plugin
+        # The more Neon knows about how the publisher's images are placed
+        # on the page, the more accurately we can capture tracking info.
+
+        # Does publisher use BC's CMS to manage their video thumbnails
+        self.uses_bc_thumbnail_api = uses_bc_thumbnail_api
+        # Does publisher use BC's player based on html5 library named video.js
+        self.uses_bc_videojs_player = uses_bc_videojs_player
+        # Does publisher use the older Flash-based player
+        self.uses_bc_smart_player = uses_bc_smart_player
+        # Does publisher use BC's gallery product to display many videos on a page
+        self.uses_bc_gallery = uses_bc_gallery
 
         # Which custom field to use for the video id. If it is
         # BrightcovePlatform.REFERENCE_ID, then the reference_id field
@@ -4115,8 +4355,8 @@ class BrightcoveIntegration(AbstractIntegration):
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
 
-        # Amount of times we have retried a video submit 
-        self.video_submit_retries = video_submit_retries 
+        # Amount of times we have retried a video submit
+        self.video_submit_retries = video_submit_retries
 
     @classmethod
     def get_ovp(cls):
@@ -4126,7 +4366,7 @@ class BrightcoveIntegration(AbstractIntegration):
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id, 
+            self.account_id, self.publisher_id, 
             self.read_token, self.write_token) 
 
     def set_rendition_frame_width(self, f_width):
@@ -4399,8 +4639,7 @@ class OoyalaIntegration(AbstractIntegration):
     OOYALA Integration
     '''
     def __init__(self, 
-                 i_id=None, 
-                 a_id='', 
+                 a_id='',
                  p_code=None, 
                  api_key=None, 
                  api_secret=None): 
@@ -4411,7 +4650,7 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-        super(OoyalaIntegration, self).__init__(i_id)
+        super(OoyalaIntegration, self).__init__(None, True)
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key
@@ -5090,7 +5329,8 @@ class ThumbnailServingURLs(NamespacedStoredObject):
                 # TODO(mdesnoyer): once the db is cleaned, make this
                 # raise a ValueError
                 _log.warn_n('url %s does not conform to base %s' %
-                            (url, self.base_url))
+                            (url, self.base_url),
+                    50)
         self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
@@ -5440,6 +5680,68 @@ class ThumbnailStatus(DefaultedStoredObject):
         '''
         return ThumbnailStatus.__name__
 
+class Verification(StoredObject):
+    '''
+    Class schema for Verification
+
+    Keyed by email
+    '''
+    def __init__(self, email, token=None, extra_info=None): 
+        super(Verification, self).__init__(email)
+        
+        # the special token that is used to verify the account
+        self.token = token or uuid.uuid1().hex  
+
+        # extra_info is a json store, that could store any 
+        # number of things, but is mostly used for objects 
+        # that may need to be saved after verification is 
+        # complete 
+        self.extra_info = extra_info or {}
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Verification.__name__
+
+class AccountLimits(StoredObject):
+    '''
+    Class schema for AccountLimits
+
+    Keyed by account_id(api_key)
+    '''
+    def __init__(self, 
+                 account_id, 
+                 video_posts=0, 
+                 max_video_posts=10, 
+                 refresh_time_video_posts=datetime.datetime(2050,1,1), 
+                 seconds_to_refresh_video_posts=2592000.0,
+                 max_video_size=900.0):
+ 
+        super(AccountLimits, self).__init__(account_id)
+        
+        # the number of video posts this account has made 
+        self.video_posts = video_posts 
+         
+        # the maximum amount of video posts the account is allowed 
+        self.max_video_posts = max_video_posts 
+
+        # when the video_posts counter will be reset 
+        self.refresh_time_video_posts = refresh_time_video_posts.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f") 
+
+        # amount of seconds to add to now() when resetting the timer 
+        self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+
+        # maximum video length we will process in seconds 
+        self.max_video_size = max_video_size 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return AccountLimits.__name__
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -5766,8 +6068,106 @@ class VideoMetadata(StoredObject):
         for tid in vmeta.thumbnail_ids:
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
-        yield VideoMetadata.delete(key, async=True) 
+        yield VideoMetadata.delete(key, async=True)
 
+    @classmethod 
+    @tornado.gen.coroutine
+    def search_videos(cls, 
+                      account_id=None, 
+                      since=None,
+                      until=None, 
+                      limit=25):
+
+        """Does a basic search over the videometadatas in the DB 
+
+           account_id : if specified will only search videos for that account, 
+                        defaults to None, meaning it will search all accounts 
+                        for videos 
+           since      : if specified will find videos since this date, 
+                        defaults to None, meaning it will grab the 25 most 
+                        recent videos 
+           until      : if specified will find videos until this date, 
+                        defaults to None
+           limit      : if specified it limits the search to this many 
+                        videos, defaults to 25
+
+           Returns : a dictionary of the following 
+               videos - the videos that the search returned 
+               since_time - this is the time of the most recent video that 
+                            the search returned, it's mainly here to prevent 
+                            consumers from having to do this 
+        """ 
+        where_clause = "" 
+        videos = []
+        since_time = None 
+        until_time = None  
+        wc_params = []
+        rv = {}  
+        
+        where_clause = "_data->'job_id' != 'null'"
+        order_clause = "ORDER BY created_time DESC" 
+        if since: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time > to_timestamp(%s)::timestamp"
+            # switch up the order clause so the page starts at the right spot 
+            order_clause = "ORDER BY created_time ASC" 
+            wc_params.append(since) 
+
+        if until: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time < to_timestamp(%s)::timestamp" 
+            wc_params.append(until) 
+        
+        if account_id: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " _data->>'key' LIKE %s"
+            wc_params.append(account_id+'_%')
+ 
+        results = yield cls.get_and_execute_select_query(
+                    [ "_data", 
+                      "_type", 
+                      "created_time AS created_time_pg", 
+                      "updated_time AS updated_time_pg" ], 
+                    where_clause, 
+                    wc_params=wc_params, 
+                    limit_clause="LIMIT %d" % limit, 
+     		    order_clause=order_clause,
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        def _get_time(result): 
+            # need micros here 
+            created_time = result['created_time_pg']
+            cc_tt = time.mktime(created_time.timetuple())
+            _time = (cc_tt + created_time.microsecond / 1000000.0)
+            return _time 
+        
+        try:   
+            do_reverse = False 
+            if since: 
+                since_time = _get_time(results[-1])
+                until_time = _get_time(results[0])
+                do_reverse = True
+            else:  
+                since_time = _get_time(results[0]) 
+                until_time = _get_time(results[-1]) 
+        except (KeyError,IndexError): 
+            pass
+        
+        for result in results:
+            obj = cls._create(result['_data']['key'], result)
+            videos.append(obj)
+
+        if do_reverse: 
+            videos.reverse() 
+
+        rv['videos'] = videos 
+        rv['since_time'] = since_time
+        rv['until_time'] = until_time
+        raise tornado.gen.Return(rv) 
+         
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 

@@ -258,6 +258,7 @@ class Cluster():
             'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
             'mapreduce.task.timeout' : 1800000,
             'mapreduce.reduce.speculative': 'false',
+            'mapreduce.map.speculative': 'false',
             'io.file.buffer.size': 65536
         }
 
@@ -281,7 +282,7 @@ class Cluster():
             for key in s3conn.get_bucket(bucket_name).list(prefix):
                 input_data_size += key.size
 
-            n_reducers = math.ceil(input_data_size / 1073741824.)
+            n_reducers = math.ceil(input_data_size / (1073741824. / 2))
             extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
         
         # If the cluster's core has larger instances, the memory
@@ -723,7 +724,7 @@ class Cluster():
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
         conn = EmrConnection()
-	ec2conn = EC2Connection()
+        ec2conn = EC2Connection()
         
         self.master_ip = None
 
@@ -792,6 +793,10 @@ class Cluster():
                 ['--base-path', 's3://elasticmapreduce',
                  '--impala-version', '1.2.4']),
             BootstrapAction(
+                'Configure Daemons',
+                's3://elasticmapreduce/bootstrap-actions/configure-daemons',
+                ['--client-opts=-Xmx14000m']),
+            BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
                 ['--hdfs-key-value', 'io.file.buffer.size=65536',
@@ -825,7 +830,7 @@ class Cluster():
             
         subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'm4.large', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
                           'Master Instance Group'),
             instance_group
             ]

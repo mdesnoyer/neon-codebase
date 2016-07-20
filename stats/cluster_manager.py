@@ -97,11 +97,13 @@ class BatchProcessManager(threading.Thread):
                     self.cluster, options.input_path,
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
+                _log.info('Sucessful cleaning job output to: %s' %
+                          cleaned_output_path)
+                self.last_output_path = cleaned_output_path
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster,
                     timeout = (options.batch_period * 4))
-                self.last_output_path = cleaned_output_path
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
             except Exception as e:

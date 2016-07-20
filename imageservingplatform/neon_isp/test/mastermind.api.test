@@ -40,12 +40,12 @@ expiry=2020-02-10T23:43:01Z
 ###################################################################################
 # basic test case where a perfect match is found while there are also qualifying 
 # approximate scaled images defined.
-# 
-# NOTE: the qualifying approx pixel range is currently hardcoded to 6.  These tests depend on this value.  When we upgrade to a configurable
-# value these tests will need updating.
 #
+# we base approximate on closest matching aspect ratio, if there are no matching images 
+# with the same aspect ratio we return the default thumb
+ 
 {"type": "pub", "pid": "perfectpub1", "aid" : "perfectaccount1" }
-{ "type": "dir","aid":"perfectaccount1", "vid":"vid0", "sla":"expiry=2014-07-22T07:14:01Z", "fractions":[ { "pct": 1.0, "tid": "thumb1", "default_url": "http://perfect_match_default.jpg", "imgs":[ {"h":704, "w":804, "url":"http://neon/thumb2_704_804.jpg"}, {"h":705, "w":805, "url":"http://neon/thumb2_705_805.jpg"}, {"h":706, "w":806, "url":"http://neon/thumb2_706_806.jpg"}, {"h":718, "w":818, "url":"http://neon/thumb2_718_818.jpg"}  ]}]}
+{ "type": "dir","aid":"perfectaccount1", "vid":"vid0", "sla":"expiry=2014-07-22T07:14:01Z", "fractions":[ { "pct": 1.0, "tid": "thumb1", "default_url": "http://perfect_match_default.jpg", "imgs":[ {"h":704, "w":804, "url":"http://neon/thumb2_704_804.jpg"}, {"h":705, "w":805, "url":"http://neon/thumb2_705_805.jpg"}, {"h":640, "w":360, "url":"http://neon/thumb2_640_360.jpg"}, {"h":706, "w":806, "url":"http://neon/thumb2_706_806.jpg"}, {"h":718, "w":818, "url":"http://neon/thumb2_718_818.jpg"}  ]}]}
 
 ###################################################################################
 # Legacy tests
@@ -71,4 +71,8 @@ expiry=2020-02-10T23:43:01Z
 ###################################################################################
 { "type": "dir", "aid": "acc5", "vid": "kevin~vid~with~tildes", "sla": "expiry=2014-07-22T07:14:01Z", "fractions": [ { "pct": 0.7, "tid": "thumb1", "base_url": "http://kevin_test/", "default_size": { "h": 700, "w": 800 }, "base_url": "http://kevin_test/", "img_sizes": [ { "h": 500, "w": 600 }, { "h": 700, "w": 800 } ] }, { "pct": 0.2, "tid": "thumb2", "base_url": "http://kevin_test/", "default_size": { "h": 700, "w": 800 }, "img_sizes": [ { "h": 500, "w": 600 }, { "h": 300, "w": 400 } ] }, { "pct": 0.1, "tid": "thumb3", "base_url": "http://kevin_test/", "default_size": { "h": 700, "w": 800 }, "img_sizes": [ { "h": 500, "w": 600 }, { "h": 300, "w": 400 } ] } ] }
 { "type": "dir", "aid": "acc5", "vid": "kevin~vid$@with$others", "sla": "expiry=2014-07-22T07:14:01Z", "fractions": [ { "pct": 0.7, "tid": "thumb1", "base_url": "http://kevin_test/", "default_size": { "h": 700, "w": 800 }, "base_url": "http://kevin_test/", "img_sizes": [ { "h": 500, "w": 600 }, { "h": 700, "w": 800 } ] }, { "pct": 0.2, "tid": "thumb2", "base_url": "http://kevin_test/", "default_size": { "h": 700, "w": 800 }, "img_sizes": [ { "h": 500, "w": 600 }, { "h": 300, "w": 400 } ] }, { "pct": 0.1, "tid": "thumb3", "base_url": "http://kevin_test/", "default_size": { "h": 700, "w": 800 }, "img_sizes": [ { "h": 500, "w": 600 }, { "h": 300, "w": 400 } ] } ] }
+#####################################################################################
+# Aspect Ratio approximate equal
+###################################################################################
+{ "type": "dir", "aid": "acc5", "vid": "vidar1", "sla": "expiry=2014-07-22T07:14:01Z", "fractions": [ { "pct": 0.7, "tid": "thumb1", "base_url": "http://kevin_test", "default_size": { "h": 700, "w": 800 }, "base_url": "http://kevin_test", "img_sizes": [ { "h": 160, "w": 90 }, { "h": 360, "w": 640 } ] }, { "pct": 0.2, "tid": "thumb2", "base_url": "http://kevin_test", "default_size": { "h": 700, "w": 800 }, "img_sizes": [ { "h": 160, "w": 90 }, { "h": 360, "w": 640 } ] }, { "pct": 0.1, "tid": "thumb3", "base_url": "http://kevin_test", "default_size": { "h": 700, "w": 800 }, "img_sizes": [ { "h": 160, "w": 90 }, { "h": 360, "w": 640 } ] } ] }
 end

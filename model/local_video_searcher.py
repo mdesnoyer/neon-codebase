@@ -168,6 +168,7 @@ import numpy as np
 from model.colorname import ColorName
 from utils import statemon
 from utils import pycvutils
+from utils.options import define, options
 from model.metropolisHastingsSearch import MCMH_rpl
 
 _log = logging.getLogger(__name__)
@@ -176,6 +177,10 @@ statemon.define('all_frames_filtered', int)
 statemon.define('cv_video_read_error', int)
 statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
+
+define("text_model_path", 
+       default=os.path.join(__base_path__, 'cvutils', 'data'), 
+       help="The location of the text detector models")
 
 MINIMIZE = -1  # flag for statistics where better = smaller
 NORMALIZE = 0  # flag for statistics where better = closer to mean
@@ -1054,8 +1059,7 @@ class ResultsList(object):
 
 
 class LocalSearcher(object):
-    def __init__(self, predictor, face_finder,
-                 eye_classifier,
+    def __init__(self, predictor,
                  processing_time_ratio=1.0,
                  local_search_width=32,
                  local_search_step=4,
@@ -1074,7 +1078,10 @@ class LocalSearcher(object):
                  use_all_data=False,
                  use_best_data=False,
                  testing=False,
-                 testing_dir=None):
+                 testing_dir=None,
+                 filter_text=True,
+                 text_filter_params=None,
+                 filter_text_thresh=0.04):
         '''
         Inputs:
             predictor:
@@ -1159,6 +1166,37 @@ class LocalSearcher(object):
                 <number>_<frame>_<score>_<feat_score>_<comb_score>_<reason>
             testing_dir:
                 Specifies where to save the images, if testing is enabled.
+            filter_text:
+                Whether or not to remove text from the frames.
+            text_filter_params:
+                The parameters used to instantiate the text filter. This is a
+                list of 9 individual parameters:
+                    classifier xml 1 
+                        - (str) The first level classifier filename. Must be
+                        located in options.text_model_path
+                    classifier xml 2 
+                        - (str) The second level classifier filename. Must be
+                        located in options.text_model_path
+                    threshold delta [def: 16]
+                        - (int) the number of steps for MSER 
+                    min area [def: 0.00015]
+                        - (float) minimum ratio of the detection area to the
+                        total area of the image for acceptance as a text region.
+                    max area [def: 0.003]
+                        - (float) maximum ratio of the detection area to the
+                        total area of the image for acceptance as a text region.
+                    min probability, step 1 [def: 0.8]
+                        - (float) minimum probability for step 1 to proceed.
+                    non max suppression [def: True]
+                        - (bool) whether or not to use non max suppression.
+                    min probability difference [def: 0.5]
+                        - (float) minimum probability difference for 
+                        classification to proceed.
+                    min probability, step 2 [def: 0.9]
+                        - (float) minimum probability for step 2 to proceed.
+            filter_text_thresh: [def: 0.04]
+                The fraction of text that occupies the image in order to
+                filter it out.
 
         '''
         self.predictor = predictor
@@ -1177,6 +1215,7 @@ class LocalSearcher(object):
         self.max_variety = max_variety
         self.use_all_data = use_all_data
         self.use_best_data = use_best_data
+        self.filter_text_thresh = filter_text_thresh
         if adapt_improve:
             _log.warn(('WARNING: adaptive improvement is enabled, but is '
                        'an experimental feature'))
@@ -1187,6 +1226,20 @@ class LocalSearcher(object):
             global TESTING_DIR
             TESTING_DIR = testing_dir
         self._reset()
+        self.filter_text = filter_text
+        if text_filter_params is None:
+            tcnm1 = os.path.join(options.text_model_path,
+                                 'trained_classifierNM1.xml')
+            tcnm2 = os.path.join(options.text_model_path,
+                                 'trained_classifierNM2.xml')
+            text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8, 
+                                  True, 0.5, 0.9]
+        else:
+            text_filter_params[0] = os.path.join(options.text_model_path, 
+                                                 text_filter_params[0])
+            text_filter_params[1] = os.path.join(options.text_model_path, 
+                                                 text_filter_params[1])
+        self.text_filter_params = text_filter_params
         self.analysis_crop = None  # this, if necessary at all, will be set
         # by update_processing_strategy
 
@@ -1217,6 +1270,12 @@ class LocalSearcher(object):
         strategy. See the ProcessingStrategy object in cmsdb/neondata.py
         '''
         self._reset()
+        # handle the text filter parameters
+        text_filter_params = processing_strategy.text_filter_params
+        text_filter_params[0] = os.path.join(options.text_model_path, 
+                                             text_filter_params[0])
+        text_filter_params[1] = os.path.join(options.text_model_path, 
+                                             text_filter_params[1])
         self.processing_time_ratio = processing_strategy.processing_time_ratio
         self._orig_local_search_width = processing_strategy.local_search_width
         self._orig_local_search_step = processing_strategy.local_search_step
@@ -1227,12 +1286,15 @@ class LocalSearcher(object):
         self.startend_clip = processing_strategy.startend_clip
         self.adapt_improve = processing_strategy.adapt_improve
         self.analysis_crop = processing_strategy.analysis_crop
+        self.filter_text = processing_strategy.filter_text
+        self.text_filter_params = text_filter_params
+        self.filter_text_thresh = processing_strategy.filter_text_thresh
 
     @property
     def min_score(self):
         return self.results.min
 
-    def choose_thumbnails(self, video, video_name='', n=None):
+    def choose_thumbnails(self, video, n=None, video_name='',):
         self._reset()
         rand_seed = int(1000*time()) % 2 ** 32
         _log.info('Beginning thumbnail selection for video %s, random seed '
@@ -1259,7 +1321,7 @@ class LocalSearcher(object):
         else:
             raise Exception("Could not create testing dir!")
 
-    def choose_thumbnails_impl(self, video, video_name='', n=None):
+    def choose_thumbnails_impl(self, video, n=None, video_name=''):
         # instantiate the statistics objects required
         # for computing the running stats.
         for gen_name in self.feats_to_cache.keys():
@@ -1339,11 +1401,6 @@ class LocalSearcher(object):
                            end_frame, e)
         raw_results = self.results.get_results()
         # format it into the expected format
-        results = []
-        for rr in raw_results:
-            formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
-                                '')
-            results.append(formatted_result)
         try:
             perc_samp = self.search_algo.n_samples * 100. / self.search_algo.N
             _log.info('%.2f%% of video sampled' % perc_samp)
@@ -1354,6 +1411,27 @@ class LocalSearcher(object):
             _log.info('%.2f%% of video searched' % perc_srch)
         except:
             _log.info('Unknown percentage of video searched')
+        results = []
+        if not len(raw_results):
+            _log.debug('No suitable frames have been found for video %s!'
+                      ' Will uniformly select frames', video_name)
+            # increment the statemon
+            statemon.state.increment('all_frames_filtered')
+            # select which frames to use
+            frames = np.linspace(self.search_algo.buffer, 
+                                 self.num_frames - self.search_algo.buffer, 
+                                 self.n_thumbs).astype(int)
+            rframes = [self._get_frame(x) for x in frames]
+            for frame, frameno in zip(rframes, frames):
+                formatted_result = (frame, 1.0, frameno, 
+                                    frameno / float(fps))
+                results.append(formatted_result)
+        else:
+            _log.debug('%i thumbs found', len(raw_results))
+            for rr in raw_results:
+                formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
+                                    '')
+                results.append(formatted_result)
         return results
 
     def _conduct_local_search(self, start_frame, end_frame,
@@ -1414,6 +1492,41 @@ class LocalSearcher(object):
             #                         if accepted[n]]
             # framenos = [x for n, x in enumerate(frames) if accepted[n]]
             # frames = [x for n, x in enumerate(frames) if accepted[n]]
+        # ---------- START OF TEXT PROCESSING
+        # filter text too
+        if self.filter_text:
+            lower_crop_frac = 0.2  # how much of the lower portion of the
+            # image to crop out
+            text_d = []
+            for cframe in frames:
+                # Cut out the bottom 20% of the image because it often has 
+                # tickers
+                text_det_out = cv2.text.textDetect(
+                    cframe[0:int(cframe.shape[0]*.82), :, :],
+                    *self.text_filter_params)
+                text_d.append(text_det_out)
+            masks = [x[1] for x in text_d]
+            # accept only those where tet occupies a sufficiently small amount 
+            # of the image.
+            accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
+                        for x in masks]
+            n_rej = np.sum(np.logical_not(accepted))
+            n_acc = np.sum(accepted)
+            _log.debug(('Filter for feature %s has '
+                        'has rejected %i frames, %i remain' % (
+                            'fancy text detect', n_rej, n_acc)))
+            if not np.any(accepted):
+                _log.debug('No frames accepted by filters')
+                return
+            # filter the current features across all feature
+            # dicts, as well as the framenos
+            acc_idxs = list(np.nonzero(accepted)[0])
+            for k in frame_feats.keys():
+                frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
+            framenos = [framenos[x] for x in acc_idxs]
+            frames = [frames[x] for x in acc_idxs]
+            gold = [gold[x] for x in acc_idxs]
+        # ---------- END OF TEXT PROCESSING
         for k, f in self.generators.iteritems():
             if k in frame_feats:
                 continue

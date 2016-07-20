@@ -1910,51 +1910,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         video_trap.wait()
         self.assertEquals(len(video_trap.args), 1)
 
-    def test_subscribe_changes_after_db_connection_loss(self):
-        trap = TestNeondata.ChangeTrap()
-        
-        # Try initial change
-        trap.subscribe(VideoMetadata, 'acct1_*')
-        trap.subscribe(VideoMetadata, 'acct2_*')
-        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
-        video_meta.save()
-        events = trap.wait()
-        self.assertEquals(len(events), 1)
-        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
-        trap.reset()
-        video_meta2 = VideoMetadata('acct2_vid1', request_id='req2')
-        video_meta2.save()
-        events = trap.wait()
-        self.assertEquals(len(events), 1)
-        self.assertEquals(events[0], ('acct2_vid1', video_meta2, 'set'))
-        trap.reset()
-
-        # Now unsubscribe from account 2
-        trap.unsubscribe(VideoMetadata, 'acct2_*')
-
-        # Now force a connection loss by stopping the server
-        self.redis.stop(clear_singleton=False)
-        self.assertWaitForEquals(
-            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
-            False)
-
-        # Start a new server
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start(clear_singleton=False)
-        self.assertWaitForEquals(
-            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
-            True)
-
-        # Now change the video and make sure we get the event for
-        # account 1, but not 2
-        video_meta.serving_enabled=False
-        video_meta2.save()
-        video_meta.serving_enabled=False
-        video_meta.save()
-        events = trap.wait()
-        self.assertEquals(len(events), 1)
-        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
-
     def test_subscribe_changes_db_address_change(self):
         trap = TestNeondata.ChangeTrap()
         
@@ -3410,6 +3365,68 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
     def _get_object_type(cls): 
         return VideoMetadata
 
+    @tornado.testing.gen_test 
+    def test_base_search_videos(self):
+        # this function is tested more thoroughly 
+        # in the api tests, this is here as a sanity 
+        # check. not going to double up the tests at this point
+        request = NeonApiRequest('r1', 'acct1')
+        request.video_title="pie ala mode" 
+        yield request.save(async=True) 
+        video_info = VideoMetadata('acct1_vid1', request_id='r1')
+        yield video_info.save(async=True)
+
+        results = yield neondata.VideoMetadata.search_videos()
+        self.assertEquals(len(results['videos']), 1)
+
+class TestPGVerification(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')] 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
+    @classmethod 
+    def _get_object_type(cls): 
+        return neondata.Verification
+
+class TestPGAccountLimits(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')] 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
+    @classmethod 
+    def _get_object_type(cls): 
+        return neondata.AccountLimits
+
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
@@ -3466,6 +3483,44 @@ class TestPGUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def _get_object_type(cls): 
         return User
+
+    @tornado.testing.gen_test 
+    def test_get_associated_account_ids_single(self):
+        new_user = User(username='test_user') 
+        yield new_user.save(async=True)
+        new_account = NeonUserAccount('test_account')      
+        new_account.users.append('test_user') 
+        yield new_account.save(async=True)
+        
+        a_ids = yield new_user.get_associated_account_ids(async=True)
+        self.assertEquals(1, len(a_ids)) 
+        a_id = a_ids[0] 
+        self.assertEquals(a_id, new_account.neon_api_key)
+ 
+    @tornado.testing.gen_test 
+    def test_get_associated_account_ids_multiple(self):
+        new_user = User(username='test_user') 
+        yield new_user.save(async=True)
+        new_account_one = NeonUserAccount('test_account1')      
+        new_account_one.users.append('test_user') 
+        yield new_account_one.save(async=True)
+
+        new_account_two = NeonUserAccount('test_account2')      
+        new_account_two.users.append('test_user') 
+        yield new_account_two.save(async=True)
+        
+        a_ids = yield new_user.get_associated_account_ids(async=True)
+        self.assertEquals(2, len(a_ids))
+        self.assertItemsEqual([new_account_one.neon_api_key, 
+                                new_account_two.neon_api_key], 
+                              a_ids)  
+
+    @tornado.testing.gen_test 
+    def test_get_associated_account_ids_empty(self):
+        new_user = User(username='test_user') 
+        yield new_user.save(async=True)
+        a_ids = yield new_user.get_associated_account_ids(async=True)
+        self.assertEquals(0, len(a_ids)) 
     
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
@@ -3512,7 +3567,6 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         yield so.save(async=True)
         yield so.get_videos_and_statuses(async=True)
 
-
     @tornado.testing.gen_test 
     def test_mm_neon_user_account(self):
         def _m_me(a): 
@@ -3524,6 +3578,31 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         neondata.NeonUserAccount.modify_many([so.key], _m_me) 
         get_me = yield so.get(so.key, async=True)
         self.assertEquals('asdfaafds', get_me.neon_api_key)
+    
+    @tornado.testing.gen_test
+    def test_base_get_integrations(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True) 
+        bi = neondata.BrightcoveIntegration('kevinacct')
+        yield bi.save(async=True)
+        oi = neondata.OoyalaIntegration('kevinacct')
+        yield oi.save(async=True)
+        bi = neondata.BrightcoveIntegration('kevinacct')
+        yield bi.save(async=True)
+        integrations = yield so.get_integrations(async=True)
+
+        self.assertEquals(len(integrations), 3)  
+        # test order by 
+        self.assertEquals(type(integrations[2]), neondata.OoyalaIntegration) 
+        self.assertEquals(integrations[2].account_id, 'kevinacct')
+ 
+    @tornado.testing.gen_test
+    def test_empty_get_integrations(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True) 
+        integrations = yield so.get_integrations(async=True)
+        self.assertEquals(len(integrations), 0)  
+
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
