@@ -712,7 +712,7 @@ def _checkpoint_hdfs_to_s3(**kwargs):
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
-    'start_date': (datetime.utcnow() - timedelta(days=1)).date(),
+    'start_date': (datetime.utcnow() - timedelta(days=1)),
     'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
     'email_on_retry': True,
