@@ -801,13 +801,12 @@ mr_cleaning_job = PythonOperator(
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
 
-if is_first_run and is_first_instance_run:
-    s3copy = PythonOperator(
-        task_id='copy_hdfs_to_s3',
-        dag=clicklogs,
-        python_callable=_checkpoint_hdfs_to_s3,
-        op_kwargs=dict(timeout=60 * 600))
-    s3copy.set_upstream(mr_cleaning_job)
+s3copy = PythonOperator(
+    task_id='copy_hdfs_to_s3',
+    dag=clicklogs,
+    python_callable=_checkpoint_hdfs_to_s3,
+    op_kwargs=dict(timeout=60 * 600))
+s3copy.set_upstream(mr_cleaning_job)
 
 # Load the cleaned files from Map/Reduce into Impala
 load_impala_tables = []
