@@ -267,8 +267,8 @@ class NewAccountHandler(APIV2Handler):
             'default_width': All(Coerce(int), Range(min=1, max=8192)),
             'default_height': All(Coerce(int), Range(min=1, max=8192)),
             'default_thumbnail_id': All(Coerce(str), Length(min=1, max=2048)),
-            'admin_user_first_name': All(Coerce(str), Length(min=1, max=256)),
-            'admin_user_last_name': All(Coerce(str), Length(min=1, max=256)),
+            'admin_user_first_name': All(Coerce(unicode), Length(min=1, max=256)),
+            'admin_user_last_name': All(Coerce(unicode), Length(min=1, max=256)),
             'admin_user_title': All(Coerce(str), Length(min=1, max=32))
         })
         args = self.parse_args()
@@ -472,7 +472,9 @@ class AccountHelper(object):
         account_limits = neondata.AccountLimits(account.neon_api_key)
         account_limits.populate_with_billing_plan(billing_plan)
         try:
-            yield account_limits.save(async=True)
+            yield account_limits.save(
+                overwrite_existing_object=False,
+                async=True)
         except neondata.psycopg2.IntegrityError:
             pass
 
