@@ -502,6 +502,30 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertFalse(account.serving_enabled)
 
     @tornado.testing.gen_test
+    def test_create_account_with_utf8_name(self):
+        url = self.get_url('/api/v2/accounts/')
+        username = 'a@a.bc'
+        first_name = u'Lucía'
+        last_name = u'Rolagár'
+        body = json.dumps({'customer_name': 'meisnew',
+                             'email': username,
+                             'admin_user_username':'a@a.com',
+                             'admin_user_password':'testacpas',
+                             'admin_user_first_name': first_name,
+                             'admin_user_last_name': last_name})
+        headers = {'Content-Type':'application/json'}
+        yield self.http_client.fetch(
+                url,
+                method='POST',
+                headers=headers,
+                body=body)
+        verification = yield neondata.Verification.get(username, async=True)
+        verif_user = json.loads(verification.extra_info['user'])
+        self.assertEqual(first_name, verif_user['_data']['first_name'])
+        self.assertEqual(last_name, verif_user['_data']['last_name'])
+
+
+    @tornado.testing.gen_test
     def test_create_new_account_invalid_email(self):
         url = '/api/v2/accounts?customer_name=meisnew&email=aa.bc'\
               '&admin_user_username=abcd1234'\
@@ -845,10 +869,12 @@ class TestAuthUserHandler(TestAuthenticationBase):
 
         username = 'lucia@gmail.com'
         first_name = u'Lucía'
+        last_name = u'Rolagár'
         params = json.dumps({
             'username': username,
             'password': 'passw0rd',
-            'first_name': first_name})
+            'first_name': first_name,
+            'last_name': last_name})
         token = JWTHelper.generate_token({
             'account_id': 'a0',
             'username': 'a0'})
@@ -863,6 +889,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
         verification = yield neondata.Verification.get(username, async=True)
         verif_user = json.loads(verification.extra_info['user'])
         self.assertEqual(first_name, verif_user['_data']['first_name'])
+        self.assertEqual(last_name, verif_user['_data']['last_name'])
 
     def test_post_user_exceptions(self):
         exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')
