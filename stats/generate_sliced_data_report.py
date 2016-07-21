@@ -740,7 +740,10 @@ def get_total_conversions(fn):
         for line in f:
             fields = line.strip().split(',')
             if len(fields) >= 2:
-                retval[fields[0]] = float(fields[1])
+                try:
+                    retval[fields[0]] = float(fields[1])
+                except ValueError:
+                    pass
     return retval
 
 def get_full_stats_table(end_time):
