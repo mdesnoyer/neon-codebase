@@ -1801,7 +1801,10 @@ class LocalSearcher(object):
                 # uh-oh, something went wrong! Update the knowledge
                 # state of the search algo with the knowledge that the
                 # frame is bad.
-                self.search_algo.update(frameno, bad=True)
+                
+                # TODO(Nick): Define how it should be updated. bad
+                #isn't a keyword in MCMH right now
+                #self.search_algo.update(frameno, bad=True)
                 return
             frames = self._prep(frames)
         try:

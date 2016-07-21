@@ -137,6 +137,7 @@ class VideoError(Exception): pass
 class BadVideoError(VideoError): pass
 class DefaultThumbError(VideoError): pass  
 class VideoDownloadError(VideoError, IOError): pass  
+class PredictionError(VideoError): pass
 class DBError(IOError): pass
 
 # For when another worker completed the video
@@ -644,6 +645,8 @@ class VideoProcessor(object):
             _log.error(msg)
             statemon.state.increment('video_read_error')
             raise BadVideoError(msg)
+        except model.errors.PredictionError as e:
+            raise PredictionError(e.message)
 
         rank=0
         for result in top_results:

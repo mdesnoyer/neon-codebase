@@ -320,8 +320,13 @@ class Predictor(object):
                 raise tornado.gen.Return((score, vec, vers))
             except tornado.gen.Return:
                 raise
-            except Exception as e:
+            except model.errors.PredictionError:
                 _log.warn('Problem scoring image. Retrying: %s' % e)
+                delay = (1 << cur_try) * base_time * random.random()
+                yield tornado.gen.sleep(delay)
+            except Exception as e:
+                _log.exception('Unexpected problem scoring image. Retrying: %s'
+                               % e)
                 delay = (1 << cur_try) * base_time * random.random()
                 yield tornado.gen.sleep(delay)
         statemon.state.increment('prediction_error')
@@ -537,6 +542,11 @@ class DeepnetPredictor(Predictor):
             with self._cv:
                 self.active -= 1
                 self._cv.notify_all()
+
+        if response is None:
+            msg = 'RPC Error: response was None'
+            _log.error(msg)
+            raise model.errors.PredictionError(msg)
 
         vers = response.model_version or 'aqv1.1.250'
 
