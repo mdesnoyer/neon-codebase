@@ -5215,7 +5215,7 @@ class Verification(StoredObject):
 class AccountLimits(StoredObject):
 
     # A limit of videos uploaded for a non-paid, signed up account.
-    MAX_VIDEOS_ON_DEMO_SIGNUP = 50
+    MAX_VIDEOS_ON_DEMO_SIGNUP = 100
 
     '''
     Class schema for AccountLimits
