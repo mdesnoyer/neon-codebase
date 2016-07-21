@@ -476,8 +476,9 @@ def _run_mr_cleaning_job(**kwargs):
             hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
             hdfs_dir = 'mnt/cleaned'
             cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
-            #cleaning_job_input_path = options.full_run_input_path
-            cleaning_job_input_path = "s3://neon-tracker-logs-v2/v2.2/2089095449/2016/07/*/*"
+            cleaning_job_input_path = options.full_run_input_path
+            #cleaning_job_input_path = "s3://neon-tracker-logs-v2/v2.2/2089095449/2016/07/*/*"
+            _log.info("Increasing the number of task instances to %s" % options.max_task_instances)
             cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
         else:
             _log.info("mr job not required to be run for this run hour %s" %
@@ -525,7 +526,8 @@ def _load_impala_table(**kwargs):
     # faster completion. Bring down the number of task instances to zero later on when complete
     if is_first_run:
         if is_first_instance_run:
-            _log.info("This is first & big run, bumping up the num of task instances")
+            _log.info("This is first & big run, bumping up the num of task instances to %s" %
+                options.max_task_instances)
             cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
         else:
             _log.info("Not required to build impala tables for this run hour %s" 
@@ -797,8 +799,9 @@ mr_cleaning_job = PythonOperator(
     op_kwargs=dict(staging_path=options.staging_path,
                    output_path=options.output_path, timeout=60 * 600),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
-    execution_timeout=timedelta(minutes=600))
-    # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
+    priority_weight=9999,
+    execution_timeout=timedelta(minutes=600),
+    depends_on_past=True)
 mr_cleaning_job.set_upstream(stage_files)
 
 s3copy = PythonOperator(
@@ -828,7 +831,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        priority_weight=10,
+        priority_weight=99999,
         depends_on_past=True)
     op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
@@ -848,6 +851,7 @@ update_table_build_times = PythonOperator(
     dag=clicklogs,
     trigger_rule='all_done',
     provide_context=True,
+    priority_weight=99999,
     python_callable=_update_table_build_times,
     depends_on_past=True)
 update_table_build_times.set_upstream(load_impala_tables)
