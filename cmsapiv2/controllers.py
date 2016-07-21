@@ -1198,6 +1198,7 @@ class ThumbnailHandler(ShareableContentHandler):
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'gender': In(['M', 'F', None]),
           'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None]),
+          Optional('video_id'): str,
           Optional('share_token'): str})
 
         args = self.parse_args()
@@ -1238,13 +1239,10 @@ class ThumbnailHandler(ShareableContentHandler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET: neondata.AccessLevels.READ,
-                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-                 'account_required': [HTTPVerbs.GET,
-                                        HTTPVerbs.PUT,
-                                        HTTPVerbs.POST]
-               }
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+            'account_required': [HTTPVerbs.PUT, HTTPVerbs.POST]}
 
     @classmethod
     def _get_default_returned_fields(cls):
