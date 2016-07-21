@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
@@ -25,6 +26,7 @@ import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.NullWritable;
@@ -1162,7 +1164,12 @@ public class RawTrackerMR extends Configured implements Tool {
     if (thumbnailId == null) {
       return null;
     }
-    return thumbnailId.toString().replaceAll("\\-", "_");
+    Pattern dashRe = Pattern.compile("^[0-9a-zA-Z]+\\-[0-9a-zA-Z~\\.]+\\-[0-9a-zA-Z]+$");
+    if (dashRe.matcher(thumbnailId.toString()).matches()) {
+      return thumbnailId.toString().replaceAll("\\-", "_");
+    } else {
+      return thumbnailId.toString();
+    }
   }
 
   /**
@@ -1246,8 +1253,10 @@ public class RawTrackerMR extends Configured implements Tool {
       System.err.println("Usage: RawTrackerMR <input path> <output path>");
       return -1;
     }
+    
+    Configuration conf = getConf();
 
-    Job job = Job.getInstance(getConf());
+    Job job = Job.getInstance(conf);
     job.setJarByClass(RawTrackerMR.class);
     job.setJobName("Raw Tracker Data Cleaning");
 
@@ -1278,6 +1287,8 @@ public class RawTrackerMR extends Configured implements Tool {
         AvroKeyOutputFormat.class, AdPlayHive.getClassSchema());
     AvroMultipleOutputs.addNamedOutput(job, "VideoPlayHive",
         AvroKeyOutputFormat.class, VideoPlayHive.getClassSchema());
+    AvroMultipleOutputs.addNamedOutput(job, "VideoViewPercentageHive",
+        AvroKeyOutputFormat.class, VideoViewPercentageHive.getClassSchema());
     AvroMultipleOutputs.addNamedOutput(job, "EventSequenceHive",
         AvroKeyOutputFormat.class, EventSequenceHive.getClassSchema());
 

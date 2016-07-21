@@ -122,6 +122,7 @@ __EVENTS = ['VideoPlay', 'EventSequence']
 TAI = re.compile(r'^[\w]{3,15}$')  
 EPOCH = dateutils.timezone(datetime(1970, 1, 1), timezone='utc')
 PROTECTED_PREFIXES = [r'^/$', r'v[0-9].[0-9]']
+airflow_start_date = datetime.combine((datetime.date(datetime.utcnow()) - timedelta(days=1)), datetime.min.time())
 
 class ClusterDown(Exception): pass
 
@@ -314,20 +315,6 @@ def _run_cluster_command(cmd, **kwargs):
     ssh_conn.execute_remote_command(cmd)
 
 
-# def _check_compute_cluster_capacity(op_kwargs):
-#     """
-
-#     :return:
-#     """
-#     ti = op_kwargs['task_instance']
-#     cluster = ClusterGetter.get_cluster()
-#     cluster.connect()
-#     if False:
-#         cluster.change_instance_group_size(group_type='TASK', incr_amount=1)
-#     # else:
-#     #     cluster.change_instance_group_size(group_type='TASK', new_size=2)
-
-
 def _delete_previously_cleaned_files(dag, execution_date, output_path):
     """
 
@@ -401,6 +388,8 @@ def _stage_files(**kwargs):
     dag = kwargs['dag']
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
+
+    _log.info('Airflow start date is %s' % airflow_start_date)
 
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
@@ -524,6 +513,7 @@ def _load_impala_table(**kwargs):
 
     # The first run is going to be big. So provision sufficient number of task instances to enable
     # faster completion. Bring down the number of task instances to zero later on when complete
+
     if is_first_run:
         if is_first_instance_run:
             _log.info("This is first & big run, bumping up the num of task instances to %s" %
@@ -714,7 +704,7 @@ def _checkpoint_hdfs_to_s3(**kwargs):
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
-    'start_date': datetime.combine((datetime.date(datetime.utcnow()) - timedelta(days=1)), datetime.min.time()),
+    'start_date': airflow_start_date,
     'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
     'email_on_retry': True,
@@ -800,8 +790,7 @@ mr_cleaning_job = PythonOperator(
                    output_path=options.output_path, timeout=60 * 600),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
     priority_weight=9999,
-    execution_timeout=timedelta(minutes=600),
-    depends_on_past=True)
+    execution_timeout=timedelta(minutes=600))
 mr_cleaning_job.set_upstream(stage_files)
 
 s3copy = PythonOperator(
@@ -831,7 +820,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        priority_weight=99999,
+        priority_weight=999999,
         depends_on_past=True)
     op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
