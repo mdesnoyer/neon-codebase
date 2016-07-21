@@ -793,7 +793,7 @@ class ShareableContentHandler(APIV2Handler):
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
             # Implement for just video resources reads for now.
-            pl_account_id, pl_video_id = payload['content_id'].split('_')
+            pl_account_id, pl_video_id = str(payload['content_id']).split('_')
             if (access_level_required & neondata.AccessLevels.READ and
                 payload['content_type'] == 'VideoMetadata' and
                 pl_account_id == request.account_id and

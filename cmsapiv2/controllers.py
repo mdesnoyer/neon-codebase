@@ -1010,7 +1010,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
-class ThumbnailHandler(APIV2Handler):
+class ThumbnailHandler(ShareableContentHandler):
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1197,8 +1197,9 @@ class ThumbnailHandler(APIV2Handler):
           Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()), 
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'gender': In(['M', 'F', None]),
-          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])
-        })
+          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None]),
+          Optional('share_token'): str})
+
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)

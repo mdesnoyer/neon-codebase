@@ -3865,9 +3865,9 @@ class TestVideoHandler(TestControllersBase):
 
 class TestThumbnailHandler(TestControllersBase):
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        self.user.save()
+        self.account_id_api_key = self.user.neon_api_key
         np.random.seed(2341235)
         neondata.ThumbnailMetadata(
             'testingtid', 
@@ -3877,7 +3877,8 @@ class TestThumbnailHandler(TestControllersBase):
             model_version='20160713-test').save()
         self.test_video = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(self.account_id_api_key,
-                             'tn_test_vid1')).save()
+                             'tn_test_vid1'))
+        self.test_video.save()
         neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid2')).save()
 
@@ -4101,7 +4102,6 @@ class TestThumbnailHandler(TestControllersBase):
         video = neondata.VideoMetadata.get(internal_video_id)
         thumbnail_ids = video.thumbnail_ids
         self.assertEquals(len(video.thumbnail_ids), 2)
-        #for tid in thumbnail_ids:
 
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
@@ -4131,6 +4131,26 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(splits[0], '20160713-test')
         self.assertGreaterEqual(int(splits[1]), 0)
         self.assertLess(int(splits[1]), 1024)
+
+    @tornado.testing.gen_test
+    def test_share_token_allows_get(self):
+
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': self.test_video.get_id()
+        }
+        share_token = ShareJWTHelper.encode(payload)
+        headers = {'Content-Type': 'application/json'}
+        tid = 'testingtid'
+
+        url = self.get_url('/api/v2/{aid}/thumbnails/?thumbnail_id={tid}&share_token={st}'.format(
+            aid=self.user.get_api_key(),
+            tid=tid,
+            st=share_token))
+
+        r = yield self.http_client.fetch(url, headers=headers)
+        rjson = json.loads(r.body)
+        self.assertEqual(tid, rjson['thumbnails'][0]['thumbnail_id'])
 
     @tornado.testing.gen_test
     def test_get_multiple_thumbnails(self):
@@ -4769,7 +4789,6 @@ class TestLiftStatsHandler(TestControllersBase):
         }
         share_token = ShareJWTHelper.encode(payload)
         video.share_token = share_token
-        video.save()
         video.save()
 
         neondata.ThumbnailMetadata('a', model_score=.4).save()
