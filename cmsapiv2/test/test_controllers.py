@@ -4089,9 +4089,9 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_bad_add_new_thumbnail_not_image(self):
-        video_id = 'tn_test_vid1'
         url = self.get_url('/api/v2/{}/thumbnails?video_id={}'.format(
-            self.account_id_api_key, video_id))
+            self.account_id_api_key,
+            self.video_id))
 
         # Make a random, non-image file.
         buf = StringIO()
@@ -4106,7 +4106,7 @@ class TestThumbnailHandler(TestControllersBase):
                 headers=headers,
                 body=body.to_string(),
                 method='POST')
-        self.assertEquals(e.exception.code, 400)
+        self.assertEqual(e.exception.code, 400)
 
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
@@ -4244,7 +4244,7 @@ class TestThumbnailHandler(TestControllersBase):
 
         url = '/api/v2/%s/thumbnails?thumbnail_id=%s' % (
             self.account_id_api_key,
-            self.thumb.get_id())
+            thumb.get_id())
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)['thumbnails'][0]
         self.assertEqual(rjson['neon_score'], 7)
@@ -4314,27 +4314,23 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_thumbnail_update_enabled(self):
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
-            self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
+        url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+            self.account_id_api_key,
+            self.thumb.get_id()))
+        response = yield self.http_client.fetch(url)
         old_tn = json.loads(response.body)
 
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=0' % (
-            self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='PUT',
-                                                allow_nonstandard_methods=True)
+        url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s&enabled=0' % (
+            self.account_id_api_key,
+            self.thumb.get_id()))
+        response = yield self.http_client.fetch(url, body='', method='PUT')
         new_tn = json.loads(response.body)
         self.assertEquals(new_tn['enabled'],False)
 
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=1' % (
-            self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='PUT',
-                                                allow_nonstandard_methods=True)
+        url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s&enabled=1' % (
+            self.account_id_api_key,
+            self.thumb.get_id()))
+        response = yield self.http_client.fetch(url, body='', method='PUT')
         new_tn = json.loads(response.body)
         self.assertEquals(new_tn['enabled'], True)
 
@@ -4388,18 +4384,16 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_thumbnail_update_no_params(self):
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
-            self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
+        url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+            self.account_id_api_key,
+            self.thumb.get_id()))
+        response = yield self.http_client.fetch(url)
         old_tn = json.loads(response.body)['thumbnails'][0]
 
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
-            self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='PUT',
-                                                allow_nonstandard_methods=True)
+        url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+            self.account_id_api_key,
+            self.thumb.get_id()))
+        response = yield self.http_client.fetch(url, body='', method='PUT')
         new_tn = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(new_tn['enabled'],old_tn['enabled'])
@@ -4407,10 +4401,9 @@ class TestThumbnailHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_delete_thumbnail_not_implemented(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            url = '/api/v2/%s/thumbnails?thumbnail_id=12234' % (
-                self.account_id_api_key)
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    method='DELETE')
+            url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=12234' % (
+                self.account_id_api_key))
+            response = yield self.http_client.fetch(url, method='DELETE')
 	    self.assertEquals(e.excpetion.code, 501)
 
     def test_get_thumbnail_exceptions(self):
