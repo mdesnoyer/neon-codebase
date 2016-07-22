@@ -231,6 +231,16 @@ class TestDeepnetPredictorGoodConnection(test_utils.neontest.AsyncTestCase):
                                              async=True)
 
         self.assertEquals(self.predictor.active, 0)
+
+    @tornado.testing.gen_test
+    def test_none_response(self):
+        # Don't know why this happens, but it does sometimes
+        self.mock_regress_call.side_effect = [None]
+
+        with self.assertLogExists(logging.ERROR, 'RPC Error: response was'):
+            with self.assertRaises(model.errors.PredictionError) as e:
+                yield self.predictor.predict(self.image, base_time=0.0,
+                                             async=True)
         
     # TODO(Nick): Add more tests
 

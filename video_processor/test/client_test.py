@@ -730,6 +730,21 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                           ['black', 'black'])
 
     @tornado.testing.gen_test
+    def test_choose_thumbnail_errors(self):
+        self.model.choose_thumbnails.side_effect = [
+            model.errors.VideoReadError('Oops'),
+            model.errors.PredictionError('Bad connection')]
+
+        vprocessor = self.setup_video_processor("neon")
+        with self.assertLogExists(logging.ERROR, 'Error using OpenCV'):
+            with self.assertRaises(video_processor.client.BadVideoError):
+                yield vprocessor.process_video(self.test_video_file)
+
+        with self.assertRaises(video_processor.client.PredictionError):
+            yield vprocessor.process_video(self.test_video_file)
+                
+
+    @tornado.testing.gen_test
     def test_get_center_frame(self):
         '''
         Test center frame extraction
