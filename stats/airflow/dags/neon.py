@@ -94,6 +94,8 @@ options.define('max_task_instances', default=30, type=int,
                help='Maximum number of task instances to request')
 options.define('full_run_input_path', default='s3://neon-tracker-logs-v2/v2.2/*/*/*/*',
                 type=str, help='input path for first run')
+options.define('airflow_start_date', default='2016, 7, 22',
+                type=str, help='airflow start date')
 
 # Use Neon's options module for configuration parsing
 try:
@@ -122,7 +124,7 @@ __EVENTS = ['VideoPlay', 'EventSequence']
 TAI = re.compile(r'^[\w]{3,15}$')  
 EPOCH = dateutils.timezone(datetime(1970, 1, 1), timezone='utc')
 PROTECTED_PREFIXES = [r'^/$', r'v[0-9].[0-9]']
-airflow_start_date = datetime.combine((datetime.date(datetime.utcnow()) - timedelta(days=1)), datetime.min.time())
+airflow_start_date = datetime.strptime(options.airflow_start_date, '%Y, %m, %d')
 
 class ClusterDown(Exception): pass
 
