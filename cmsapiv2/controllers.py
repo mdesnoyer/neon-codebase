@@ -1207,16 +1207,22 @@ class ThumbnailHandler(ShareableContentHandler):
 
         query_tids = args['thumbnail_id'].split(',')
         fields = args.get('fields', None)
-        gender = args.get('gender', None) 
-        age = args.get('age', None) 
+        gender = args.get('gender', None)
+        age = args.get('age', None)
 
         if fields:
             fields = set(fields.split(','))
 
-        thumbs = yield neondata.ThumbnailMetadata.get_many(
+        unchecked_thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True)
- 
+
+        # Raise Forbidden if any requested thumb doesn't belong to the account.
+        if any([t for t in unchecked_thumbs if t and t.get_account_id() != account_id]):
+            raise ForbiddenError('Access forbidden for a requested thumbnail')
+
+        thumbs = [t for t in unchecked_thumbs if t and t.get_account_id() == account_id]
+
         thumbnails = yield [
             ThumbnailHandler.db2api(
                 x, 
@@ -1279,6 +1285,23 @@ class ThumbnailHandler(ShareableContentHandler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
+
+    @tornado.gen.coroutine
+    def _check_shared_content_ownership(self, pl_account_id, pl_video_id, args):
+        pl_key = neondata.InternalVideoID.generate(pl_account_id, pl_video_id)
+        video = yield neondata.VideoMetadata.get(pl_key, async=True)
+
+        try:
+            # Strictly check that all thumbs belong to this video.
+            query_tids = args['thumbnail_id'].split(',')
+            thumbs = yield neondata.ThumbnailMetadata.get_many(
+                query_tids,
+                async=True)
+            raise tornado.gen.Return(
+                thumbs and
+                all([t.video_id == video.get_id() for t in thumbs]))
+        except (AttributeError, KeyError):
+            raise tornado.gen.Return(False)
 
 
 '''*********************************************************************
@@ -1850,8 +1873,7 @@ class VideoHandler(ShareableContentHandler):
             Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
             Required('video_id'): Any(
                 CustomVoluptuousTypes.CommaSeparatedList()),
-            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-            'share_token': Any(str)
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1977,6 +1999,21 @@ class VideoHandler(ShareableContentHandler):
     def db2api(video, request, fields=None):
         video_obj = yield VideoHelper.db2api(video, request, fields)
         raise tornado.gen.Return(video_obj)
+
+    @tornado.gen.coroutine
+    def _check_shared_content_ownership(self, pl_account_id, pl_video_id, args):
+        '''Check the database's version of the video belongs to the account.'''
+        pl_key = neondata.InternalVideoID.generate(pl_account_id, pl_video_id)
+        video = yield neondata.VideoMetadata.get(pl_key, async=True)
+        try:
+            # Check the request video id and the payload refer to the same vid.
+            req_key = neondata.InternalVideoID.generate(
+                self.account_id,
+                args['video_id'])
+            raise tornado.gen.Return(req_key == video.get_id())
+        except (AttributeError, KeyError):
+            raise tornado.gen.Return(False)
+
 
 '''*********************************************************************
 VideoStatsHandler
@@ -2186,6 +2223,22 @@ class LiftStatsHandler(ShareableContentHandler):
 
     def get_access_levels(self):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
+
+    def _check_shared_content_ownership(self, pl_account_id, pl_video_id, args):
+        pl_key = neondata.InternalVideoID.generate(pl_account_id, pl_video_id)
+        video = yield neondata.VideoMetadata.get(pl_key, async=True)
+
+        try:
+            # Strictly check that all thumbs belong to this video.
+            query_tids = args['thumbnail_id'].split(',')
+            thumbs = yield neondata.ThumbnailMetadata.get_many(
+                query_tids,
+                async=True)
+            raise tornado.gen.Return(
+                thumbs and
+                all([t.video_id == video.get_id() for t in thumbs]))
+        except (AttributeError, KeyError):
+            raise tornado.gen.Return(False)
 
 
 '''*********************************************************************

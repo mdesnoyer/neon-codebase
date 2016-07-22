@@ -170,7 +170,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         args = {}
         if len(self.request.query_arguments) > 0:
             for key, value in self.request.query_arguments.iteritems():
-                if key != 'token' or keep_token:
+                if key not in ['share_token', 'token'] or keep_token:
                     args[key] = value[0]
         if len(self.request.body) > 0:
             content_type = self.request.headers.get('Content-Type', None)
@@ -188,7 +188,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             else:
                 raise BadRequestError(
                     'Content-Type must be JSON or multipart/form-data')
-
+        self.args = args
         return args
 
     def set_account_id(request):
@@ -229,10 +229,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         account = request.account
         access_token = request.access_token
-        if account_required and not account:
-            raise NotAuthorizedError('account does not exist')
         if not access_token:
             raise NotAuthorizedError('this endpoint requires an access token')
+        if account_required and not account:
+            raise NotAuthorizedError('account does not exist')
 
         try:
             payload = JWTHelper.decode_token(access_token)
@@ -641,6 +641,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 statemon.state.increment(ref=_unauthorized_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_UNAUTHORIZED)
+            if isinstance(exception, ForbiddenError):
+                statemon.state.increment(ref=_unauthorized_errors_ref,
+                                         safe=False)
+                self.set_status(ResponseCode.HTTP_FORBIDDEN)
             if isinstance(exception, NotImplementedError):
                 statemon.state.increment(ref=_not_implemented_errors_ref,
                                          safe=False)
@@ -788,17 +792,18 @@ class ShareableContentHandler(APIV2Handler):
                       access_level_required,
                       account_required=True,
                       internal_only=False):
-        """Allow access if request has query token and matches resource"""
+        """Allow access if request has share token and matches resource"""
         args = request.parse_args(True)
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
-            # Implement for just video resources reads for now.
-            pl_account_id, pl_video_id = str(payload['content_id']).split('_')
-            if (access_level_required & neondata.AccessLevels.READ and
-                payload['content_type'] == 'VideoMetadata' and
-                pl_account_id == request.account_id and
-                pl_video_id == args['video_id']):
-                   raise tornado.gen.Return(True)
+            pl_account_id, pl_content_id = str(payload['content_id']).split('_', 1)
+            if (access_level_required & neondata.AccessLevels.READ):
+                # Check if the request and data match ownership.
+                if request._check_shared_content_ownership(
+                        pl_account_id,
+                        pl_content_id,
+                        args):
+                    raise tornado.gen.Return(True)
         except (ValueError, KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.
             pass
@@ -808,6 +813,19 @@ class ShareableContentHandler(APIV2Handler):
                 account_required,
                 internal_only)
         raise tornado.gen.Return(rv)
+
+    def _check_shared_content_ownership(self, pl_account_id, pl_content_id, args):
+        '''Check that the requested resource belongs to the payload object
+
+        This checks that the requested resource is associated to the parent
+        content identified by pl_content_id, and that the resource and
+        content both belong to the pl_account_id account.
+
+        Input- pl_account_id- the content owner's id, from the JWT token
+        Input- pl_content_id- the parent content's id
+        Raises boolean- True if the request should be served, else False
+        '''
+        raise NotImplementedError('Subclass needs implementation')
 
 class MandrillEmailSender(object): 
     @staticmethod
@@ -984,6 +1002,13 @@ class NotAuthorizedError(tornado.web.HTTPError):
     def __init__(self,
                  msg='not authorized',
                  code=ResponseCode.HTTP_UNAUTHORIZED):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+
+class ForbiddenError(tornado.web.HTTPError):
+    def __init__(self,
+                 msg='Forbidden',
+                 code=ResponseCode.HTTP_FORBIDDEN):
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 
