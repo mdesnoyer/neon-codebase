@@ -4247,7 +4247,7 @@ class TestThumbnailHandler(TestControllersBase):
             self.thumb.get_id())
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)['thumbnails'][0]
-        self.assertEqual(rjson['neon_score'], 45)
+        self.assertEqual(rjson['neon_score'], 7)
 
         thumb2 = neondata.ThumbnailMetadata(
             '%s_%s' % (self.video.get_id(), 'a'),
@@ -7927,7 +7927,7 @@ class TestFeatureHandler(TestControllersBase):
         url = '/api/v2/feature?model_name=%s' % 'kfmodel' 
         response = yield self.http_client.fetch(
             self.get_url(url))
-	self.assertEquals(response.code, 200)
+        self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
         self.assertEquals(rjson['feature_count'], 2)
         f1 = rjson['features'][0]  

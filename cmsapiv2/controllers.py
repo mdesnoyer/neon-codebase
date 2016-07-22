@@ -1221,24 +1221,18 @@ class ThumbnailHandler(ShareableContentHandler):
         if any([t for t in unchecked_thumbs if t and t.get_account_id() != account_id]):
             raise ForbiddenError('Access forbidden for a requested thumbnail')
 
-        thumbs = [t for t in unchecked_thumbs if t and t.get_account_id() == account_id]
-
         thumbnails = yield [
             ThumbnailHandler.db2api(
-                x, 
+                x,
                 gender=gender,
-                age=age, 
-                fields=fields) for x in thumbs if x is not None]
+                age=age,
+                fields=fields) for x in unchecked_thumbs if x is not None]
 
         if not thumbnails:
             raise NotFoundError('thumbnails do not exist with ids = %s' %
                                 (query_tids))
 
-        # TODO not sure if this is right thing to do 
-        #if len(thumbnails) == 1: 
-        #    rv = thumbnails[0]
-        #else:  
-        rv = { 'thumb_count': len(thumbnails), 'thumbnails': thumbnails } 
+        rv = { 'thumb_count': len(thumbnails), 'thumbnails': thumbnails }
         statemon.state.increment('get_thumbnail_oks')
         self.success(rv)
 
