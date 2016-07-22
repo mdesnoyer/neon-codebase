@@ -320,7 +320,7 @@ class Predictor(object):
                 raise tornado.gen.Return((score, vec, vers))
             except tornado.gen.Return:
                 raise
-            except model.errors.PredictionError:
+            except model.errors.PredictionError as e:
                 _log.warn('Problem scoring image. Retrying: %s' % e)
                 delay = (1 << cur_try) * base_time * random.random()
                 yield tornado.gen.sleep(delay)
