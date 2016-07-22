@@ -103,7 +103,8 @@ def filter_video_objects(videos, start_video_time=None, end_video_time=None):
 def get_video_objects(impression_metric, pub_id,
                       start_time=None, end_time=None,
                       start_video_time=None, end_video_time=None,
-                      video_ids=None, min_impressions=0):
+                      video_ids=None, min_impressions=0,
+                      table='eventsequences'):
     '''Returns all the videos in the impala database within the time we 
     care about
     '''
@@ -114,7 +115,7 @@ def get_video_objects(impression_metric, pub_id,
     query = """select count({metric}) as imp_count,
     regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_', 1)
       as video_id 
-    from eventsequences where 
+    from {table} where 
     thumbnail_id is not NULL and
     {metric} is not null and
     tai='{pub_id}'
@@ -124,7 +125,8 @@ def get_video_objects(impression_metric, pub_id,
         metric = impala_col_map[impression_metric],
         pub_id = pub_id, 
         min_impressions = min_impressions,
-        time_clause = get_time_clause(start_time, end_time))
+        time_clause = get_time_clause(start_time, end_time),
+        table=table)
     cursor.execute(query)
 
     vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-\~]+)')
@@ -349,24 +351,25 @@ def get_baseline_thumb(thumb_info, impressions, baseline_types=['default'],
     return None
 
 
-def calculate_raw_stats(pub_id, start_time=None, end_time=None):
+def calculate_raw_stats(pub_id, start_time=None, end_time=None,
+                        table='eventsequences'):
     _log.info('Calculating some raw stats')
     conn = impala_connect()
     cursor = conn.cursor()
     cursor.execute(
         '''select count(imloadclienttime), count(imvisclienttime),
            count(imclickclienttime), count(adplayclienttime),
-           count(videoplayclienttime) from eventsequences where 
-           tai='%s' %s''' %(pub_id,
+           count(videoplayclienttime) from %s where 
+           tai='%s' %s''' %(table, pub_id,
                             get_time_clause(start_time, end_time)))
     stat_rows = cursor.fetchall()
 
     cursor.execute(
          '''select cast(min(imloadservertime) as timestamp),
          cast(max(imloadservertime) as timestamp) 
-         from eventsequences where 
-         tai='%s' %s''' %(pub_id,
-                            get_time_clause(start_time,end_time)))
+         from %s where 
+         tai='%s' %s''' %(table, pub_id,
+                          get_time_clause(start_time,end_time)))
     time_rows = cursor.fetchall()
     
     return pandas.Series({

@@ -767,7 +767,7 @@ def get_full_stats_table(end_time):
                                              options.end_video_time,
                                              video_ids,
                                              options.min_impressions
-                                             )
+                                             options.sequences_table)
     thumb_meta = statutils.get_thumb_metadata(video_objs)
 
     video_statuses = get_video_statuses(thumb_meta['video_id'])
@@ -832,7 +832,8 @@ def main():
     sheets['Raw Stats']= pandas.DataFrame(
         stats.statutils.calculate_raw_stats(options.pub_id,
                                             options.start_time,
-                                            options.end_time))
+                                            options.end_time,
+                                            options.sequences_table))
 
     full_table, slices = get_full_stats_table(
         sheets['Raw Stats'].loc['end time'][0])
