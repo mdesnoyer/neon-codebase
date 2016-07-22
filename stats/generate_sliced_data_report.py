@@ -766,7 +766,7 @@ def get_full_stats_table(end_time):
                                              options.start_video_time,
                                              options.end_video_time,
                                              video_ids,
-                                             options.min_impressions
+                                             options.min_impressions,
                                              options.sequences_table)
     thumb_meta = statutils.get_thumb_metadata(video_objs)
 
