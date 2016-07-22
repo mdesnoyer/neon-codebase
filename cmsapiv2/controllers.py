@@ -1359,13 +1359,13 @@ class ThumbnailHelper(object):
                 'height': int,
                 'aspect_ratio': string in format "WxH"
         """
-        return [ThumbnailHelper._to_dict(item) for item
-                in urls_obj.size_map.items()]
+        return [ThumbnailHelper._to_dict(item) for item in urls_obj]
+
 
     @staticmethod
     def _to_dict(pair):
         """Given a size map (sizes, url) tuple return a rendition dictionary."""
-        dimensions, url = pair 
+        dimensions, url = pair
 
         return {
             'url': url,

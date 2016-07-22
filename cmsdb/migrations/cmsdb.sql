@@ -279,7 +279,7 @@ CREATE TABLE trackeraccountidmapper (
 );
 
 
-ALTER TABLE thumbnailstatus OWNER TO pgadmin;
+ALTER TABLE trackeraccountidmapper OWNER TO pgadmin;
 
 --
 -- Name: users; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 

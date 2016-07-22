@@ -4051,7 +4051,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(response.code, 202)
         r = json.loads(response.body)
 
-        thumbnail = yield neondata.ThumbnailMetadata.get(r['thumbnail_id'])
+        thumbnail = neondata.ThumbnailMetadata.get(r['thumbnail_id'])
         expect_video_id = neondata.InternalVideoID.generate(
             self.account_id_api_key)
 
@@ -4265,7 +4265,7 @@ class TestThumbnailHandler(TestControllersBase):
     def test_get_thumbnail_with_renditions(self):
 
         base_url = 'http://n3.neon-images.com/xbo/neontn'
-        tid = 'testingtid'
+        tid = self.thumb.get_id()
         neondata.ThumbnailServingURLs(
             tid,
             size_map={
@@ -4278,6 +4278,19 @@ class TestThumbnailHandler(TestControllersBase):
                 tid=tid,
                 ac=self.account_id_api_key,
                 fs='thumbnail_id,renditions'))
+
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)['thumbnails'][0]
+        self.assertEqual(3, len(rjson['renditions']))
+        self.assertIn({
+            u'aspect_ratio': u'105x59',
+            u'height': 118,
+            u'url': u'%s%s_w210_h118.jpg' % (base_url, tid),
+            u'width': 210}, rjson['renditions'])
+
+        neondata.ThumbnailServingURLs(
+            tid,
+            sizes=[(210, 118), (160, 90), (320, 180)])
 
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)['thumbnails'][0]
