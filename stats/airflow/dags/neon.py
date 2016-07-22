@@ -789,8 +789,9 @@ mr_cleaning_job = PythonOperator(
     op_kwargs=dict(staging_path=options.staging_path,
                    output_path=options.output_path, timeout=60 * 600),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
-    priority_weight=9999,
-    execution_timeout=timedelta(minutes=600))
+    priority_weight=8,
+    execution_timeout=timedelta(minutes=600),
+    depends_on_past=True)
 mr_cleaning_job.set_upstream(stage_files)
 
 s3copy = PythonOperator(
@@ -820,7 +821,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        priority_weight=999999,
+        priority_weight=10,
         depends_on_past=True)
     op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
@@ -840,7 +841,7 @@ update_table_build_times = PythonOperator(
     dag=clicklogs,
     trigger_rule='all_done',
     provide_context=True,
-    priority_weight=99999,
+    priority_weight=9,
     python_callable=_update_table_build_times,
     depends_on_past=True)
 update_table_build_times.set_upstream(load_impala_tables)
