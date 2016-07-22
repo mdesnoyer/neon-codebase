@@ -4232,6 +4232,33 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(tn2['thumbnail_id'], thumb2.get_id())
 
     @tornado.testing.gen_test
+    def test_get_one_thumbnail_not_mine(self):
+
+        thumb2 = neondata.ThumbnailMetadata(
+            '%s_%s' % (self.video.get_id(), 'testingtid2'))
+        thumb2.save()
+
+        not_my_thumb = neondata.ThumbnailMetadata(
+            '%s_%s' % ('somebody_else', 'testingtid3'))
+        not_my_thumb.save()
+
+        # Try all kinds of different combinations.
+        for tids in [
+            [self.thumb.get_id(), not_my_thumb.get_id()],
+            [self.thumb.get_id(), not_my_thumb.get_id(), thumb2.get_id()],
+            [not_my_thumb.get_id(), self.thumb.get_id()],
+            [not_my_thumb.get_id()],
+            [not_my_thumb.get_id(), not_my_thumb.get_id()]]:
+
+            url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+                self.account_id_api_key,
+                ','.join(tids)))
+
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                yield self.http_client.fetch(url)
+            self.assertEqual(403, e.exception.code)
+
+    @tornado.testing.gen_test
     def test_score_map(self):
 
         thumb = neondata.ThumbnailMetadata(
