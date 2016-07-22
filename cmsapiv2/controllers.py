@@ -1359,7 +1359,7 @@ class ThumbnailHelper(object):
                 'height': int,
                 'aspect_ratio': string in format "WxH"
         """
-        return [ThumbnailHelper._to_dict(item) for item in urls_obj]
+        return [ThumbnailHelper._to_dict(item) for item in urls_obj] if urls_obj else []
 
 
     @staticmethod

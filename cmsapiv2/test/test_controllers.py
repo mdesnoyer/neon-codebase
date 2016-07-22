@@ -4341,41 +4341,47 @@ class TestThumbnailHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_score_from_feature_vector(self):
         features = np.random.rand(1024)
+        tid = '%s_vid_%s' % (self.account_id_api_key, 'featandscore')
         neondata.ThumbnailMetadata(
-            'featandscore',
+            tid,
             urls=['http://asdf.com/1.jpg'],
             model_score='-1e-3',
             model_version='20160713-test',
             features=features
         ).save()
-        url = '/api/v2/%s/thumbnails?thumbnail_id=featandscore' % (
-            self.account_id_api_key)
+        url = '/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+            self.account_id_api_key,
+            tid)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)['thumbnails'][0]
         self.assertGreater(rjson['neon_score'], 0)
 
+        tid2 = '%s_vid_%s' % (self.account_id_api_key, 'featonly')
         neondata.ThumbnailMetadata(
-            'featonly',
+            tid2,
             urls=['http://asdf.com/1.jpg'],
             model_score=None,
             model_version='20160713-test',
             features=features
         ).save()
-        url = '/api/v2/%s/thumbnails?thumbnail_id=featonly' % (
-            self.account_id_api_key)
+        url = '/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+            self.account_id_api_key,
+            tid2)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)['thumbnails'][0]
         self.assertGreater(rjson['neon_score'], 0)
 
+        tid3 = '%s_vid_%s' % (self.account_id_api_key, 'scoreonly')
         neondata.ThumbnailMetadata(
-            'scoreonly',
+            tid3,
             urls=['http://asdf.com/1.jpg'],
             model_score='-1e-3',
             model_version='20160713-test',
             features=None
         ).save()
-        url = '/api/v2/%s/thumbnails?thumbnail_id=scoreonly' % (
-            self.account_id_api_key)
+        url = '/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+            self.account_id_api_key,
+            tid3)
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)['thumbnails'][0]
         self.assertGreater(rjson['neon_score'], 0)
