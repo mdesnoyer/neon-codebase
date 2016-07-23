@@ -1213,20 +1213,20 @@ class ThumbnailHandler(ShareableContentHandler):
         if fields:
             fields = set(fields.split(','))
 
-        unchecked_thumbs = yield neondata.ThumbnailMetadata.get_many(
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True)
 
         # Raise Forbidden if any requested thumb doesn't belong to the account.
-        if any([t for t in unchecked_thumbs if t and t.get_account_id() != account_id]):
+        if any([t for t in thumbs if t and t.get_account_id() != account_id]):
             raise ForbiddenError('Access forbidden for a requested thumbnail')
 
         thumbnails = yield [
             ThumbnailHandler.db2api(
-                x,
+                t,
                 gender=gender,
                 age=age,
-                fields=fields) for x in unchecked_thumbs if x is not None]
+                fields=fields) for t in thumbs if t is not None]
 
         if not thumbnails:
             raise NotFoundError('thumbnails do not exist with ids = %s' %
@@ -1279,23 +1279,6 @@ class ThumbnailHandler(ShareableContentHandler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
-
-    @tornado.gen.coroutine
-    def _check_shared_content_ownership(self, pl_account_id, pl_video_id, args):
-        pl_key = neondata.InternalVideoID.generate(pl_account_id, pl_video_id)
-        video = yield neondata.VideoMetadata.get(pl_key, async=True)
-
-        try:
-            # Strictly check that all thumbs belong to this video.
-            query_tids = args['thumbnail_id'].split(',')
-            thumbs = yield neondata.ThumbnailMetadata.get_many(
-                query_tids,
-                async=True)
-            raise tornado.gen.Return(
-                thumbs and
-                all([t.video_id == video.get_id() for t in thumbs]))
-        except (AttributeError, KeyError):
-            raise tornado.gen.Return(False)
 
 
 '''*********************************************************************
@@ -1994,20 +1977,6 @@ class VideoHandler(ShareableContentHandler):
         video_obj = yield VideoHelper.db2api(video, request, fields)
         raise tornado.gen.Return(video_obj)
 
-    @tornado.gen.coroutine
-    def _check_shared_content_ownership(self, pl_account_id, pl_video_id, args):
-        '''Check the database's version of the video belongs to the account.'''
-        pl_key = neondata.InternalVideoID.generate(pl_account_id, pl_video_id)
-        video = yield neondata.VideoMetadata.get(pl_key, async=True)
-        try:
-            # Check the request video id and the payload refer to the same vid.
-            req_key = neondata.InternalVideoID.generate(
-                self.account_id,
-                args['video_id'])
-            raise tornado.gen.Return(req_key == video.get_id())
-        except (AttributeError, KeyError):
-            raise tornado.gen.Return(False)
-
 
 '''*********************************************************************
 VideoStatsHandler
@@ -2193,6 +2162,13 @@ class LiftStatsHandler(ShareableContentHandler):
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
 
+        # Check that the base thumbnail id contains this account id
+        # before checking if the thumbnail exists.
+        thumb_acct_part = args['base_id'].split('_', 1)[0]
+        if thumb_acct_part != args['account_id']:
+            raise ForbiddenError('Access forbidden for base thumbnail')
+
+        # Check that the base thumbnail exists.
         base_thumb = yield neondata.ThumbnailMetadata.get(
             args['base_id'],
             async=True)
@@ -2204,6 +2180,10 @@ class LiftStatsHandler(ShareableContentHandler):
             query_tids,
             async=True,
             as_dict=True)
+
+        # Check that all the thumbs are owned by the account.
+        if any([t for t in thumbs.values() if t and t.get_account_id() != account_id]):
+            raise ForbiddenError('Access forbidden for a requested thumbnail')
 
         lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
             base_thumb) if t else None}
@@ -2217,22 +2197,6 @@ class LiftStatsHandler(ShareableContentHandler):
 
     def get_access_levels(self):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
-
-    def _check_shared_content_ownership(self, pl_account_id, pl_video_id, args):
-        pl_key = neondata.InternalVideoID.generate(pl_account_id, pl_video_id)
-        video = yield neondata.VideoMetadata.get(pl_key, async=True)
-
-        try:
-            # Strictly check that all thumbs belong to this video.
-            query_tids = args['thumbnail_id'].split(',')
-            thumbs = yield neondata.ThumbnailMetadata.get_many(
-                query_tids,
-                async=True)
-            raise tornado.gen.Return(
-                thumbs and
-                all([t.video_id == video.get_id() for t in thumbs]))
-        except (AttributeError, KeyError):
-            raise tornado.gen.Return(False)
 
 
 '''*********************************************************************

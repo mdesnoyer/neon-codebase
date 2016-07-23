@@ -4816,23 +4816,35 @@ class TestLiftStatsHandler(TestControllersBase):
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
 
+        self.account_id = 'testaccount'
+        self.video_id = '%s_%s' % (self.account_id, 'testvid')
+        self.video = neondata.VideoMetadata(self.video_id)
+        self.video.save()
+
+        self.base_thumb_id = '%s_%s' % (self.video_id, 'a')
+        self.base_thumb = neondata.ThumbnailMetadata(self.base_thumb_id)
+        self.base_thumb.save()
+
+        self.thumbs = [neondata.ThumbnailMetadata('%s_%s' %
+            (self.video_id, _id)) for _id in ['b', 'c', 'd']]
+        [t.save() for t in self.thumbs]
+        self.thumb_ids = [t.get_id() for t in self.thumbs]
+
+        self.url = self.get_url(
+            '/api/v2/{}/statistics/estimated_lift?base_id=%s&thumbnail_ids=%s'.format(
+                self.account_id))
+
     def tearDown(self):
         self.verify_account_mocker.stop()
         super(TestLiftStatsHandler, self).tearDown()
 
     @tornado.testing.gen_test
     def test_response_has_structure(self):
-        base_id = 'a'
-        neondata.ThumbnailMetadata('a', model_score=.4).save()
-        thumbnail_ids = ['b', 'c', 'd']
-        neondata.ThumbnailMetadata('c', model_score=.5).save()
-        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
-            '?base_id={}&thumbnail_ids={}'.format(
-                base_id,
-                ','.join(thumbnail_ids))))
+        url = self.url % (self.base_thumb_id, ','.join(self.thumb_ids))
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
-        self.assertIn('baseline_thumbnail_id', rjson)
+
+        self.assertEqual(self.base_thumb_id, rjson['baseline_thumbnail_id'])
         self.assertIn('lift', rjson)
         lift = rjson['lift']
         self.assertIsInstance(lift, list)
@@ -4845,71 +4857,80 @@ class TestLiftStatsHandler(TestControllersBase):
         [self.assertEqual(i['lift'], 0.25) for i in lift
             if i['thumbnail_id'] == 'c']
 
-
     @tornado.testing.gen_test
     def test_base_thumb_does_not_exist(self):
-        base_id = 'b'
-        thumbnail_ids = ['c']
-        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
-            '?base_id={}&thumbnail_ids={}'.format(
-                base_id,
-                ','.join(thumbnail_ids))))
+        none_thumb_id = '%s_%s' % (self.video_id, 'e')
+        url = self.url % (none_thumb_id, ','.join(self.thumb_ids))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(404, e.exception.code)
 
     @tornado.testing.gen_test
     def test_model_score_is_none(self):
-        # Ensure model scores of None don't break api.
-        neondata.ThumbnailMetadata('a', model_score=.4).save()
-        neondata.ThumbnailMetadata('b', model_score=.5).save()
-        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
-            '?base_id={}&thumbnail_ids={}'.format('a', 'b')))
-        response = yield self.http_client.fetch(url)
-        rjson = json.loads(response.body)
-        self.assertIsNotNone(rjson['lift'][0]['lift'])
-        neondata.ThumbnailMetadata('b', model_score=None).save()
-        response = yield self.http_client.fetch(url)
-        rjson = json.loads(response.body)
-        self.assertIsNone(rjson['lift'][0]['lift'])
-        neondata.ThumbnailMetadata('a', model_score=None).save()
-        neondata.ThumbnailMetadata('b', model_score=.5).save()
+
+        # Ensure a model score of None doesn't break api.
+        neondata.ThumbnailMetadata(self.thumb_ids[0], model_score=.4).save()
+        neondata.ThumbnailMetadata(self.thumb_ids[1], model_score=.5).save()
+
+        url = self.url % (self.base_thumb_id, ','.join(self.thumb_ids))
+        neondata.ThumbnailMetadata(self.thumb_ids[0], model_score=None).save()
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
         self.assertIsNone(rjson['lift'][0]['lift'])
-        neondata.ThumbnailMetadata('b', model_score=None).save()
+
+        neondata.ThumbnailMetadata(self.thumb_ids[0], model_score=None).save()
+        neondata.ThumbnailMetadata(self.thumb_ids[1], model_score=.5).save()
         response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertIsNone(rjson['lift'][0]['lift'])
+
+        neondata.ThumbnailMetadata(self.thumb_ids[1], model_score=None).save()
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
         self.assertIsNone(rjson['lift'][0]['lift'])
 
     @tornado.testing.gen_test
+    def test_thumbnail_not_mine_403(self):
+
+        not_my_thumb_id = 'notmy_thumb_id0'
+        neondata.ThumbnailMetadata(not_my_thumb_id).save()
+
+        url = self.url % (
+            self.base_thumb_id,
+            ','.join(self.thumb_ids + [not_my_thumb_id]))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(403, e.exception.code)
+
+        url = self.url % (
+            not_my_thumb_id,
+            ','.join(self.thumb_ids))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(403, e.exception.code)
+
+    @tornado.testing.gen_test
     def test_share_token_allows_get(self):
 
-        video = neondata.VideoMetadata('u_1', request_id='1')
         payload = {
             'content_type': 'VideoMetadata',
-            'content_id': video.get_id()
+            'content_id': self.video_id
         }
         share_token = ShareJWTHelper.encode(payload)
-        video.share_token = share_token
-        video.save()
-
-        neondata.ThumbnailMetadata('a', model_score=.4).save()
-        neondata.ThumbnailMetadata('b', model_score=.5).save()
+        self.video.share_token = share_token
+        self.video.save()
 
         self.verify_account_mocker.stop()
 
-        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
-            '?base_id={}&thumbnail_ids={}'.format('a', 'b')))
+        url = self.url % (self.base_thumb_id, ','.join(self.thumb_ids))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(401, e.exception.code)
 
-        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
-            '?base_id={}&thumbnail_ids={}&share_token={}'.format('a', 'b', share_token)))
+        url = url + '&share_token=%s' % share_token
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
+
         self.verify_account_mocker.start()
 
 

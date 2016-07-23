@@ -797,13 +797,17 @@ class ShareableContentHandler(APIV2Handler):
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
             pl_account_id, pl_content_id = str(payload['content_id']).split('_', 1)
-            if (access_level_required & neondata.AccessLevels.READ):
-                # Check if the request and data match ownership.
-                if request._check_shared_content_ownership(
+            if (access_level_required & neondata.AccessLevels.READ and
+                pl_account_id == request.account_id):
+
+                if payload['content_type'] == 'VideoMetadata':
+                    pl_key = neondata.InternalVideoID.generate(
                         pl_account_id,
-                        pl_content_id,
-                        args):
-                    raise tornado.gen.Return(True)
+                        pl_content_id)
+                    video = yield neondata.VideoMetadata.get(pl_key, async=True)
+                    # Getting the video implicitly validates the account id.
+                    raise tornado.gen.Return(video == True)
+
         except (ValueError, KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.
             pass
@@ -813,19 +817,6 @@ class ShareableContentHandler(APIV2Handler):
                 account_required,
                 internal_only)
         raise tornado.gen.Return(rv)
-
-    def _check_shared_content_ownership(self, pl_account_id, pl_content_id, args):
-        '''Check that the requested resource belongs to the payload object
-
-        This checks that the requested resource is associated to the parent
-        content identified by pl_content_id, and that the resource and
-        content both belong to the pl_account_id account.
-
-        Input- pl_account_id- the content owner's id, from the JWT token
-        Input- pl_content_id- the parent content's id
-        Raises boolean- True if the request should be served, else False
-        '''
-        raise NotImplementedError('Subclass needs implementation')
 
 class MandrillEmailSender(object): 
     @staticmethod
