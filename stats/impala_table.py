@@ -335,7 +335,7 @@ class ImpalaTable(object):
             self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
 
-            -_log.info('SET mapreduce.reduce.memory.mb=%d' %
+            _log.info('SET mapreduce.reduce.memory.mb=%d' %
                               options.parquet_memory)
             _log.info('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
