@@ -3903,7 +3903,8 @@ class TestThumbnailHandler(TestControllersBase):
             width=500,
             urls=['s'],
             features=np.random.rand(1024),
-            model_version='20160713-test')
+            model_version='20160713-test',
+            internal_vid='%s_vid0' % self.account_id_api_key)
         self.thumb.save()
 
         # I use "video_id" to be the id without the account prefix,
@@ -4166,7 +4167,6 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_share_token_allows_get(self):
-
         payload = {
             'content_type': 'VideoMetadata',
             'content_id': self.video.get_id()}
@@ -4178,13 +4178,17 @@ class TestThumbnailHandler(TestControllersBase):
             self.thumb.get_id(),
             share_token))
 
+        self.verify_account_mocker.stop()
+
         r = yield self.http_client.fetch(url, headers=headers)
+        self.assertEqual(ResponseCode.HTTP_OK, r.code)
         rjson = json.loads(r.body)
         self.assertEqual(self.thumb.get_id(), rjson['thumbnails'][0]['thumbnail_id'])
 
+        self.verify_account_mocker.start()
+
     @tornado.testing.gen_test
     def test_share_token_wrong_thumbnail(self):
-
         payload = {
             'content_type': 'VideoMetadata',
             'content_id': self.video.get_id()}
@@ -4198,9 +4202,75 @@ class TestThumbnailHandler(TestControllersBase):
             tid=bad_tid,
             st=share_token))
 
+        self.verify_account_mocker.stop()
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url, headers=headers)
         self.assertEqual(403, e.exception.code)
+
+        # Another case is that the thumbnail is of the account
+        # but not the shared video. This is a 403.
+        bad_tid_2 = '%s_notmyvideo_t0' % self.account_id_api_key
+        neondata.ThumbnailMetadata(bad_tid_2).save()
+
+        url = self.get_url('/api/v2/{aid}/thumbnails/?thumbnail_id={tid}&share_token={st}'.format(
+            aid=self.user.get_api_key(),
+            tid=bad_tid_2,
+            st=share_token))
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url, headers=headers)
+        self.assertEqual(403, e.exception.code)
+
+        self.verify_account_mocker.start()
+
+    @tornado.testing.gen_test
+    def test_no_post_put_with_share_token(self):
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': self.video.get_id()}
+        share_token = ShareJWTHelper.encode(payload)
+        headers = {'Content-Type': 'application/json'}
+
+        # Let's try to add a thumbnail to the existing video.
+        body = json.dumps({
+            'video_id': 'vid0',
+            'url': 'https://instagram.com/1234.jpg',
+            'thumbnail_ref': 'my-photo'
+        })
+        url = self.get_url('/api/v2/{aid}/thumbnails/'.format(
+            aid=self.user.get_api_key()))
+
+        self.verify_account_mocker.stop()
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                body=body,
+                headers=headers,
+                method='POST')
+        self.assertEqual(401, e.exception.code)
+        self.im_download_mock.assert_not_called()
+
+        # Now try to update the existing thumb.
+        body = json.dumps({
+            'video_id': 'vid0',
+            'thumbnail_id': self.thumb.get_id(),
+            'enabled': False
+        })
+        url = self.get_url('/api/v2/{aid}/thumbnails/'.format(
+            aid=self.user.get_api_key()))
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                body=body,
+                headers=headers,
+                method='PUT')
+        self.assertEqual(401, e.exception.code)
+        self.im_download_mock.assert_not_called()
+
+        self.verify_account_mocker.start()
+
 
     @tornado.testing.gen_test
     def test_get_multiple_thumbnails(self):
@@ -4221,6 +4291,7 @@ class TestThumbnailHandler(TestControllersBase):
             'thumbnail_id,width'))
 
         response = yield self.http_client.fetch(url)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
 
         self.assertEqual(rjson['thumb_count'],2)
@@ -4930,6 +5001,32 @@ class TestLiftStatsHandler(TestControllersBase):
         url = url + '&share_token=%s' % share_token
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
+
+        self.verify_account_mocker.start()
+
+    @tornado.testing.gen_test
+    def test_no_post_put_with_share_token(self):
+
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': self.video_id
+        }
+        share_token = ShareJWTHelper.encode(payload)
+        self.video.share_token = share_token
+        self.video.save()
+
+        self.verify_account_mocker.stop()
+
+        # These raise NotImplementedError.
+        url = self.url % (self.base_thumb_id, ','.join(self.thumb_ids))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url, body='', method='POST')
+        self.assertEqual(501, e.exception.code)
+
+        url = self.url % (self.base_thumb_id, ','.join(self.thumb_ids))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url, body='', method='PUT')
+        self.assertEqual(501, e.exception.code)
 
         self.verify_account_mocker.start()
 

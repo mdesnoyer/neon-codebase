@@ -806,7 +806,11 @@ class ShareableContentHandler(APIV2Handler):
                         pl_content_id)
                     video = yield neondata.VideoMetadata.get(pl_key, async=True)
                     # Getting the video implicitly validates the account id.
-                    raise tornado.gen.Return(video == True)
+                    if video is None:
+                        raise tornado.gen.Return(False)
+                    # Keep the valid payload around for security checks.
+                    request.share_payload = payload
+                    raise tornado.gen.Return(True)
 
         except (ValueError, KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.

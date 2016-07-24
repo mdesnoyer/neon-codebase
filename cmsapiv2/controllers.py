@@ -1194,12 +1194,10 @@ class ThumbnailHandler(ShareableContentHandler):
 
         schema = Schema({
           Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+          Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'gender': In(['M', 'F', None]),
-          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None]),
-          Optional('video_id'): str,
-          Optional('share_token'): str})
+          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])})
 
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -1213,20 +1211,30 @@ class ThumbnailHandler(ShareableContentHandler):
         if fields:
             fields = set(fields.split(','))
 
-        thumbs = yield neondata.ThumbnailMetadata.get_many(
+        _thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True)
+        thumbs = [t for t in _thumbs if t]
 
         # Raise Forbidden if any requested thumb doesn't belong to the account.
-        if any([t for t in thumbs if t and t.get_account_id() != account_id]):
+        if any([t for t in thumbs if t.get_account_id() != account_id]):
             raise ForbiddenError('Access forbidden for a requested thumbnail')
+
+        # Check the thumbs against the share token payload's video id, if set.
+        try:
+            video_id = self.share_payload['content_id']
+            if any([t for t in thumbs if t.video_id != video_id]):
+                raise ForbiddenError('Access forbidden for a requested thumbnail')
+        except AttributeError:
+            # If share_payload is not set, pass.
+            pass
 
         thumbnails = yield [
             ThumbnailHandler.db2api(
                 t,
                 gender=gender,
                 age=age,
-                fields=fields) for t in thumbs if t is not None]
+                fields=fields) for t in thumbs]
 
         if not thumbnails:
             raise NotFoundError('thumbnails do not exist with ids = %s' %
@@ -2176,15 +2184,25 @@ class LiftStatsHandler(ShareableContentHandler):
             raise NotFoundError('Base thumbnail does not exist')
 
         query_tids = args['thumbnail_ids'].split(',')
-        thumbs = yield neondata.ThumbnailMetadata.get_many(
+        _thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True,
             as_dict=True)
+        thumbs = {k: t for (k, t) in _thumbs.items() if t}
 
         # Check that all the thumbs are owned by the account.
         if any([t for t in thumbs.values() if t and t.get_account_id() != account_id]):
             raise ForbiddenError('Access forbidden for a requested thumbnail')
 
+        # Check the thumbs against the share token payload's video id, if set.
+        try:
+            video_id = self.share_payload['content_id']
+            if any([t for t in thumbs if t.video_id != video_id]):
+                raise ForbiddenError('Access forbidden for a requested thumbnail')
+
+        except AttributeError:
+            # If share_payload is not set, pass.
+            pass
         lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
             base_thumb) if t else None}
                 for k, t in thumbs.items()]
