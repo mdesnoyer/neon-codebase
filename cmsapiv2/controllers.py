@@ -3218,8 +3218,7 @@ class EmailSupportHandler(APIV2Handler):
             self.SUPPORT_ADDRESS,
             self.SUPPORT_TEMPLATE_SLUG,
             template_args=args,
-            from_email=args['from_email'],
-            from_name=args['from_name'])
+            reply_to=args['from_email'])
 
         self.success({'message' : 'Email sent to %s' % self.SUPPORT_ADDRESS})
 

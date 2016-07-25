@@ -8205,8 +8205,7 @@ class TestEmailSupportHandler(TestControllersBase):
         self.assertEqual(expect_slug, got_slug)
         req2 = self.http_mock.call_args_list[1][0][0]
         sent = json.loads(req2.body)
-        self.assertEqual(sent['message']['from_email'], from_email)
-        self.assertEqual(sent['message']['from_name'], from_name)
+        self.assertEqual(sent['message']['headers']['Reply-To'], from_email)
         expect_html = ''.join([from_name, from_email, message])
         self.assertEqual(sent['message']['html'], expect_html)
         self.assertEqual(sent['message']['to'][0]['email'], expect_address)
