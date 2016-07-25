@@ -7,6 +7,7 @@ sys.path.insert(0,  os.path.abspath(
 
 import logging
 from mock import patch, MagicMock
+from PIL import Image
 import random
 from StringIO import StringIO
 import test_utils.neontest
@@ -59,6 +60,12 @@ class TestPILImageUtils(unittest.TestCase):
         im2 = imageutils.PILImageUtils.resize(self.im, None, None)
         self.assertEqual(im2.size, (480, 360))
         self.assertEqual(self.im, im2)
+
+    def test_rgba_to_cv(self):
+        rgba_im = Image.open(os.path.join(os.path.dirname(__file__),
+                                          'alpha_image.png'))
+        cv_im = imageutils.PILImageUtils.to_cv(rgba_im)
+        #imageutils.PILImageUtils.from_cv(cv_im).show()
 
 class TestDownloadImage(test_utils.neontest.AsyncTestCase):
     def setUp(self):
