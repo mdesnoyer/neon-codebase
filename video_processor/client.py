@@ -399,6 +399,7 @@ class VideoProcessor(object):
                     shutil.move(x['filename'], self.tempfile.name)
                     
             dl_params = {}
+            dl_params['noplaylist'] = True
             dl_params['ratelimit'] = (options.max_bandwidth_per_core 
                                       if do_throttle else None)
             dl_params['restrictfilenames'] = True
@@ -430,7 +431,8 @@ class VideoProcessor(object):
                         # Need to step to the next url
                         cur_url = video_info['url']
                         continue
-                    elif result_type == 'video':
+                    elif result_type in ['video', 'playlist']:
+                        # If type playlist, we get the first or current video.
                         found_video = True
                     else:
                         # They gave us a playlist or other type of url
