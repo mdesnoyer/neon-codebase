@@ -12,6 +12,7 @@ import dateutil.parser
 import model.predictor
 import numpy as np
 import PIL.Image
+import re
 import io
 import StringIO
 
@@ -1793,6 +1794,15 @@ class VideoHandler(ShareableContentHandler):
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
+
+        # Make sure that the external_video_ref is of a form we can handle
+        id_match = re.match(neondata.InternalVideoID.VALID_EXTERNAL_REGEX,
+                            args['external_video_ref'])
+        if (id_match is None or 
+            id_match.end() != len(args['external_video_ref'])):
+            raise Invalid('Invalid video reference. It must work with the '
+                          'following regex for all characters: %s' % 
+                          neondata.InternalVideoID.VALID_EXTERNAL_REGEX)
 
         reprocess = args.get('reprocess', None)
         url = args.get('url', None)

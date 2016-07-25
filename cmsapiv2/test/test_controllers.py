@@ -2585,6 +2585,23 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(video.key, internal_video_id)
 
     @tornado.testing.gen_test
+    def test_post_video_bad_id(self):
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=id_with_underscore'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        rjson = json.loads(e.exception.response.body)
+        self.assertEquals(e.exception.code, 400)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Invalid video reference')
+
+    @tornado.testing.gen_test
     def test_post_video_thumbnail_exists_in_db(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
