@@ -284,7 +284,7 @@ class ImpalaTable(object):
             self.hive.execute("""
             CREATE TABLE IF NOT EXISTS %s
             (%s)
-            partitioned by (tai string, yr int, mnth int, day int, hr int)
+            partitioned by (tai string, yr int, mnth int)
             ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe'
             STORED AS INPUTFORMAT 'parquet.hive.DeprecatedParquetInputFormat'
             OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
@@ -353,15 +353,12 @@ class ImpalaTable(object):
                 hi=hour_interval))
             sql = """
             insert overwrite table %s
-            partition(tai, yr, mnth, day, hr)
+            partition(tai, yr, mnth)
             select %s, trackerAccountId,
             year(cast(serverTime as timestamp)),
-            month(cast(serverTime as timestamp)),
-            day(cast(serverTime as timestamp)),
-            FLOOR(hour(cast(serverTime as timestamp)) / %d) * %d
+            month(cast(serverTime as timestamp))
             from %s""" % (parq_table,
                           ','.join(x.name for x in self.avro_schema.fields),
-                          hour_interval, hour_interval,
                           avro_table)
             _log.info('LOAD Impala-Parquet table command: {sql}'.format(
                 sql=sql))
