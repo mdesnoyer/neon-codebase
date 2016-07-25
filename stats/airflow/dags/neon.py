@@ -34,6 +34,7 @@ from airflow.operators.dummy_operator import DummyOperator
 # from airflow.operators.subdag_operator import SubDagOperator
 # from airflow.operators.sensors import ExternalTaskSensor  # S3KeySensor, S3PrefixSensor, TimeSensor
 from datetime import datetime, timedelta
+from boto.s3.connection import S3Connection
 import dateutils
 import logging
 import optparse
@@ -385,7 +386,8 @@ def _quiet_period(**kwargs):
 def _stage_files(**kwargs):
     """Copy input path files to staging area for the execution date
     """
-    s3 = S3Hook(s3_conn_id='s3')
+    #s3 = S3Hook(s3_conn_id='s3')
+    s3 = S3Connection()
 
     dag = kwargs['dag']
     execution_date = kwargs['execution_date']
