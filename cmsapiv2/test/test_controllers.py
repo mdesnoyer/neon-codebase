@@ -4719,6 +4719,8 @@ class TestLiftStatsHandler(TestControllersBase):
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
 
+        np.random.seed(234235)
+
     def tearDown(self):
         self.verify_account_mocker.stop()
         super(TestLiftStatsHandler, self).tearDown()
@@ -4747,6 +4749,36 @@ class TestLiftStatsHandler(TestControllersBase):
             if i['thumbnail_id'] in ['b', 'd']]
         [self.assertEqual(i['lift'], 0.25) for i in lift
             if i['thumbnail_id'] == 'c']
+
+    @tornado.testing.gen_test
+    def test_different_demographic(self):
+        neondata.ThumbnailMetadata('base',
+                                   model_version='20160713-test',
+                                   features=np.random.rand(1024)).save()
+        neondata.ThumbnailMetadata('other',
+                                   model_version='20160713-test',
+                                   features=np.random.rand(1024)).save()
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift?base_id=base&'
+                           'thumbnail_ids=other')
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        neutral_lift = rjson['lift']
+        self.assertEquals(len(neutral_lift), 1)
+        self.assertGreaterEqual(neutral_lift[0]['lift'], -1.0)
+        self.assertEquals(neutral_lift[0]['thumbnail_id'], 'other')
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift?base_id=base&'
+                           'thumbnail_ids=other&age=40-49&gender=M')
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        demo_lift = rjson['lift']
+        self.assertEquals(len(demo_lift), 1)
+        self.assertGreaterEqual(demo_lift[0]['lift'], -1.0)
+        self.assertEquals(demo_lift[0]['thumbnail_id'], 'other')
+
+        self.assertNotAlmostEqual(demo_lift[0]['lift'],
+                                  neutral_lift[0]['lift'])
 
 
     @tornado.testing.gen_test
