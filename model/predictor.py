@@ -48,6 +48,10 @@ statemon.define('unknown_model', int)
 MEAN_CHANNEL_VALS = [[[92.366, 85.133, 81.674]]]
 MEAN_CHANNEL_VALS = np.array(MEAN_CHANNEL_VALS).round().astype(np.uint8)
 
+# Valid demographic categories
+VALID_GENDER = ['M', 'F', None]
+VALID_AGE_GROUP = ['18-19', '20-29', '30-39', '40-49', '50+', None]
+
 def _resize_to(img, w=None, h=None):
   '''
   Resizes the image to a desired width and height. If either is undefined,
