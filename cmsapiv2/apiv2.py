@@ -170,7 +170,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         args = {}
         if len(self.request.query_arguments) > 0:
             for key, value in self.request.query_arguments.iteritems():
-                if key != 'token' or keep_token:
+                if key not in ['share_token', 'token'] or keep_token:
                     args[key] = value[0]
         if len(self.request.body) > 0:
             content_type = self.request.headers.get('Content-Type', None)
@@ -188,7 +188,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             else:
                 raise BadRequestError(
                     'Content-Type must be JSON or multipart/form-data')
-
+        self.args = args
         return args
 
     def set_account_id(request):
@@ -229,10 +229,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         account = request.account
         access_token = request.access_token
-        if account_required and not account:
-            raise NotAuthorizedError('account does not exist')
         if not access_token:
             raise NotAuthorizedError('this endpoint requires an access token')
+        if account_required and not account:
+            raise NotAuthorizedError('account does not exist')
 
         try:
             payload = JWTHelper.decode_token(access_token)
@@ -641,6 +641,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 statemon.state.increment(ref=_unauthorized_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_UNAUTHORIZED)
+            if isinstance(exception, ForbiddenError):
+                statemon.state.increment(ref=_unauthorized_errors_ref,
+                                         safe=False)
+                self.set_status(ResponseCode.HTTP_FORBIDDEN)
             if isinstance(exception, NotImplementedError):
                 statemon.state.increment(ref=_not_implemented_errors_ref,
                                          safe=False)
@@ -783,22 +787,35 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 class ShareableContentHandler(APIV2Handler):
     """Enable authorization by URL parameter share_token."""
 
+    def initialize(self):
+        super(ShareableContentHandler, self).initialize()
+        self.share_payload = None
+
     @tornado.gen.coroutine
     def is_authorized(request,
                       access_level_required,
                       account_required=True,
                       internal_only=False):
-        """Allow access if request has query token and matches resource"""
+        """Allow access if request has share token and matches resource"""
         args = request.parse_args(True)
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
-            # Implement for just video resources reads for now.
-            pl_account_id, pl_video_id = payload['content_id'].split('_')
+            pl_account_id, pl_content_id = str(payload['content_id']).split('_', 1)
             if (access_level_required & neondata.AccessLevels.READ and
-                payload['content_type'] == 'VideoMetadata' and
-                pl_account_id == request.account_id and
-                pl_video_id == args['video_id']):
-                   raise tornado.gen.Return(True)
+                pl_account_id == request.account_id):
+
+                if payload['content_type'] == 'VideoMetadata':
+                    pl_key = neondata.InternalVideoID.generate(
+                        pl_account_id,
+                        pl_content_id)
+                    video = yield neondata.VideoMetadata.get(pl_key, async=True)
+                    # Getting the video implicitly validates the account id.
+                    if video is None:
+                        raise tornado.gen.Return(False)
+                    # Keep the valid payload around for security checks.
+                    request.share_payload = payload
+                    raise tornado.gen.Return(True)
+
         except (ValueError, KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.
             pass
@@ -984,6 +1001,13 @@ class NotAuthorizedError(tornado.web.HTTPError):
     def __init__(self,
                  msg='not authorized',
                  code=ResponseCode.HTTP_UNAUTHORIZED):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+
+class ForbiddenError(tornado.web.HTTPError):
+    def __init__(self,
+                 msg='Forbidden',
+                 code=ResponseCode.HTTP_FORBIDDEN):
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 

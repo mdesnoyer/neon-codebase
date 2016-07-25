@@ -1010,7 +1010,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
-class ThumbnailHandler(APIV2Handler):
+class ThumbnailHandler(ShareableContentHandler):
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1194,56 +1194,60 @@ class ThumbnailHandler(APIV2Handler):
 
         schema = Schema({
           Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+          Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'gender': In(['M', 'F', None]),
-          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])
-        })
+          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])})
+
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
 
         query_tids = args['thumbnail_id'].split(',')
         fields = args.get('fields', None)
-        gender = args.get('gender', None) 
-        age = args.get('age', None) 
+        gender = args.get('gender', None)
+        age = args.get('age', None)
 
         if fields:
             fields = set(fields.split(','))
 
-        thumbs = yield neondata.ThumbnailMetadata.get_many(
+        _thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True)
- 
+        thumbs = [t for t in _thumbs if t]
+
+        # Raise Forbidden if any requested thumb doesn't belong to the account.
+        if any([t for t in thumbs if t.get_account_id() != account_id]):
+            raise ForbiddenError('Access forbidden for a requested thumbnail')
+
+        # Check the thumbs against the share token payload's video id, if set.
+        if self.share_payload:
+            video_id = self.share_payload['content_id']
+            if any([t for t in thumbs if t.video_id != video_id]):
+                raise ForbiddenError('Access forbidden for a requested thumbnail')
+
         thumbnails = yield [
             ThumbnailHandler.db2api(
-                x, 
+                t,
                 gender=gender,
-                age=age, 
-                fields=fields) for x in thumbs if x is not None]
+                age=age,
+                fields=fields) for t in thumbs]
 
         if not thumbnails:
             raise NotFoundError('thumbnails do not exist with ids = %s' %
                                 (query_tids))
 
-        # TODO not sure if this is right thing to do 
-        #if len(thumbnails) == 1: 
-        #    rv = thumbnails[0]
-        #else:  
-        rv = { 'thumb_count': len(thumbnails), 'thumbnails': thumbnails } 
+        rv = { 'thumb_count': len(thumbnails), 'thumbnails': thumbnails }
         statemon.state.increment('get_thumbnail_oks')
         self.success(rv)
 
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET: neondata.AccessLevels.READ,
-                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-                 'account_required': [HTTPVerbs.GET,
-                                        HTTPVerbs.PUT,
-                                        HTTPVerbs.POST]
-               }
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+            'account_required': [HTTPVerbs.PUT, HTTPVerbs.POST]}
 
     @classmethod
     def _get_default_returned_fields(cls):
@@ -1343,13 +1347,13 @@ class ThumbnailHelper(object):
                 'height': int,
                 'aspect_ratio': string in format "WxH"
         """
-        return [ThumbnailHelper._to_dict(item) for item
-                in urls_obj.size_map.items()]
+        return [ThumbnailHelper._to_dict(item) for item in urls_obj] if urls_obj else []
+
 
     @staticmethod
     def _to_dict(pair):
         """Given a size map (sizes, url) tuple return a rendition dictionary."""
-        dimensions, url = pair 
+        dimensions, url = pair
 
         return {
             'url': url,
@@ -1851,8 +1855,7 @@ class VideoHandler(ShareableContentHandler):
             Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
             Required('video_id'): Any(
                 CustomVoluptuousTypes.CommaSeparatedList()),
-            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-            'share_token': Any(str)
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1978,6 +1981,7 @@ class VideoHandler(ShareableContentHandler):
     def db2api(video, request, fields=None):
         video_obj = yield VideoHelper.db2api(video, request, fields)
         raise tornado.gen.Return(video_obj)
+
 
 '''*********************************************************************
 VideoStatsHandler
@@ -2158,13 +2162,18 @@ class LiftStatsHandler(ShareableContentHandler):
             Required('base_id'): All(Coerce(str), Length(min=1, max=2048)),
             Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
             Optional('gender'): In(model.predictor.VALID_GENDER),
-            Optional('age'): In(model.predictor.VALID_AGE_GROUP),
-            Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('share_token'): str})
+            Optional('age'): In(model.predictor.VALID_AGE_GROUP)})
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
 
+        # Check that the base thumbnail id contains this account id
+        # before checking if the thumbnail exists.
+        thumb_acct_part = args['base_id'].split('_', 1)[0]
+        if thumb_acct_part != args['account_id']:
+            raise ForbiddenError('Access forbidden for base thumbnail')
+
+        # Check that the base thumbnail exists.
         base_thumb = yield neondata.ThumbnailMetadata.get(
             args['base_id'],
             async=True)
@@ -2172,10 +2181,21 @@ class LiftStatsHandler(ShareableContentHandler):
             raise NotFoundError('Base thumbnail does not exist')
 
         query_tids = args['thumbnail_ids'].split(',')
-        thumbs = yield neondata.ThumbnailMetadata.get_many(
+        _thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True,
             as_dict=True)
+        thumbs = {k: t for (k, t) in _thumbs.items() if t}
+
+        # Check that all the thumbs are owned by the account.
+        if any([t for t in thumbs.values() if t and t.get_account_id() != account_id]):
+            raise ForbiddenError('Access forbidden for a requested thumbnail')
+
+        # Check the thumbs against the share token payload's video id, if set.
+        if self.share_payload:
+            video_id = self.share_payload['content_id']
+            if any([t for t in thumbs.values() if t.video_id != video_id]):
+                raise ForbiddenError('Access forbidden for a requested thumbnail')
 
         lift = [{'thumbnail_id': k, 
                  'lift': t.get_estimated_lift(base_thumb,

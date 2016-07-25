@@ -4848,7 +4848,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None, account_id=None, features=None):
+                 external_id=None, features=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -4873,7 +4873,6 @@ class ThumbnailMetadata(StoredObject):
         if self.type is ThumbnailType.NEON:
             self.do_source_crop = True
             self.do_smart_crop = True
-        self.account_id = account_id
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 
