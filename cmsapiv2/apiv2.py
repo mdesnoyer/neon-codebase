@@ -789,7 +789,7 @@ class ShareableContentHandler(APIV2Handler):
 
     def initialize(self):
         super(ShareableContentHandler, self).initialize()
-        self.share_token = None
+        self.share_payload = None
 
     @tornado.gen.coroutine
     def is_authorized(request,
