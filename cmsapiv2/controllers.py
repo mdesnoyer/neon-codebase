@@ -1786,8 +1786,8 @@ class VideoHandler(ShareableContentHandler):
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
           'callback_email': All(Coerce(str), Length(min=1, max=2048)),
           'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
-          'gender': In(['M', 'F', None]),
-          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])
+          'gender': In(model.predictor.VALID_GENDER),
+          'age': In(model.predictor.VALID_AGE_GROUP)
         })
 
         args = self.parse_args()
@@ -2161,6 +2161,8 @@ class LiftStatsHandler(ShareableContentHandler):
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('base_id'): All(Coerce(str), Length(min=1, max=2048)),
             Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            Optional('gender'): In(model.predictor.VALID_GENDER),
+            Optional('age'): In(model.predictor.VALID_AGE_GROUP),
             Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
             Optional('share_token'): str})
         args = self.parse_args()
@@ -2197,8 +2199,11 @@ class LiftStatsHandler(ShareableContentHandler):
             if any([t for t in thumbs if t.video_id != video_id]):
                 raise ForbiddenError('Access forbidden for a requested thumbnail')
 
-        lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
-            base_thumb) if t else None}
+        lift = [{'thumbnail_id': k, 
+                 'lift': t.get_estimated_lift(base_thumb,
+                                              gender=args.get('gender', None),
+                                              age=args.get('age', None)) 
+                                              if t else None}
                 for k, t in thumbs.items()]
 
         # Check thumbnail exists.

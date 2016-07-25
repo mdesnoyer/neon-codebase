@@ -4904,6 +4904,7 @@ class TestLiftStatsHandler(TestControllersBase):
         self.url = self.get_url(
             '/api/v2/{}/statistics/estimated_lift?base_id=%s&thumbnail_ids=%s'.format(
                 self.account_id))
+        np.random.seed(234235)
 
     def tearDown(self):
         self.verify_account_mocker.stop()
@@ -4927,6 +4928,36 @@ class TestLiftStatsHandler(TestControllersBase):
             if i['thumbnail_id'] in ['b', 'd']]
         [self.assertEqual(i['lift'], 0.25) for i in lift
             if i['thumbnail_id'] == 'c']
+
+    @tornado.testing.gen_test
+    def test_different_demographic(self):
+        neondata.ThumbnailMetadata('base',
+                                   model_version='20160713-test',
+                                   features=np.random.rand(1024)).save()
+        neondata.ThumbnailMetadata('other',
+                                   model_version='20160713-test',
+                                   features=np.random.rand(1024)).save()
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift?base_id=base&'
+                           'thumbnail_ids=other')
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        neutral_lift = rjson['lift']
+        self.assertEquals(len(neutral_lift), 1)
+        self.assertGreaterEqual(neutral_lift[0]['lift'], -1.0)
+        self.assertEquals(neutral_lift[0]['thumbnail_id'], 'other')
+
+        url = self.get_url('/api/v2/u/statistics/estimated_lift?base_id=base&'
+                           'thumbnail_ids=other&age=40-49&gender=M')
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        demo_lift = rjson['lift']
+        self.assertEquals(len(demo_lift), 1)
+        self.assertGreaterEqual(demo_lift[0]['lift'], -1.0)
+        self.assertEquals(demo_lift[0]['thumbnail_id'], 'other')
+
+        self.assertNotAlmostEqual(demo_lift[0]['lift'],
+                                  neutral_lift[0]['lift'])
 
     @tornado.testing.gen_test
     def test_base_thumb_does_not_exist(self):
@@ -5414,6 +5445,11 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         TestAuthenticationHandler.first_name = 'kevin'
         TestAuthenticationHandler.last_name = 'keviniii'
         TestAuthenticationHandler.title = 'blah'
+        TestAuthenticationHandler.account_id = 'test_account'
+        self.account = neondata.NeonUserAccount(
+            TestAuthenticationHandler.account_id,
+            users=[TestAuthenticationHandler.username])
+        self.account.save()
         self.user = neondata.User(username=TestAuthenticationHandler.username,
             password=TestAuthenticationHandler.password,
             first_name=TestAuthenticationHandler.first_name,
@@ -5505,6 +5541,10 @@ class TestAuthenticationHandler(TestAuthenticationBase):
             async=True)
         self.assertEquals(user.access_token, rjson['access_token'])
         self.assertEquals(user.refresh_token, rjson['refresh_token'])
+        a_payload = JWTHelper.decode_token(user.access_token)
+        self.assertEqual(self.account.get_api_key(), a_payload['account_id'])
+        r_payload = JWTHelper.decode_token(user.refresh_token)
+        self.assertEqual(self.account.get_api_key(), r_payload['account_id'])
         user_info = rjson['user_info']
         self.assertEquals(user_info['first_name'],
             TestAuthenticationHandler.first_name)
@@ -5564,9 +5604,6 @@ class TestAuthenticationHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test
     def test_account_ids_returned_single(self):
-        new_account_one = neondata.NeonUserAccount('test_account1')
-        new_account_one.users.append(self.user.username)
-        yield new_account_one.save(async=True)
 
         url = '/api/v2/authenticate'
         params = json.dumps({'username': TestAuthenticationHandler.username,
@@ -5580,7 +5617,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         account_ids = rjson['account_ids']
         self.assertEquals(1, len(account_ids))
         a_id = account_ids[0]
-        self.assertEquals(a_id, new_account_one.neon_api_key)
+        self.assertEquals(a_id, self.account.get_api_key())
 
     @tornado.testing.gen_test
     def test_account_ids_returned_multiple(self):
@@ -5602,24 +5639,9 @@ class TestAuthenticationHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         account_ids = rjson['account_ids']
-        self.assertEquals(2, len(account_ids))
+        self.assertEquals(3, len(account_ids))
         self.assertTrue(new_account_one.neon_api_key in account_ids)
         self.assertTrue(new_account_two.neon_api_key in account_ids)
-
-    @tornado.testing.gen_test
-    def test_account_ids_returned_empty(self):
-        url = '/api/v2/authenticate'
-        params = json.dumps({'username': TestAuthenticationHandler.username,
-                             'password': TestAuthenticationHandler.password})
-        header = { 'Content-Type':'application/json' }
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body=params,
-                                                method='POST',
-                                                headers=header)
-        rjson = json.loads(response.body)
-        account_ids = rjson['account_ids']
-        account_ids = rjson['account_ids']
-        self.assertEquals(0, len(account_ids))
 
 
 class TestRefreshTokenHandler(TestAuthenticationBase):
@@ -5672,8 +5694,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
                                          headers=self.headers)
         self.assertEqual(500, e.exception.code)
 
-
     def test_refresh_token_expired(self):
+        neondata.NeonUserAccount('test', users=self.user.get_id()).save()
         refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp')
         options._set('cmsapiv2.apiv2.refresh_token_exp', -1)
         url = '/api/v2/authenticate'
@@ -5762,6 +5784,8 @@ class TestLogoutHandler(TestAuthenticationBase):
         user = neondata.User(username=TestLogoutHandler.username,
                              password=TestLogoutHandler.password)
         user.save()
+        account = neondata.NeonUserAccount('test', users=user.get_id())
+        account.save()
         super(TestLogoutHandler, self).setUp()
     def tearDown(self):
         super(TestLogoutHandler, self).tearDown()

@@ -5125,11 +5125,11 @@ class ThumbnailMetadata(StoredObject):
                                        gender, age)
         return None
 
-    def get_estimated_lift(self, other_thumb): 
+    def get_estimated_lift(self, other_thumb, gender=None, age=None): 
         """ returns the estimated lift of this object vs another 
             thumbnail""" 
-        ot_score = other_thumb.get_score() 
-        score = self.get_score() 
+        ot_score = other_thumb.get_score(gender=gender, age=age) 
+        score = self.get_score(gender=gender, age=age) 
         if ot_score is None or score is None:
             return None
         # determine the model
