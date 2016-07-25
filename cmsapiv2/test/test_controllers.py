@@ -5463,8 +5463,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
                                          headers=self.headers)
         self.assertEqual(500, e.exception.code)
 
-
     def test_refresh_token_expired(self):
+        neondata.NeonUserAccount('test', users=self.user.get_id()).save()
         refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp')
         options._set('cmsapiv2.apiv2.refresh_token_exp', -1)
         url = '/api/v2/authenticate'
@@ -5553,6 +5553,8 @@ class TestLogoutHandler(TestAuthenticationBase):
         user = neondata.User(username=TestLogoutHandler.username,
                              password=TestLogoutHandler.password)
         user.save()
+        account = neondata.NeonUserAccount('test', users=user.get_id())
+        account.save()
         super(TestLogoutHandler, self).setUp()
     def tearDown(self):
         super(TestLogoutHandler, self).tearDown()
