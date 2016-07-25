@@ -2162,9 +2162,7 @@ class LiftStatsHandler(ShareableContentHandler):
             Required('base_id'): All(Coerce(str), Length(min=1, max=2048)),
             Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
             Optional('gender'): In(model.predictor.VALID_GENDER),
-            Optional('age'): In(model.predictor.VALID_AGE_GROUP),
-            Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('share_token'): str})
+            Optional('age'): In(model.predictor.VALID_AGE_GROUP)})
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
@@ -2196,7 +2194,7 @@ class LiftStatsHandler(ShareableContentHandler):
         # Check the thumbs against the share token payload's video id, if set.
         if self.share_payload:
             video_id = self.share_payload['content_id']
-            if any([t for t in thumbs if t.video_id != video_id]):
+            if any([t for t in thumbs.values() if t.video_id != video_id]):
                 raise ForbiddenError('Access forbidden for a requested thumbnail')
 
         lift = [{'thumbnail_id': k, 

@@ -4893,11 +4893,15 @@ class TestLiftStatsHandler(TestControllersBase):
         self.video.save()
 
         self.base_thumb_id = '%s_%s' % (self.video_id, 'a')
-        self.base_thumb = neondata.ThumbnailMetadata(self.base_thumb_id)
+        self.base_thumb = neondata.ThumbnailMetadata(
+            self.base_thumb_id,
+            internal_vid=self.video_id)
         self.base_thumb.save()
 
         self.thumbs = [neondata.ThumbnailMetadata('%s_%s' %
-            (self.video_id, _id)) for _id in ['b', 'c', 'd']]
+            (self.video_id, _id),
+            internal_vid=self.video_id)
+                for _id in ['b', 'c', 'd']]
         [t.save() for t in self.thumbs]
         self.thumb_ids = [t.get_id() for t in self.thumbs]
 
@@ -4931,30 +4935,30 @@ class TestLiftStatsHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_different_demographic(self):
-        neondata.ThumbnailMetadata('base',
+        base_thumb_id = '%s_%s' % (self.video_id, 'base')
+        other_thumb_id = '%s_%s' % (self.video_id, 'other')
+        neondata.ThumbnailMetadata(base_thumb_id,
                                    model_version='20160713-test',
                                    features=np.random.rand(1024)).save()
-        neondata.ThumbnailMetadata('other',
+        neondata.ThumbnailMetadata(other_thumb_id,
                                    model_version='20160713-test',
                                    features=np.random.rand(1024)).save()
 
-        url = self.get_url('/api/v2/u/statistics/estimated_lift?base_id=base&'
-                           'thumbnail_ids=other')
+        url = self.url % (base_thumb_id, other_thumb_id)
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
         neutral_lift = rjson['lift']
         self.assertEquals(len(neutral_lift), 1)
         self.assertGreaterEqual(neutral_lift[0]['lift'], -1.0)
-        self.assertEquals(neutral_lift[0]['thumbnail_id'], 'other')
+        self.assertEquals(neutral_lift[0]['thumbnail_id'], other_thumb_id)
 
-        url = self.get_url('/api/v2/u/statistics/estimated_lift?base_id=base&'
-                           'thumbnail_ids=other&age=40-49&gender=M')
+        url = url + '&age=40-49&gender=M'
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
         demo_lift = rjson['lift']
         self.assertEquals(len(demo_lift), 1)
         self.assertGreaterEqual(demo_lift[0]['lift'], -1.0)
-        self.assertEquals(demo_lift[0]['thumbnail_id'], 'other')
+        self.assertEquals(demo_lift[0]['thumbnail_id'], other_thumb_id)
 
         self.assertNotAlmostEqual(demo_lift[0]['lift'],
                                   neutral_lift[0]['lift'])
