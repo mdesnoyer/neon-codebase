@@ -1221,13 +1221,10 @@ class ThumbnailHandler(ShareableContentHandler):
             raise ForbiddenError('Access forbidden for a requested thumbnail')
 
         # Check the thumbs against the share token payload's video id, if set.
-        try:
+        if self.share_payload:
             video_id = self.share_payload['content_id']
             if any([t for t in thumbs if t.video_id != video_id]):
                 raise ForbiddenError('Access forbidden for a requested thumbnail')
-        except AttributeError:
-            # If share_payload is not set, pass.
-            pass
 
         thumbnails = yield [
             ThumbnailHandler.db2api(
@@ -2195,14 +2192,11 @@ class LiftStatsHandler(ShareableContentHandler):
             raise ForbiddenError('Access forbidden for a requested thumbnail')
 
         # Check the thumbs against the share token payload's video id, if set.
-        try:
+        if self.share_payload:
             video_id = self.share_payload['content_id']
             if any([t for t in thumbs if t.video_id != video_id]):
                 raise ForbiddenError('Access forbidden for a requested thumbnail')
 
-        except AttributeError:
-            # If share_payload is not set, pass.
-            pass
         lift = [{'thumbnail_id': k, 'lift': t.get_estimated_lift(
             base_thumb) if t else None}
                 for k, t in thumbs.items()]

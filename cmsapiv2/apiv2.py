@@ -787,6 +787,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 class ShareableContentHandler(APIV2Handler):
     """Enable authorization by URL parameter share_token."""
 
+    def initialize(self):
+        super(ShareableContentHandler, self).initialize()
+        self.share_token = None
+
     @tornado.gen.coroutine
     def is_authorized(request,
                       access_level_required,
