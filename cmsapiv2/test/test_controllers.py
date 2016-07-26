@@ -5710,10 +5710,14 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         _, refresh_token = authentication.AccountHelper.get_auth_tokens(
             {'username': username})
         params = json.dumps({'token': refresh_token})
-        with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(self.url, body=params, method='POST',
-                                         headers=self.headers)
-        self.assertEqual(500, e.exception.code)
+        result = yield self.http_client.fetch(self.url, body=params, method='POST',
+                                     headers=self.headers)
+        self.assertEqual(200, result.code)
+        rjson = json.loads(result.body)
+        self.assertIn('access_token', rjson)
+        self.assertEqual(refresh_token, rjson['refresh_token'])
+        self.assertFalse(rjson['account_ids'])
+
 
     def test_refresh_token_expired(self):
         neondata.NeonUserAccount('test', users=self.user.get_id()).save()
