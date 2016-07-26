@@ -1634,13 +1634,13 @@ class VideoHelper(object):
         if not video.duration or int(video.duration) <= 0: 
             return 0.0  
 
-        est_process_time = 2.5 * video.duration
+        est_process_time = 2.8 * video.duration
         updated_ts = dateutil.parser.parse(
             request.updated)
         utc_now = datetime.utcnow()
         diff = (utc_now - updated_ts).total_seconds()
  
-        return max(float(est_process_time - diff), 60.0)
+        return max(float(est_process_time - diff), 1.0)
 
     @staticmethod
     @tornado.gen.coroutine
