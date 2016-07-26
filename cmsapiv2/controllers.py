@@ -1640,7 +1640,7 @@ class VideoHelper(object):
         utc_now = datetime.utcnow()
         diff = (utc_now - updated_ts).total_seconds()
  
-        return max(float(est_process_time - diff), 1.0)
+        return max(float(est_process_time - diff), 0.0)
 
     @staticmethod
     @tornado.gen.coroutine
