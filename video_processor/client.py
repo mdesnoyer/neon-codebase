@@ -431,11 +431,17 @@ class VideoProcessor(object):
                         # Need to step to the next url
                         cur_url = video_info['url']
                         continue
-                    elif result_type in ['video', 'playlist']:
+                    # Distinguish between /playlist and /watch?list= urls:
+                    # skip the former and download the latter.
+                    elif result_type == 'playlist' and 'entries' not in video_info:
+                        # This effectively strips list and index parameters from the playlist url.
+                        cur_url = video_info['webpage_url']
+                        continue
+                    elif result_type == 'video':
                         # If type playlist, we get the first or current video.
                         found_video = True
                     else:
-                        # They gave us a playlist or other type of url
+                        # They gave us another type of url
                         msg = ('Unhandled video type %s' %
                                (result_type))
                         raise youtube_dl.utils.DownloadError(msg)
