@@ -90,7 +90,7 @@ class AuthenticateHandler(APIV2Handler):
 
         access_token, refresh_token = AccountHelper.get_auth_tokens({
             'username': username,
-            'account_id': account_ids[0]})
+            'account_id': account_ids[0] if account_ids else None})
 
         def _update_tokens(x):
             x.access_token = access_token
@@ -219,7 +219,7 @@ class RefreshTokenHandler(APIV2Handler):
 
             access_token = JWTHelper.generate_token(
                 {'username': username,
-                 'account_id': account_ids[0]},
+                 'account_id': account_ids[0] if account_ids else None},
                 token_type=TokenTypes.ACCESS_TOKEN)
 
             def _update_user(u):
