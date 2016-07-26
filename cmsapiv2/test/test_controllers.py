@@ -3107,7 +3107,7 @@ class TestVideoHandler(TestControllersBase):
         vid1 = rjson['videos'][0] 
  
         self.assertEquals(vid1['video_id'], 'vid1')
-        self.assertGreater(vid1['estimated_time_remaining'], 0.0)
+        self.assertGreaterEqual(vid1['estimated_time_remaining'], 0.0)
   
     @tornado.testing.gen_test
     def test_get_single_video_processing_none_duration(self):
