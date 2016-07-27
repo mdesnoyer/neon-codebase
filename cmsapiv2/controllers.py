@@ -53,6 +53,9 @@ statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
 
+statemon.define('social_image_generated', int)
+statemon.define('social_image_invalid_request', int)
+
 '''*****************************************************************
 AccountHandler
 *****************************************************************'''
@@ -3257,25 +3260,38 @@ class SocialImageHandler(ShareableContentHandler):
         schema(args)
 
         external_video_id = args.get('video_id')
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id, external_video_id)
         tag_id = args.get('tag_id')
+        
+        # See if we can get the asset id from the payload
+        if self.share_payload is not None:
+            if self.share_payload['content_type'] != 'VideoMetadata':
+                statemon.state.increment('social_image_invalid_request')
+                raise ForbiddenError('Content token is not for videos')
+            if external_video_id is not None:
+                if self.share_payload['content_id'] != internal_video_id:
+                    statemon.state.increment('social_image_invalid_request')
+                    raise ForbiddenError('Content token is not for this video')
+            else:
+                # Grab the video id from the payload
+                internal_video_id = self.share_payload['content_id']
+                external_video_id = neondata.InternalVideoID.to_external(
+                    internal_video_id)
+                
         if (external_video_id is None) == (tag_id is None):
+            statemon.state.increment('social_image_invalid_request')
             raise Invalid('Exactly one of video_id or tag_id is required')
         if tag_id is not None:
             # TODO(nate, mdesnoyer): wire this up for image
             # collections when we are ready for it.
+            statemon.state.increment('social_image_invalid_request')
             raise Invalid('tag_id is not implemented yet')
 
-        if self.share_payload is not None:
-            if payload['content_type'] != 'VideoMetadata':
-                raise ForbiddenError('Content token is not for videos')
-            if payload['content_id'] != args['video_id']:
-                raise ForbiddenError('Content token is not for this video')
-
         # We are building the composite for a video
-        video = yield neondata.VideoMetadata.get(
-            neondata.InternalVideoID.generate(account_id, external_video_id),
-            async=True)
+        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
         if video is None:
+            statemon.state.increment('social_image_invalid_request')
             raise Invalid('Invalid video id')
 
         base_thumb, best_thumb = yield self._get_thumbs(video)
@@ -3290,6 +3306,7 @@ class SocialImageHandler(ShareableContentHandler):
         self.set_status(200)
         self.write(buf.getvalue())
         self.finish()
+        statemon.state.increment('social_image_generated')
 
     @tornado.gen.coroutine
     def _build_image(self, base_thumb, best_thumb):
@@ -3329,6 +3346,7 @@ class SocialImageHandler(ShareableContentHandler):
     @tornado.gen.coroutine
     def _get_350_image(self, thumb):
         '''Returns a PIL image that is 350x350 of a given thumb.'''
+        is_download_error = False
         # First see if there's a serving url we can grab
         urls = yield neondata.ThumbnailServingURLs.get(thumb.key, async=True)
         if urls is not None:
@@ -3339,16 +3357,17 @@ class SocialImageHandler(ShareableContentHandler):
             except KeyError:
                 pass
             except IOError:
-                pass
+                is_download_error = True
 
         # We could not get the correct sized image, so cut it
         full_im = None
         for url in thumb.urls:
+            is_download_error = False
             try:
                 full_im = yield PILImageUtils.download_image(url, async=True)
                 break
             except IOError:
-                pass
+                is_download_error = True
             
         if full_im:
             cv_im = utils.pycvutils.resize_and_crop(
@@ -3357,8 +3376,15 @@ class SocialImageHandler(ShareableContentHandler):
                 350)
             raise tornado.gen.Return(PILImageUtils.from_cv(cv_im))
 
-        raise Invalid('Could not generate a rendition for image: %s' % 
-                      thumb.key)
+        if is_download_error:
+            msg = 'Error downloading source image for thumb %s' % thumb.key
+            _log.error(msg)
+            raise ResourceDownloadError(msg)
+        else:
+            msg = ('Could not generate a rendition for image: %s' % 
+                    thumb.key)
+            _log.warn(msg)
+            raise Invalid(msg)
 
     @tornado.gen.coroutine
     def _find_thumb(self, thumb_ids, types, sort_key=lambda x: x.rank):
@@ -3393,7 +3419,7 @@ class SocialImageHandler(ShareableContentHandler):
         job_thumb_ids = (thumb_group[0].thumbnail_ids if any(thumb_group) 
                          else None)
         if not job_thumb_ids:
-            job_thumbs_ids = video.thumbnail_ids
+            job_thumb_ids = video.thumbnail_ids
 
         job_thumbs = yield neondata.ThumbnailMetadata.get_many(job_thumb_ids,
                                                                async=True)

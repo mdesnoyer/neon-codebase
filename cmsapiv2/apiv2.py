@@ -811,7 +811,7 @@ class ShareableContentHandler(APIV2Handler):
                     video = yield neondata.VideoMetadata.get(pl_key, async=True)
                     # Getting the video implicitly validates the account id.
                     if video is None:
-                        raise tornado.gen.Return(False)
+                        raise NotAuthorizedError('Invalid token')
                     # Keep the valid payload around for security checks.
                     request.share_payload = payload
                     raise tornado.gen.Return(True)
@@ -985,10 +985,13 @@ class SaveError(Error):
         self.msg = msg
         self.code = code
 
-class SubmissionError(tornado.web.HTTPError):
+class InternalError(Error):
     def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR):
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
+
+class SubmissionError(InternalError): pass
+class ResourceDownloadError(InternalError): pass
  
 class NotFoundError(tornado.web.HTTPError):
     def __init__(self,
