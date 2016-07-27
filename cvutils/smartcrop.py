@@ -466,7 +466,7 @@ class SmartCrop(object):
         center_horizontal = width / 2
         center_vertical = height / 2
         new_x = center_horizontal - new_width / 2
-        new_y = center_vertical - height / 2
+        new_y = center_vertical - new_height / 2
 
 
         if self.with_saliency:
