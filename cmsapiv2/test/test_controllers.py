@@ -5971,6 +5971,22 @@ class TestVideoSearchInternalHandler(TestVerifiedControllersBase):
         self.assertEquals(rjson['video_count'], 2)
 
     @tornado.testing.gen_test
+    def test_search_no_api_request(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)
+        yield neondata.NeonApiRequest('job1',
+            'kevin',
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+
+    @tornado.testing.gen_test
     def test_search_get_newer_prev_page(self):
         video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
         yield video.save(async=True)
@@ -6176,6 +6192,24 @@ class TestVideoSearchExternalHandler(TestVerifiedControllersBase):
                                                 method='GET')
         rjson = json.loads(response.body)
         self.assertEquals(rjson['video_count'], 2)
+
+    @tornado.testing.gen_test
+    def test_search_no_api_request(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)
+        yield neondata.NeonApiRequest('job2',
+            'kevin',
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/kevin/videos/search?fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        videos = rjson['videos']
+        self.assertEquals(videos[0]['video_id'], 'vid2') 
+        self.assertEquals(rjson['video_count'], 1)
 
     @tornado.testing.gen_test
     def test_search_get_older_prev_page(self):
