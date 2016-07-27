@@ -75,7 +75,7 @@ class TestSmartCrop(unittest.TestCase):
                         'test_crop_images/vertical_bad_resize.jpg'))
         smart_crop = smartcrop.SmartCrop(saliency_im, with_saliency=False)
         cropped_im = smart_crop.crop_and_resize(350, 350)                
-        # imshow(cropped_im)
+        # cv2.imshow('smart cropped vertical image', cropped_im)
         gist = features.MemCachedFeatures.create_shared_cache(
                         features.GistGenerator())
         gist_cropped = gist.generate(cropped_im)
