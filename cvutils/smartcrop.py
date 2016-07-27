@@ -292,7 +292,7 @@ class SmartCrop(object):
         if not upper_text_y_array:
             return self.image[y:y+height, x:x+width]
         upper_text_y = min(upper_text_y_array) - 3
-        new_height = upper_text_y - y
+        new_height = min(height, upper_text_y - y)
         new_width = new_height * width / height
         new_x = x + (width - new_width)/2
         new_x_end = x + new_width
