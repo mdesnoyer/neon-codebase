@@ -1595,7 +1595,7 @@ class VideoHelper(object):
                        job_ids,
                        async=True)
         for video, request in zip(videos, requests):
-            index +=1 
+            index += 1 
             if video is None or request is None:
                 if video_ids: 
                     new_videos.append({'error': 'video does not exist',		
