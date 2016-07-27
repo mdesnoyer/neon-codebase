@@ -67,3 +67,17 @@ class TestSmartCrop(unittest.TestCase):
         gist_cropped = gist.generate(cropped_im)
         gist_expected = gist.generate(expected_resize)
         self.assertLess(JSD(gist_cropped, gist_expected), 0.01)
+
+    def test_vertical_crop(self):
+        vertical_im = cv2.imread(os.path.join(os.path.dirname(__file__),
+                                          'test_crop_images/vertical.jpg'))
+        bad_crop = cv2.imread(os.path.join(os.path.dirname(__file__),
+                        'test_crop_images/vertical_bad_resize.jpg'))
+        smart_crop = smartcrop.SmartCrop(saliency_im, with_saliency=False)
+        cropped_im = smart_crop.crop_and_resize(350, 350)                
+        # imshow(cropped_im)
+        gist = features.MemCachedFeatures.create_shared_cache(
+                        features.GistGenerator())
+        gist_cropped = gist.generate(cropped_im)
+        gist_bad = gist.generate(bad_crop)
+        self.assertGreater(JSD(gist_cropped, gist_bad), 0.01)
