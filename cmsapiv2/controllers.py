@@ -1595,13 +1595,13 @@ class VideoHelper(object):
                        job_ids,
                        async=True)
         for video, request in zip(videos, requests):
+            index +=1 
             if video is None or request is None:
                 if video_ids: 
                     new_videos.append({'error': 'video does not exist',		
                         'video_id': video_ids[index] }) 
                 continue
 
-            index +=1 
             new_video = yield VideoHelper.db2api(video,
                                                  request,
                                                  fields)
