@@ -38,6 +38,7 @@ import jwt
 from mock import patch, DEFAULT, MagicMock
 from cmsdb import neondata
 from passlib.hash import sha256_crypt
+import PIL.Image
 from StringIO import StringIO
 from cvutils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
@@ -8283,6 +8284,83 @@ class TestEmailSupportHandler(TestControllersBase):
                 headers=self.headers,
                 body=body)
         self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
+
+class TestSocialImageGeneration(TestControllersBase):
+    def setUp(self):
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
+        self.acct.save()
+        self.account_id = self.acct.neon_api_key
+
+        # Mock out the verification
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+
+        # Setup a video with a couple of thumbnails in it
+        self.vid_id = neondata.InternalVideoID.generate(self.account_id,
+                                                        'vid1')
+        video = neondata.VideoMetadata(self.vid_id, 
+                                       non_job_thumb_ids=[
+                                           '%s_def' % self.vid_id],
+                                       job_results = [
+                                           neondata.VideoJobThumbnailList(
+                                               thumbnail_ids=[
+                                                   '%s_n1' % self.vid_id])])
+        video.save()
+        neondata.ThumbnailMetadata('%s_def' % self.vid_id,
+                                   ttype='default',
+                                   rank=0,
+                                   model_version='20160713-test',
+                                   model_score=0.2,
+                                   urls=['640x480']).save()
+        neondata.ThumbnailMetadata('%s_n1' % self.vid_id,
+                                   ttype='neon',
+                                   rank=1,
+                                   model_version='20160713-test',
+                                   model_score=0.4).save()
+        urls = neondata.ThumbnailServingURLs('%s_n1' % self.vid_id)
+        urls.add_serving_url('350x350', 350, 350)
+        urls.save()
+
+        # Mock out the image download
+        self.im_download_mocker = patch(
+            'cvutils.imageutils.PILImageUtils.download_image')
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start(), require_async_kw=True)
+
+        def _generate_image(url):
+            w, h = url.split('x')
+            return PILImageUtils.create_random_image(int(h), int(w))
+        self.im_download_mock.side_effect = _generate_image
+        
+        super(TestSocialImageGeneration, self).setUp()
+
+    def tearDown(self):
+        self.im_download_mocker.stop()
+        self.verify_account_mocker.stop()
+        super(TestSocialImageGeneration, self).tearDown()
+
+    @tornado.gen.coroutine
+    def get_response_image(self, video_id):
+        url = self.get_url('/api/v2/{}/social/image?video_id={}'.format(
+            self.account_id, video_id))
+        response = yield self.http_client.fetch(url, method='GET')
+
+        raise tornado.gen.Return((PIL.Image.open(response.buffer), response))
+
+    @tornado.testing.gen_test
+    def basic_test(self):
+        im, response = yield self.get_response_image('vid1')
+
+        self.assertEquals(response.code, 200)
+        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+
+        # Uncomment this to see the image for manual inspection purposes
+        #im.show()
+        
 
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
