@@ -563,6 +563,58 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
 
+    @tornado.testing.gen_test
+    def test_download_youtube_with_list_param(self):
+
+        url = 'https://www.youtube.com/watch?v=k8tzfpeyPzw'
+        url_with_list = url + '&list=%s&index=%d' % (
+            'PLV4p_y6bK69puhKH0ddPgGNlEy3jMaRSw',
+            8)
+
+        def _extracted_info(cur_url, download):
+            if cur_url == url:
+                return {
+                    u'_type': u'video',
+                    u'upload_date': u'20140415',
+                    u'protocol': u'https',
+                    u'height': 720,
+                    u'like_count': 118845,
+                    u'player_url': u'//s.ytimg.com/yts/jsbin/player-en_US-vflIB5TLK/base.js',
+                    u'id': 'k8tzfpeyPzw',
+                    u'view_count': 1100328,
+                    u'webpage_url': u'https://www.youtube.com/watch?v=k8tzfpeyPzw'}
+            elif cur_url == url_with_list:
+                return {
+                    u'_type': u'playlist',
+                    u'upload_date': u'20140415',
+                    u'protocol': u'https',
+                    u'height': 720,
+                    u'like_count': 118845,
+                    u'player_url': u'//s.ytimg.com/yts/jsbin/player-en_US-vflIB5TLK/base.js',
+                    u'id': 'k8tzfpeyPzw',
+                    u'view_count': 1100328,
+                    u'webpage_url': u'https://www.youtube.com/watch?v=k8tzfpeyPzw'}
+            raise Error('Wrong')
+        self.youtube_extract_info_mock.side_effect = _extracted_info
+
+        vp = self.setup_video_processor('neon', url=url_with_list)
+        yield vp.download_video_file()
+        # We expect the url without the list and index params.
+        self.assertEqual(url, self.youtube_extract_info_mock.call_args[0][0])
+        self.assertTrue(self.youtube_extract_info_mock.call_args[1]['download'])
+
+    @tornado.testing.gen_test
+    def test_no_download_youtube_playlist(self):
+        url = u'https://www.youtube.com/playlist?list=PLV4p_y6bK69puhKH0ddPgGNlEy3jMaRSw'
+        self.youtube_extract_info_mock.return_value = {
+            u'_type': u'playlist',
+            u'entries': [1, 2],
+            u'webpage_url': url}
+        vp = self.setup_video_processor('neon', url=url)
+        with self.assertRaises(video_processor.client.VideoDownloadError) as e:
+            yield vp.download_video_file()
+        self.assertRegexpMatches(e.exception.message, r'(?i)Unhandled video type')
+
     @patch('video_processor.client.model.generate_model')
     @tornado.testing.gen_test
     def test_fail_and_retry(self, model_mock):

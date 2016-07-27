@@ -8,13 +8,17 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+from cvutils.imageutils import PILImageUtils
 import dateutil.parser
 import model.predictor
 import numpy as np
 import PIL.Image
+import PIL.ImageDraw
+import PIL.ImageFont
 import re
 import io
-import StringIO
+from cStringIO import StringIO
+import utils.pycvutils
 
 import cmsapiv2.client
 import fractions
@@ -48,6 +52,9 @@ statemon.define('post_video_oks', int)
 statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
+
+statemon.define('social_image_generated', int)
+statemon.define('social_image_invalid_request', int)
 
 '''*****************************************************************
 AccountHandler
@@ -1516,8 +1523,8 @@ class VideoHelper(object):
                                                         age=age) for
                                 x in thumbnails]
             renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
-            for thumbnail in thumbnails:
-                thumbnail['renditions'] = renditions[thumbnail['thumbnail_id']]
+            for thumbnail, tid in zip(*(thumbnails, tids)):
+                thumbnail['renditions'] = renditions[tid]
 
         raise tornado.gen.Return(thumbnails)
 
@@ -1634,13 +1641,13 @@ class VideoHelper(object):
         if not video.duration or int(video.duration) <= 0: 
             return 0.0  
 
-        est_process_time = 2.5 * video.duration
+        est_process_time = 2.8 * video.duration
         updated_ts = dateutil.parser.parse(
             request.updated)
         utc_now = datetime.utcnow()
         diff = (utc_now - updated_ts).total_seconds()
  
-        return max(float(est_process_time - diff), 60.0)
+        return max(float(est_process_time - diff), 0.0)
 
     @staticmethod
     @tornado.gen.coroutine
@@ -3236,6 +3243,187 @@ class EmailSupportHandler(APIV2Handler):
     def get_access_levels(cls):
         return {HTTPVerbs.POST: neondata.AccessLevels.NONE}
 
+class SocialImageHandler(ShareableContentHandler):
+    '''Endpoint that creates composite images to share on social'''
+
+    # Maps the platform name to 
+    # (image_width, image_height, box_height, font_size)
+    PLATFORM_MAP = {
+        'twitter' : (875, 500, 70, 38),
+        'facebook' : (800, 800, 67, 38),
+        '' : (800, 800, 67, 38),
+        None : (800, 800, 67, 38)
+    }
+
+    @tornado.gen.coroutine
+    def get(self, account_id, platform):
+        '''On 200, returns a JPG image for sharing on social that is 
+        composed of the baseline thumb and our best thumb.
+        '''
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Optional('platform'): In(['twitter', '', None, 'facebook']),
+            Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
+            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256))})
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+
+        external_video_id = args.get('video_id')
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id, external_video_id)
+        tag_id = args.get('tag_id')
+        
+        # See if we can get the asset id from the payload
+        if self.share_payload is not None:
+            if self.share_payload['content_type'] != 'VideoMetadata':
+                statemon.state.increment('social_image_invalid_request')
+                raise ForbiddenError('Content token is not for videos')
+            if external_video_id is not None:
+                if self.share_payload['content_id'] != internal_video_id:
+                    statemon.state.increment('social_image_invalid_request')
+                    raise ForbiddenError('Content token is not for this video')
+            else:
+                # Grab the video id from the payload
+                internal_video_id = self.share_payload['content_id']
+                external_video_id = neondata.InternalVideoID.to_external(
+                    internal_video_id)
+                
+        if (external_video_id is None) == (tag_id is None):
+            statemon.state.increment('social_image_invalid_request')
+            raise Invalid('Exactly one of video_id or tag_id is required')
+        if tag_id is not None:
+            # TODO(nate, mdesnoyer): wire this up for image
+            # collections when we are ready for it.
+            statemon.state.increment('social_image_invalid_request')
+            raise Invalid('tag_id is not implemented yet')
+
+        # Get the size needs based on the platform
+        width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
+            platform]
+            
+
+        # We are building the composite for a video
+        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
+        if video is None:
+            statemon.state.increment('social_image_invalid_request')
+            raise Invalid('Invalid video id')
+
+        best_thumb = yield self._get_best_thumb(video)
+
+        # Now, we build the image. Hooray
+        image = yield self._build_image(best_thumb, width, height, box_height,
+                                        font_size)
+        buf = StringIO()
+        image.save(buf, 'jpeg', quality=90)
+
+        # Finally, write the image data to JPEG in the output
+        self.set_header('Content-Type', 'image/jpg')
+        self.set_status(200)
+        self.write(buf.getvalue())
+        self.finish()
+        statemon.state.increment('social_image_generated')
+
+    @tornado.gen.coroutine
+    def _build_image(self, best_thumb, width, height, box_height, font_size):
+        canvas = yield self._get_image_of_size(best_thumb, width, height)
+
+        # Draw the icon on the good thumbnail
+        icon = PIL.Image.open(os.path.join(
+            os.path.dirname(__file__), 'images', 'NeonScore.png'))
+        icon = icon.resize(
+            (icon.size[0] * box_height / icon.size[1], box_height),
+            PIL.Image.ANTIALIAS)
+        canvas.paste(icon, (0, height-box_height), mask=icon.split()[3])
+
+        # Write the scores
+        font = PIL.ImageFont.truetype(
+            os.path.join(os.path.dirname(__file__), 'fonts', 'balto-book.otf'),
+            size=font_size,
+            index=0)
+        draw = PIL.ImageDraw.Draw(canvas)
+        draw.text((int(box_height + 0.24*box_height),
+                   int(height-box_height+0.22*box_height)),
+                  '%2d' % best_thumb.get_neon_score(),
+                  font=font, fill='#FFFFFF')
+
+        raise tornado.gen.Return(canvas)
+
+    @tornado.gen.coroutine
+    def _get_image_of_size(self, thumb, width, height):
+        '''Returns a PIL image that is WxH of a given thumb.'''
+        is_download_error = False
+        # First see if there's a serving url we can grab
+        urls = yield neondata.ThumbnailServingURLs.get(thumb.key, async=True)
+        if urls is not None:
+            try:
+                url = urls.get_serving_url(width, height)
+                im = yield PILImageUtils.download_image(url, async=True)
+                raise tornado.gen.Return(im)
+            except KeyError:
+                pass
+            except IOError:
+                is_download_error = True
+
+        # We could not get the correct sized image, so cut it
+        full_im = None
+        for url in thumb.urls:
+            is_download_error = False
+            try:
+                full_im = yield PILImageUtils.download_image(url, async=True)
+                break
+            except IOError:
+                is_download_error = True
+            
+        if full_im:
+            cv_im = utils.pycvutils.resize_and_crop(
+                PILImageUtils.to_cv(full_im),
+                height,
+                width)
+            raise tornado.gen.Return(PILImageUtils.from_cv(cv_im))
+
+        if is_download_error:
+            msg = 'Error downloading source image for thumb %s' % thumb.key
+            _log.error(msg)
+            raise ResourceDownloadError(msg)
+        else:
+            msg = ('Could not generate a rendition for image: %s' % 
+                    thumb.key)
+            _log.warn(msg)
+            raise Invalid(msg)
+
+    @tornado.gen.coroutine
+    def _get_best_thumb(self, video):
+        '''Returns the (base, best) ThumbnailMetadata objects.'''
+
+        # Get the job thumbnails
+        thumb_group = [x for x in video.job_results 
+                       if x.age is None and x.gender is None]
+        job_thumb_ids = (thumb_group[0].thumbnail_ids if any(thumb_group) 
+                         else None)
+        if not job_thumb_ids:
+            job_thumb_ids = video.thumbnail_ids
+
+        job_thumbs = yield neondata.ThumbnailMetadata.get_many(job_thumb_ids,
+                                                               async=True)
+
+        job_thumbs = [x for x in job_thumbs if x is not None and
+                      x.type == neondata.ThumbnailType.NEON]
+        
+        if len(job_thumbs) == 0:
+            raise Invalid('Video does not have any valid good thumbs')
+
+        # Sort the job thumbs ascending by model score
+        job_thumbs = sorted(job_thumbs, key=lambda x: x.get_score())
+
+        best_thumb = job_thumbs[-1]
+
+        raise tornado.gen.Return(best_thumb)
+
+    @classmethod
+    def get_access_levels(cls):
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
+
 
 '''*********************************************************************
 Endpoints
@@ -3268,6 +3456,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/social/image/?([a-z]*)/?$', SocialImageHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/estimated_lift/?$', LiftStatsHandler),
