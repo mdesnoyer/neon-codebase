@@ -3147,7 +3147,8 @@ class TestVideoHandler(TestControllersBase):
             testing_enabled=False,
             duration=31.5,
             custom_data={'my_data' : 'happygo'},
-            tids=['vid1_t1', 'vid1_t2'])
+            tids=['vid1_t1', 'vid1_t2'],
+            share_token='a_token')
         vm.save()
         thumbs = [neondata.ThumbnailMetadata('vid1_t1', 'vid1', ['here.com']),
                   neondata.ThumbnailMetadata('vid1_t2', 'vid1', ['there.com'])]
@@ -3161,7 +3162,8 @@ class TestVideoHandler(TestControllersBase):
         url = '/api/v2/%s/videos?video_id=vid1'\
               '&fields=state,integration_id,testing_enabled,'\
               'job_id,title,video_id,serving_url,publish_date,'\
-              'thumbnails,duration,custom_data,demographic_thumbnails' % (
+              'thumbnails,duration,custom_data,demographic_thumbnails,'\
+              'share_token' % (
                   self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
@@ -3178,6 +3180,7 @@ class TestVideoHandler(TestControllersBase):
             'serving_url' : None,
             'publish_date' : '2015-06-10',
             'duration' : 31.5,
+            'share_token': 'a_token',
             'custom_data' : {'my_data' : 'happygo'},
             'error' : 'Some error'
             },
