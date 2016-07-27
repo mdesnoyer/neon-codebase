@@ -1599,7 +1599,7 @@ class VideoHelper(object):
             if video is None or request is None:
                 if video_ids: 
                     new_videos.append({'error': 'video does not exist',		
-                        'video_id': video_ids[index] }) 
+                        'video_id': video_ids[index-1] }) 
                 continue
 
             new_video = yield VideoHelper.db2api(video,
