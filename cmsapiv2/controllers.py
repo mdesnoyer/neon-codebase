@@ -3299,7 +3299,7 @@ class SocialImageHandler(ShareableContentHandler):
         # Now, we build the image. Hooray
         image = yield self._build_image(base_thumb, best_thumb)
         buf = StringIO()
-        image.save(buf, 'jpeg')
+        image.save(buf, 'jpeg', quality=85)
 
         # Finally, write the image data to JPEG in the output
         self.set_header('Content-Type', 'image/jpg')
@@ -3310,13 +3310,13 @@ class SocialImageHandler(ShareableContentHandler):
 
     @tornado.gen.coroutine
     def _build_image(self, base_thumb, best_thumb):
-        canvas = PIL.Image.new("RGB", (705, 350), (255, 255, 255))
+        canvas = PIL.Image.new("RGB", (703, 350), (255, 255, 255))
 
         # Paste on the images
         base_im = yield self._get_350_image(base_thumb)
         canvas.paste(base_im, (0, 0))
         best_im = yield self._get_350_image(best_thumb)
-        canvas.paste(best_im, (355, 0))
+        canvas.paste(best_im, (353, 0))
 
         # Draw the default thumbnail grey box
         BOX_HEIGHT = 30
@@ -3328,7 +3328,7 @@ class SocialImageHandler(ShareableContentHandler):
         icon = icon.resize(
             (icon.size[0] * BOX_HEIGHT / icon.size[1], BOX_HEIGHT),
             PIL.Image.ANTIALIAS)
-        canvas.paste(icon, (355, 350-BOX_HEIGHT), mask=icon.split()[3])
+        canvas.paste(icon, (353, 350-BOX_HEIGHT), mask=icon.split()[3])
 
         # Write the scores
         font = PIL.ImageFont.truetype(
@@ -3338,7 +3338,7 @@ class SocialImageHandler(ShareableContentHandler):
         draw = PIL.ImageDraw.Draw(canvas)
         draw.text((7, 356-BOX_HEIGHT), '%2d' % base_thumb.get_neon_score(),
                   font=font, fill='#FFFFFF')
-        draw.text((391, 356-BOX_HEIGHT), '%2d' % best_thumb.get_neon_score(),
+        draw.text((389, 356-BOX_HEIGHT), '%2d' % best_thumb.get_neon_score(),
                   font=font, fill='#FFFFFF')
 
         raise tornado.gen.Return(canvas)
