@@ -338,6 +338,9 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
         _log.info('deleting {key}'.format(key=key.name))
         key.delete()
 
+    # Wait for the $folder$ to show up, then delete it
+    time.sleep(120)
+
     # delete the _$folder$ key if it exists
     for key in s3.get_bucket(output_bucket).list(prefix=output_prefix):
         if re.search('folder', key.name):
@@ -356,7 +359,7 @@ def check_for_prefix(tai_prefix, bucket_name):
 
     bucket = s3.get_bucket(bucket_name)
     list_prefix = bucket.list(prefix=tai_prefix, delimiter='/')
-    prefix_exists = [p.name for p in list_prefix if p.name]
+    prefix_exists = [prefixes.name for prefixes in list_prefix if prefixes.name]
 
     return True if prefix_exists else False
 
