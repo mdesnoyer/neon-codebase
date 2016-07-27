@@ -27,7 +27,6 @@ if sys.path[0] != __base_path__:
 
 from airflow import DAG
 from airflow.configuration import conf, AirflowConfigException
-from airflow.hooks.S3_hook import S3Hook
 from airflow.operators.python_operator import PythonOperator, BranchPythonOperator
 from airflow.operators.dummy_operator import DummyOperator
 # from airflow.operators.bash_operator import BashOperator
@@ -215,7 +214,7 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
 
     bucket_name, prefix = _get_s3_tuple(input_path)
 
-    s3 = S3Hook(s3_conn_id='s3')
+    s3 = S3Connection()
 
     processing_date = execution_date.strftime('%Y/%m/%d')
     _log.info('processing date is %s' % processing_date)
@@ -225,16 +224,14 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
         tai_prefix = os.path.join(prefix, tai, processing_date, '')
 
         #check if the prefix exists
-        prefix_exists = s3.check_for_prefix(prefix=tai_prefix, 
-                                            bucket_name=bucket_name, 
-                                            delimiter='/')
+        prefix_exists = check_for_prefix(prefix=tai_prefix, 
+                                        bucket_name=bucket_name)
 
         # Get the S3 keys only if prefix exists
         if prefix_exists:
-            for key in s3.list_keys(bucket_name=bucket_name, 
-                                    prefix=tai_prefix, 
-                                    delimiter='/'):
-                input_files.append(key)
+            for key in get_keys(bucket_name=bucket_name, 
+                                    prefix=tai_prefix):
+                input_files.append(key.name)
         else:
             _log.info(("tai {tai} does not have any objects in S3 prefix "
                           "{prefix}").format(tai=tai, prefix=tai_prefix))
@@ -264,13 +261,15 @@ def _get_s3_tais(input_path):
     """
     bucket_name, prefix = _get_s3_tuple(input_path)
 
-    s3 = S3Hook(s3_conn_id='s3')
+    s3 = S3Connection()
+
+    bucket = s3.get_bucket(bucket_name)
+    prefix_list = bucket.list(prefix=prefix, delimiter='/')
 
     # get the TAIs (Tracker Account Id)
     tais = []
-    for key in s3.list_prefixes(bucket_name=bucket_name, prefix=prefix,
-                                delimiter='/'):
-        tokens = key.split('/')
+    for key in prefix_list:
+        tokens = key.name.split('/')
         if re.search(TAI, tokens[1]):
             tais.append(tokens[1])
     return tais
@@ -299,7 +298,7 @@ def _delete_s3_prefix(bucket, prefix):
                 bucket=bucket, prefix=prefix))
             return False
 
-    s3 = S3Hook(s3_conn_id='s3')
+    s3 = S3Connection()
 
     for key in s3.get_bucket(bucket).list(prefix):
         key.delete()
@@ -328,7 +327,7 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     output_bucket, output_prefix = _get_s3_tuple(output_path)
     cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                             prefix=output_prefix)
-    s3 = S3Hook(s3_conn_id='s3')
+    s3 = S3Connection()
 
     _log.info('deleting previously cleaned files from prefix {prefix}'.format(
         prefix=cleaned_prefix))
@@ -342,11 +341,39 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
         key.delete()
 
     # delete the _$folder$ key if it exists
-    folder_key = s3.get_key(key='{prefix}_$folder$'.format(
-        prefix=cleaned_prefix.rstrip('/')),
-        bucket_name=output_bucket)
-    if folder_key:
-        folder_key.delete()
+    for key in s3.get_bucket(output_bucket).list(prefix=output_prefix):
+        if re.search('folder', key.name):
+            _log.info("Found $folder$ file in %s, deleting it" % key.name)
+            key.delete()
+
+
+def check_for_prefix(tai_prefix, bucket_name):
+    """
+    Check if an S3 prefix exists
+    """
+    s3 = S3Connection()
+
+    _log.info('check for prefix')
+    _log.info('prefix is %s' % tai_prefix)
+
+    bucket = s3.get_bucket(bucket_name)
+    list_prefix = bucket.list(prefix=tai_prefix, delimiter='/')
+    prefix_exists = [p.name for p in list_prefix if p.name]
+
+    return True if prefix_exists else False
+
+
+def get_keys(tai_prefix, bucket_name):
+    """
+    Get the s3 keys to be copied
+    """
+    s3 = S3Connection()
+
+    bucket = s3.get_bucket(bucket_name)
+    list_keys = list(bucket.list(prefix=tai_prefix, delimiter='/'))
+
+    return list_keys
+
 
 def check_first_run(execution_date):
     """
@@ -386,7 +413,6 @@ def _quiet_period(**kwargs):
 def _stage_files(**kwargs):
     """Copy input path files to staging area for the execution date
     """
-    #s3 = S3Hook(s3_conn_id='s3')
     s3 = S3Connection()
 
     dag = kwargs['dag']
@@ -397,7 +423,7 @@ def _stage_files(**kwargs):
 
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
-    if is_first_run:
+    if is_first_run and is_first_instance_run:
         _log.info("This is first run, skipping of stage files as none would exist")
         return
 
@@ -464,19 +490,14 @@ def _run_mr_cleaning_job(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
 
-    if is_first_run:
-        if is_first_instance_run:
-            hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
-            hdfs_dir = 'mnt/cleaned'
-            cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
-            cleaning_job_input_path = options.full_run_input_path
-            #cleaning_job_input_path = "s3://neon-tracker-logs-v2/v2.2/2089095449/2016/07/*/*"
-            _log.info("Increasing the number of task instances to %s" % options.max_task_instances)
-            cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
-        else:
-            _log.info("mr job not required to be run for this run hour %s" %
-                      execution_date.strftime("%Y/%m/%d/%H"))
-            return
+    if is_first_run and is_first_instance_run:
+        hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
+        hdfs_dir = 'mnt/cleaned'
+        cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
+        #cleaning_job_input_path = options.full_run_input_path
+        cleaning_job_input_path = "s3://neon-tracker-logs-v2/v2.2/2089095449/2016/07/*/*"
+        _log.info("Increasing the number of task instances to %s" % options.max_task_instances)
+        cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
 
     _log.info("Output of clean up job goes to %s" % cleaning_job_output_path)
     _log.info("Input for clean up job is %s" % cleaning_job_input_path)
@@ -517,16 +538,10 @@ def _load_impala_table(**kwargs):
 
     # The first run is going to be big. So provision sufficient number of task instances to enable
     # faster completion. Bring down the number of task instances to zero later on when complete
-
-    if is_first_run:
-        if is_first_instance_run:
-            _log.info("This is first & big run, bumping up the num of task instances to %s" %
-                options.max_task_instances)
-            cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
-        else:
-            _log.info("Not required to build impala tables for this run hour %s" 
-                      % execution_date.strftime("%Y/%m/%d/%H"))
-            return
+    if is_first_run and is_first_instance_run:
+        _log.info("This is first & big run, bumping up the num of task instances to %s" %
+            options.max_task_instances)
+        cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
 
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
     cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
@@ -565,7 +580,7 @@ def _delete_staging_files(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
 
-    if is_first_run:
+    if is_first_run and is_first_instance_run:
         _log.info("This is first run, skipping delete of stage files as none would exist")
         return
 
@@ -594,14 +609,9 @@ def _execution_date_has_input_files(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
 
-    if is_first_run:
-        if is_first_instance_run:
-            _log.info("This is first run, skipping the check for existence of files")
-            return 'stage_files'
-        else:
-            _log.info("Not required to check for existence of files for this run hour %s" 
-                      % execution_date.strftime("%Y/%m/%d/%H"))
-            return 'no_input_files'
+    if is_first_run and is_first_instance_run:
+        _log.info("This is first run, skipping the check for existence of files")
+        return 'stage_files'
 
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
 
@@ -624,14 +634,9 @@ def _update_table_build_times(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
 
-    if is_first_run:
-        if is_first_instance_run:
-            _log.info("First & big run is complete, bring down the num of task instances to zero")
-            cluster.change_instance_group_size(group_type='TASK', new_size=0)
-        else:
-            _log.info("Not required to build impala tables for this run hour %s" 
-                      % execution_date.strftime("%Y/%m/%d/%H"))
-            return
+    if is_first_run and is_first_instance_run:
+        _log.info("First & big run is complete, bring down the num of task instances to zero")
+        cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
     stats.impala_table.update_table_build_times(cluster)
 
