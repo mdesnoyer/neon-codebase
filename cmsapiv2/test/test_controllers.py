@@ -38,6 +38,7 @@ import jwt
 from mock import patch, DEFAULT, MagicMock
 from cmsdb import neondata
 from passlib.hash import sha256_crypt
+import PIL.Image
 from StringIO import StringIO
 from cvutils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
@@ -267,7 +268,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestNewAccountHandler, self).setUp()
 
     def tearDown(self):
@@ -614,7 +615,7 @@ class TestAccountHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestAccountHandler, self).setUp()
 
     def tearDown(self):
@@ -772,7 +773,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestAuthUserHandler, self).setUp()
 
     def tearDown(self):
@@ -1328,7 +1329,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestOoyalaIntegrationHandler, self).setUp()
 
     def tearDown(self):
@@ -1492,7 +1493,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestBrightcoveIntegrationHandler, self).setUp()
 
     def tearDown(self):
@@ -2213,7 +2214,7 @@ class TestVideoHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         self.maxDiff = 5000
 
         # Mock the video queue
@@ -3953,7 +3954,7 @@ class TestThumbnailHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
 
         super(TestThumbnailHandler, self).setUp()
 
@@ -4583,7 +4584,7 @@ class TestVideoStatsHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestVideoStatsHandler, self).setUp()
 
     def tearDown(self):
@@ -4680,7 +4681,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         neondata.ThumbnailMetadata('testingtid', width=800).save()
         neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
         neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
@@ -4902,7 +4903,7 @@ class TestLiftStatsHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
 
         self.account_id = 'testaccount'
         self.video_id = '%s_%s' % (self.account_id, 'testvid')
@@ -5904,7 +5905,7 @@ class TestVerifiedControllersBase(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestVerifiedControllersBase, self).setUp()
 
     def tearDown(self):
@@ -6305,7 +6306,7 @@ class TestAccountIntegrationsHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestAccountIntegrationsHandler, self).setUp()
 
     def tearDown(self):
@@ -6404,7 +6405,7 @@ class TestBillingAccountHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestBillingAccountHandler, self).setUp()
 
     def tearDown(self):
@@ -6686,7 +6687,7 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestBillingSubscriptionHandler, self).setUp()
 
     def tearDown(self):
@@ -7311,7 +7312,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
 
         # Create a mock integration
         self.integration = neondata.BrightcoveIntegration(
@@ -7745,7 +7746,7 @@ class TestForgotPasswordHandler(TestAuthenticationBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.verify_account_mock.return_value = True
         super(TestForgotPasswordHandler, self).setUp()
 
     def tearDown(self):
@@ -8283,6 +8284,269 @@ class TestEmailSupportHandler(TestControllersBase):
                 headers=self.headers,
                 body=body)
         self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
+
+class TestSocialImageGeneration(TestControllersBase):
+    def setUp(self):
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
+        self.acct.save()
+        self.account_id = self.acct.neon_api_key
+
+        # Mock out the verification
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.return_value = True
+
+        # Setup a video with a couple of thumbnails in it
+        self.vid_id = neondata.InternalVideoID.generate(self.account_id,
+                                                        'vid1')
+        video = neondata.VideoMetadata(self.vid_id, 
+                                       non_job_thumb_ids=[
+                                           '%s_def' % self.vid_id],
+                                       job_results = [
+                                           neondata.VideoJobThumbnailList(
+                                               thumbnail_ids=[
+                                                   '%s_n1' % self.vid_id])])
+        video.save()
+        neondata.ThumbnailMetadata('%s_def' % self.vid_id,
+                                   ttype='default',
+                                   rank=0,
+                                   model_version='20160713-test',
+                                   model_score=0.2,
+                                   urls=['640x480']).save()
+        neondata.ThumbnailMetadata('%s_n1' % self.vid_id,
+                                   ttype='neon',
+                                   rank=1,
+                                   model_version='20160713-test',
+                                   model_score=0.4).save()
+        urls = neondata.ThumbnailServingURLs('%s_n1' % self.vid_id)
+        urls.add_serving_url('350x350', 350, 350)
+        urls.save()
+
+        # Mock out the image download
+        self.im_download_mocker = patch(
+            'cvutils.imageutils.PILImageUtils.download_image')
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start(), require_async_kw=True)
+
+        def _generate_image(url):
+            w, h = url.split('x')
+            return PILImageUtils.create_random_image(int(h), int(w))
+        self.im_download_mock.side_effect = _generate_image
+        
+        super(TestSocialImageGeneration, self).setUp()
+
+    def tearDown(self):
+        self.im_download_mocker.stop()
+        self.verify_account_mocker.stop()
+        super(TestSocialImageGeneration, self).tearDown()
+
+    @tornado.gen.coroutine
+    def get_response_image(self, video_id):
+        url = self.get_url('/api/v2/{}/social/image?video_id={}'.format(
+            self.account_id, video_id))
+        response = yield self.http_client.fetch(url, method='GET')
+
+        raise tornado.gen.Return((PIL.Image.open(response.buffer), response))
+
+    @tornado.testing.gen_test
+    def test_basic(self):
+        im, response = yield self.get_response_image('vid1')
+
+        self.assertEquals(response.code, 200)
+        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+
+        # Uncomment this to see the image for manual inspection purposes
+        #im.show()
+
+    @tornado.testing.gen_test
+    def test_unknown_video_id(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.get_response_image('unknownvid')
+
+        self.assertEquals(e.exception.code, 400)
+        self.assertRegexpMatches(
+            json.loads(e.exception.response.body)['error']['message'],
+            'Invalid video id')
+
+    @tornado.testing.gen_test
+    def test_badparams(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url('/api/v2/{}/social/image?tag_id={}'.format(
+                    self.account_id, 'tag')))
+
+        self.assertEquals(e.exception.code, 400)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(
+                    '/api/v2/{}/social/image?tag_id={}&video_id={}'.format(
+                        self.account_id, 'tag', 'vid1')))
+
+        self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test
+    def test_good_payload(self):
+        self.verify_account_mock.side_effect = [NotAuthorizedError(
+            'Invalid token')]
+        response = yield self.http_client.fetch(
+            self.get_url('/api/v2/{}/social/image?video_id={}&'
+                         'share_token={}'.format(
+                             self.account_id, 'vid1',
+                             ShareJWTHelper.encode({
+                                 'content_type': 'VideoMetadata',
+                                 'content_id': '%s_vid1' % self.account_id}))))
+
+        self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_bad_payload(self):
+        self.verify_account_mock.side_effect = [
+            NotAuthorizedError('Invalid token'),
+            NotAuthorizedError('Invalid token')]
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url('/api/v2/{}/social/image?video_id={}&'
+                             'share_token={}'.format(
+                                 self.account_id, 'vid1',
+                                 ShareJWTHelper.encode({
+                                     'content_type': 'TagMetadata',
+                                     'content_id': '%s_vid1' % self.account_id
+                                     }))))
+
+        self.assertEquals(e.exception.code, 401)
+
+        neondata.VideoMetadata('%s_vid2' % self.account_id).save()
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url('/api/v2/{}/social/image?video_id={}&'
+                             'share_token={}'.format(
+                                 self.account_id, 'vid1',
+                                 ShareJWTHelper.encode({
+                                     'content_type': 'VideoMetadata',
+                                     'content_id': '%s_vid2' % self.account_id
+                                     }))))
+
+        self.assertEquals(e.exception.code, 403)
+
+    @tornado.testing.gen_test
+    def test_video_id_from_payload(self):
+        self.verify_account_mock.side_effect = [NotAuthorizedError(
+            'Invalid token')]
+        response = yield self.http_client.fetch(
+            self.get_url('/api/v2/{}/social/image?'
+                         'share_token={}'.format(
+                             self.account_id,
+                             ShareJWTHelper.encode({
+                                 'content_type': 'VideoMetadata',
+                                 'content_id': '%s_vid1' % self.account_id}))))
+
+        self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_old_video_format(self):
+        video = neondata.VideoMetadata(self.vid_id, 
+                                       tids=[
+                                           '%s_def' % self.vid_id,
+                                           '%s_n1' % self.vid_id])
+        video.save()
+
+        im, response = yield self.get_response_image('vid1')
+
+        self.assertEquals(response.code, 200)
+        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+
+    @tornado.testing.gen_test
+    def test_no_neon_thumb(self):
+        video = neondata.VideoMetadata(self.vid_id, 
+                                       tids=[
+                                           '%s_def' % self.vid_id])
+        video.save()
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.get_response_image('vid1')
+
+        self.assertEquals(e.exception.code, 400)
+        self.assertRegexpMatches(
+            json.loads(e.exception.response.body)['error']['message'],
+            'Video does not have any valid good thumbs')
+
+    @tornado.testing.gen_test
+    def test_no_default(self):
+        video = neondata.VideoMetadata(self.vid_id, 
+                                       tids=[
+                                           '%s_n1' % self.vid_id,
+                                           '%s_n2' % self.vid_id,
+                                           ])
+        video.save()
+        neondata.ThumbnailMetadata('%s_n2' % self.vid_id,
+                                   ttype='neon',
+                                   rank=1,
+                                   urls=['350x350'],
+                                   model_version='20160713-test',
+                                   model_score=0.1).save()
+
+        im, response = yield self.get_response_image('vid1')
+
+        self.assertEquals(response.code, 200)
+        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+
+    @tornado.testing.gen_test
+    def test_custom_upload_default(self):
+        video = neondata.VideoMetadata(self.vid_id, 
+                                       tids=[
+                                           '%s_n1' % self.vid_id,
+                                           '%s_def' % self.vid_id,
+                                           '%s_cust' % self.vid_id,
+                                           ])
+        video.save()
+        neondata.ThumbnailMetadata('%s_cust' % self.vid_id,
+                                   ttype='customupload',
+                                   rank=-1,
+                                   urls=['350x350'],
+                                   model_version='20160713-test',
+                                   model_score=0.8).save()
+
+        im, response = yield self.get_response_image('vid1')
+
+        self.assertEquals(response.code, 200)
+        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+
+    @tornado.testing.gen_test
+    def test_failed_image_download(self):
+        def _fail_download(x):
+            raise IOError('Ooops')
+        self.im_download_mock.side_effect = _fail_download
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Error downloading source image'):
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                yield self.get_response_image('vid1')
+
+        self.assertEquals(e.exception.code, 500)
+        self.assertRegexpMatches(
+            json.loads(e.exception.response.body)['error']['message'],
+            'Internal Server Error')
+
+    @tornado.testing.gen_test
+    def test_missing_rendition(self):
+        neondata.ThumbnailMetadata('%s_def' % self.vid_id,
+                                   ttype='default',
+                                   rank=0,
+                                   model_version='20160713-test',
+                                   model_score=0.2).save()
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.get_response_image('vid1')
+
+        self.assertEquals(e.exception.code, 400)
+        self.assertRegexpMatches(
+            json.loads(e.exception.response.body)['error']['message'],
+            'Could not generate a rendition')
 
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
