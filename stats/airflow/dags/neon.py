@@ -224,13 +224,11 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
         tai_prefix = os.path.join(prefix, tai, processing_date, '')
 
         #check if the prefix exists
-        prefix_exists = check_for_prefix(prefix=tai_prefix, 
-                                        bucket_name=bucket_name)
+        prefix_exists = check_for_prefix(tai_prefix, bucket_name)
 
         # Get the S3 keys only if prefix exists
         if prefix_exists:
-            for key in get_keys(bucket_name=bucket_name, 
-                                    prefix=tai_prefix):
+            for key in get_keys(tai_prefix, bucket_name):
                 input_files.append(key.name)
         else:
             _log.info(("tai {tai} does not have any objects in S3 prefix "
