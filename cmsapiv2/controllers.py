@@ -3315,7 +3315,7 @@ class SocialImageHandler(ShareableContentHandler):
         image = yield self._build_image(best_thumb, width, height, box_height,
                                         font_size)
         buf = StringIO()
-        image.save(buf, 'jpeg', quality=85)
+        image.save(buf, 'jpeg', quality=90)
 
         # Finally, write the image data to JPEG in the output
         self.set_header('Content-Type', 'image/jpg')
