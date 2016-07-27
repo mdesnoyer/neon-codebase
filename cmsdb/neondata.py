@@ -3077,6 +3077,8 @@ class CDNHostingMetadata(UnsaveableStoredObject):
             [480, 360],
             [640, 360],
             [640, 480],
+            [800, 800],
+            [875, 500],
             [1280, 720]]
 
         # the created and updated on these objects

@@ -3246,13 +3246,23 @@ class EmailSupportHandler(APIV2Handler):
 class SocialImageHandler(ShareableContentHandler):
     '''Endpoint that creates composite images to share on social'''
 
+    # Maps the platform name to 
+    # (image_width, image_height, box_height, font_size)
+    PLATFORM_MAP = {
+        'twitter' : (875, 500, 70, 38),
+        'facebook' : (800, 800, 67, 38),
+        '' : (800, 800, 67, 38),
+        None : (800, 800, 67, 38)
+    }
+
     @tornado.gen.coroutine
-    def get(self, account_id):
+    def get(self, account_id, platform):
         '''On 200, returns a JPG image for sharing on social that is 
         composed of the baseline thumb and our best thumb.
         '''
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Optional('platform'): In(['twitter', '', None, 'facebook']),
             Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
             Optional('tag_id'): All(Coerce(str), Length(min=1, max=256))})
         args = self.parse_args()
@@ -3288,16 +3298,22 @@ class SocialImageHandler(ShareableContentHandler):
             statemon.state.increment('social_image_invalid_request')
             raise Invalid('tag_id is not implemented yet')
 
+        # Get the size needs based on the platform
+        width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
+            platform]
+            
+
         # We are building the composite for a video
         video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
         if video is None:
             statemon.state.increment('social_image_invalid_request')
             raise Invalid('Invalid video id')
 
-        base_thumb, best_thumb = yield self._get_thumbs(video)
+        best_thumb = yield self._get_best_thumb(video)
 
         # Now, we build the image. Hooray
-        image = yield self._build_image(base_thumb, best_thumb)
+        image = yield self._build_image(best_thumb, width, height, box_height,
+                                        font_size)
         buf = StringIO()
         image.save(buf, 'jpeg', quality=85)
 
@@ -3309,50 +3325,40 @@ class SocialImageHandler(ShareableContentHandler):
         statemon.state.increment('social_image_generated')
 
     @tornado.gen.coroutine
-    def _build_image(self, base_thumb, best_thumb):
-        canvas = PIL.Image.new("RGB", (703, 350), (255, 255, 255))
-
-        # Paste on the images
-        base_im = yield self._get_350_image(base_thumb)
-        canvas.paste(base_im, (0, 0))
-        best_im = yield self._get_350_image(best_thumb)
-        canvas.paste(best_im, (353, 0))
-
-        # Draw the default thumbnail grey box
-        BOX_HEIGHT = 30
-        canvas.paste('#989898', (0, 350-BOX_HEIGHT, BOX_HEIGHT, 350))
+    def _build_image(self, best_thumb, width, height, box_height, font_size):
+        canvas = yield self._get_image_of_size(best_thumb, width, height)
 
         # Draw the icon on the good thumbnail
         icon = PIL.Image.open(os.path.join(
             os.path.dirname(__file__), 'images', 'NeonScore.png'))
         icon = icon.resize(
-            (icon.size[0] * BOX_HEIGHT / icon.size[1], BOX_HEIGHT),
+            (icon.size[0] * box_height / icon.size[1], box_height),
             PIL.Image.ANTIALIAS)
-        canvas.paste(icon, (353, 350-BOX_HEIGHT), mask=icon.split()[3])
+        canvas.paste(icon, (0, height-box_height), mask=icon.split()[3])
 
         # Write the scores
         font = PIL.ImageFont.truetype(
             os.path.join(os.path.dirname(__file__), 'fonts', 'balto-book.otf'),
-            size=17,
+            size=font_size,
             index=0)
         draw = PIL.ImageDraw.Draw(canvas)
-        draw.text((7, 356-BOX_HEIGHT), '%2d' % base_thumb.get_neon_score(),
-                  font=font, fill='#FFFFFF')
-        draw.text((389, 356-BOX_HEIGHT), '%2d' % best_thumb.get_neon_score(),
+        draw.text((int(box_height + 0.24*box_height),
+                   int(height-box_height+0.22*box_height)),
+                  '%2d' % best_thumb.get_neon_score(),
                   font=font, fill='#FFFFFF')
 
         raise tornado.gen.Return(canvas)
 
     @tornado.gen.coroutine
-    def _get_350_image(self, thumb):
-        '''Returns a PIL image that is 350x350 of a given thumb.'''
+    def _get_image_of_size(self, thumb, width, height):
+        '''Returns a PIL image that is WxH of a given thumb.'''
         is_download_error = False
         # First see if there's a serving url we can grab
         urls = yield neondata.ThumbnailServingURLs.get(thumb.key, async=True)
         if urls is not None:
             try:
-                url350 = urls.get_serving_url(350, 350)
-                im = yield PILImageUtils.download_image(url350, async=True)
+                url = urls.get_serving_url(width, height)
+                im = yield PILImageUtils.download_image(url, async=True)
                 raise tornado.gen.Return(im)
             except KeyError:
                 pass
@@ -3372,8 +3378,8 @@ class SocialImageHandler(ShareableContentHandler):
         if full_im:
             cv_im = utils.pycvutils.resize_and_crop(
                 PILImageUtils.to_cv(full_im),
-                350,
-                350)
+                height,
+                width)
             raise tornado.gen.Return(PILImageUtils.from_cv(cv_im))
 
         if is_download_error:
@@ -3387,31 +3393,8 @@ class SocialImageHandler(ShareableContentHandler):
             raise Invalid(msg)
 
     @tornado.gen.coroutine
-    def _find_thumb(self, thumb_ids, types, sort_key=lambda x: x.rank):
-        '''Returns the best thumb of type typ, or None.'''
-        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids,
-                                                           async=True)
-        for typ in types:
-            filtered_thumbs = [x for x in thumbs if x.type == typ]
-            filtered_thumbs = sorted(filtered_thumbs, key=sort_key)
-            if len(filtered_thumbs) > 0:
-                raise tornado.gen.Return(filtered_thumbs[0])
-        raise tornado.gen.Return(None)
-
-    @tornado.gen.coroutine
-    def _get_thumbs(self, video):
+    def _get_best_thumb(self, video):
         '''Returns the (base, best) ThumbnailMetadata objects.'''
-        
-        # Get the baseline thumbnail
-        base_thumb = yield self._find_thumb(
-            video.non_job_thumb_ids,
-            [neondata.ThumbnailType.CUSTOMUPLOAD,
-             neondata.ThumbnailType.DEFAULT])
-        if not base_thumb:
-            base_thumb = yield self._find_thumb(
-                video.thumbnail_ids,
-                [neondata.ThumbnailType.CUSTOMUPLOAD,
-                 neondata.ThumbnailType.DEFAULT])
 
         # Get the job thumbnails
         thumb_group = [x for x in video.job_results 
@@ -3434,11 +3417,8 @@ class SocialImageHandler(ShareableContentHandler):
         job_thumbs = sorted(job_thumbs, key=lambda x: x.get_score())
 
         best_thumb = job_thumbs[-1]
-        if not base_thumb:
-            # Use the worst thumb as the baseline thumbnail
-            base_thumb = job_thumbs[0]
 
-        raise tornado.gen.Return((base_thumb, best_thumb))
+        raise tornado.gen.Return(best_thumb)
 
     @classmethod
     def get_access_levels(cls):
@@ -3476,7 +3456,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/social/image/?$', SocialImageHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/social/image/?([a-z]*)/?$', SocialImageHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/estimated_lift/?$', LiftStatsHandler),

@@ -8322,7 +8322,8 @@ class TestSocialImageGeneration(TestControllersBase):
                                    model_version='20160713-test',
                                    model_score=0.4).save()
         urls = neondata.ThumbnailServingURLs('%s_n1' % self.vid_id)
-        urls.add_serving_url('350x350', 350, 350)
+        urls.add_serving_url('800x800', 800, 800)
+        urls.add_serving_url('875x500', 875, 500)
         urls.save()
 
         # Mock out the image download
@@ -8344,9 +8345,9 @@ class TestSocialImageGeneration(TestControllersBase):
         super(TestSocialImageGeneration, self).tearDown()
 
     @tornado.gen.coroutine
-    def get_response_image(self, video_id):
-        url = self.get_url('/api/v2/{}/social/image?video_id={}'.format(
-            self.account_id, video_id))
+    def get_response_image(self, video_id, platform=''):
+        url = self.get_url('/api/v2/{}/social/image/{}?video_id={}'.format(
+            self.account_id, platform, video_id))
         response = yield self.http_client.fetch(url, method='GET')
 
         raise tornado.gen.Return((PIL.Image.open(response.buffer), response))
@@ -8357,6 +8358,25 @@ class TestSocialImageGeneration(TestControllersBase):
 
         self.assertEquals(response.code, 200)
         self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+        self.assertEquals(im.size, (800,800))
+
+        # Uncomment this to see the image for manual inspection purposes
+        #im.show()
+
+        # Check the different platforms that should ahve the same result
+        im, response = yield self.get_response_image('vid1', 'facebook')
+
+        self.assertEquals(response.code, 200)
+        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+        self.assertEquals(im.size, (800,800))
+
+    @tornado.testing.gen_test
+    def test_basic_twitter(self):
+        im, response = yield self.get_response_image('vid1', 'twitter')
+
+        self.assertEquals(response.code, 200)
+        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+        self.assertEquals(im.size, (875,500))
 
         # Uncomment this to see the image for manual inspection purposes
         #im.show()
@@ -8463,8 +8483,7 @@ class TestSocialImageGeneration(TestControllersBase):
     @tornado.testing.gen_test
     def test_no_neon_thumb(self):
         video = neondata.VideoMetadata(self.vid_id, 
-                                       tids=[
-                                           '%s_def' % self.vid_id])
+                                       tids=['%s_def' % self.vid_id])
         video.save()
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
@@ -8476,45 +8495,26 @@ class TestSocialImageGeneration(TestControllersBase):
             'Video does not have any valid good thumbs')
 
     @tornado.testing.gen_test
-    def test_no_default(self):
-        video = neondata.VideoMetadata(self.vid_id, 
-                                       tids=[
-                                           '%s_n1' % self.vid_id,
-                                           '%s_n2' % self.vid_id,
-                                           ])
-        video.save()
+    def test_no_precut_rendition(self):
         neondata.ThumbnailMetadata('%s_n2' % self.vid_id,
                                    ttype='neon',
-                                   rank=1,
-                                   urls=['350x350'],
+                                   rank=0,
                                    model_version='20160713-test',
-                                   model_score=0.1).save()
-
-        im, response = yield self.get_response_image('vid1')
-
-        self.assertEquals(response.code, 200)
-        self.assertEquals(response.headers['Content-Type'], 'image/jpg')
-
-    @tornado.testing.gen_test
-    def test_custom_upload_default(self):
+                                   model_score=0.6,
+                                   urls=['640x480']).save()
         video = neondata.VideoMetadata(self.vid_id, 
-                                       tids=[
-                                           '%s_n1' % self.vid_id,
-                                           '%s_def' % self.vid_id,
-                                           '%s_cust' % self.vid_id,
-                                           ])
+                                       tids=['%s_n2' % self.vid_id])
         video.save()
-        neondata.ThumbnailMetadata('%s_cust' % self.vid_id,
-                                   ttype='customupload',
-                                   rank=-1,
-                                   urls=['350x350'],
-                                   model_version='20160713-test',
-                                   model_score=0.8).save()
 
         im, response = yield self.get_response_image('vid1')
 
         self.assertEquals(response.code, 200)
         self.assertEquals(response.headers['Content-Type'], 'image/jpg')
+        self.assertEquals(im.size, (800,800))
+
+        # Uncomment this to see the image for manual inspection purposes
+        #im.show()
+        
 
     @tornado.testing.gen_test
     def test_failed_image_download(self):
@@ -8534,11 +8534,14 @@ class TestSocialImageGeneration(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_missing_rendition(self):
-        neondata.ThumbnailMetadata('%s_def' % self.vid_id,
-                                   ttype='default',
+        neondata.ThumbnailMetadata('%s_n2' % self.vid_id,
+                                   ttype='neon',
                                    rank=0,
                                    model_version='20160713-test',
-                                   model_score=0.2).save()
+                                   model_score=0.6).save()
+        video = neondata.VideoMetadata(self.vid_id, 
+                                       tids=['%s_n2' % self.vid_id])
+        video.save()
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.get_response_image('vid1')
