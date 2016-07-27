@@ -1523,8 +1523,8 @@ class VideoHelper(object):
                                                         age=age) for
                                 x in thumbnails]
             renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
-            for thumbnail in thumbnails:
-                thumbnail['renditions'] = renditions[thumbnail['thumbnail_id']]
+            for thumbnail, tid in zip(*(thumbnails, tids)):
+                thumbnail['renditions'] = renditions[tid]
 
         raise tornado.gen.Return(thumbnails)
 
