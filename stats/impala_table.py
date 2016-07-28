@@ -3,7 +3,7 @@ Script that runs one cycle of the hadoop stats batch processing.
 
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
         Robb Wagoner (robb@pandastrike.com)
-Copyright Neon Labs 2014, 2015
+Copyright Neon Labs 2014, 2015, 2016
 '''
 
 import os.path
@@ -296,17 +296,15 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ImpalaError
 
-    def load_parquet_table(self, execution_date, hour_interval=1):
+    def load_parquet_table(self, execution_date):
         '''Load data into the Parquet table from the external Avro table
         :param execution_date: the Airflow execution_date object
         :param_type datetime.datetime:
-        :param hour_interval: The hour interval, from dag.schedule_interval 
-                              property of type timedelta
         :param_type integer:
         '''
         # Building parquet tables takes a lot of
         # memory, so make sure we give the job enough.
-        # We partition by tai-year-month-hr to allow for idempotent inserts.
+        # We partition by tai-year-month to allow for idempotent inserts.
         # https://cwiki.apache.org/confluence/display/Hive/DynamicPartitions
         try:
             parq_table = self._parquet_table()
@@ -315,9 +313,6 @@ class ImpalaTable(object):
             _log.info('Loading to Impala Parquet-format table {parq} from '
                       '{avro}'.format(parq=parq_table, avro=avro_table))
             heap_size = int(options.parquet_memory * 0.9)
-
-            _log.info('memory set for map/reduce in mb is %s' % options.parquet_memory)
-            _log.info('heap size calculated is %s' % heap_size)
 
             self.hive.execute('SET hive.exec.compress.output=true')
             self.hive.execute('SET avro.output.codec=snappy')
@@ -335,22 +330,6 @@ class ImpalaTable(object):
             self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
 
-            _log.info('SET mapreduce.reduce.memory.mb=%d' %
-                              options.parquet_memory)
-            _log.info('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
-            _log.info('SET mapreduce.map.memory.mb=%d' %
-                              options.parquet_memory)
-            _log.info('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
-
-            # Hour calculation is used with Airflow and maps to a DAGs
-            #  schedule_interval.  
-            #  e.g: timedelta(days=0.125) == 3
-            #  hours
-            #
-            _log.debug('Parquet table loading hour_interval: {hi}'.format(
-                hi=hour_interval))
             sql = """
             insert overwrite table %s
             partition(tai, yr, mnth)
@@ -480,8 +459,7 @@ class ImpalaTableLoader(threading.Thread):
             if self.table.exists(parq_table):
                 _log.info("Parquet table for event '%s' exists: %s" % 
                            (self.event, parq_table))
-                self.table.load_parquet_table(self.execution_date,
-                                              self.hour_interval)
+                self.table.load_parquet_table(self.execution_date)
                 self.table.drop_avro_table(self.execution_date)
             else:
                 _log.error("Parquet table for event '%s' missing: %s" %

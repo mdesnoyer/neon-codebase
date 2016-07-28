@@ -1,18 +1,26 @@
 """
-Airflow DAG for launching an EMR cluster
+Airflow DAG for running the Neon Big Data Pipeline. 
 
-------------------------------------------------------------------
-Airflow commands to reload the Impala tables for an EMR cluster
-------------------------------------------------------------------
+This DAG comprises of the following major tasks,
+Stage files for the MapReduce Job based on time
+RawTracker MapReduce Cleaning Job
+Loading of the Impala Tables
+Clean up
 
-    EPOCH="2014-05-01 00:00:00"
-    airflow clear -t load_impala_tables --start_date "$EPOCH" clicklogs
-    airflow backfill -t load_impala_tables --start_date "$EPOCH" clicklogs
+---------------- 
+Airflow commands
+---------------- 
+To rebuild impala tables from beginning,
+sudo su -c "airflow clear -t 'create_table.*' -d -c clicklogs" -s /bin/sh statsmanager
 
+To burn down and re-build Airflow metadata database,
+sudo su -c "airflow resetdb -y" -s /bin/sh statsmanager
+sudo su -c "airflow initdb" -s /bin/sh statsmanager
 
-
+Author: Robb Wagoner (@robbwagoner), Nadeem Ahmed Nazeer (@nadeem86)
+Copyright Neon Labs 2016
 """
-__author__ = 'Robb Wagoner (@robbwagoner)'
+
 
 import os.path
 import sys
@@ -21,17 +29,10 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-# PyCharm Debugger
-#sys.path.append(os.path.join(__base_path__, 'pycharm-debug.egg'))
-#import pydevd
-
 from airflow import DAG
 from airflow.configuration import conf, AirflowConfigException
 from airflow.operators.python_operator import PythonOperator, BranchPythonOperator
 from airflow.operators.dummy_operator import DummyOperator
-# from airflow.operators.bash_operator import BashOperator
-# from airflow.operators.subdag_operator import SubDagOperator
-# from airflow.operators.sensors import ExternalTaskSensor  # S3KeySensor, S3PrefixSensor, TimeSensor
 from datetime import datetime, timedelta
 from boto.s3.connection import S3Connection
 import dateutils
@@ -97,6 +98,7 @@ options.define('full_run_input_path', default='s3://neon-tracker-logs-v2/v2.2/*/
 options.define('airflow_start_date', default='2016, 7, 22',
                 type=str, help='airflow start date')
 
+
 # Use Neon's options module for configuration parsing
 try:
     args = options.parse_options(['-c', conf.get('neon', 'config_file')],
@@ -110,20 +112,19 @@ utils.logs.AddConfiguredLogger()
 utils.monitor.start_agent()
 
 
-
 # ----------------------------------
 # NEON HELPER METHODS
 # ----------------------------------
 
-# __EVENTS = ['ImageLoad', 'ImageVisible','ImageClick', 'AdPlay', 'VideoPlay',
-#           'VideoViewPercentage', 'EventSequence']
-
-__EVENTS = ['VideoPlay', 'EventSequence']
+__EVENTS = ['ImageLoad', 'ImageVisible','ImageClick', 'AdPlay', 'VideoPlay',
+           'VideoViewPercentage', 'EventSequence']
 
 # Tracker Account Ids: alpha-numeric string 3-15 chars long
 TAI = re.compile(r'^[\w]{3,15}$')  
 EPOCH = dateutils.timezone(datetime(1970, 1, 1), timezone='utc')
 PROTECTED_PREFIXES = [r'^/$', r'v[0-9].[0-9]']
+
+# Use the current UTC date whenever rebuilding Airflow from scratch
 airflow_start_date = datetime.strptime(options.airflow_start_date, '%Y, %m, %d')
 
 class ClusterDown(Exception): pass
@@ -235,6 +236,7 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
                           "{prefix}").format(tai=tai, prefix=tai_prefix))
 
     return input_files
+
 
 def _get_s3_staging_prefix(dag, execution_date, prefix=''):
     """
@@ -354,9 +356,6 @@ def check_for_prefix(tai_prefix, bucket_name):
     """
     s3 = S3Connection()
 
-    _log.info('check for prefix')
-    _log.info('prefix is %s' % tai_prefix)
-
     bucket = s3.get_bucket(bucket_name)
     list_prefix = bucket.list(prefix=tai_prefix, delimiter='/')
     prefix_exists = [prefixes.name for prefixes in list_prefix if prefixes.name]
@@ -390,6 +389,7 @@ def check_first_run(execution_date):
             first_instance_run=True
 
     return first_run, first_instance_run
+
 
 # ----------------------------------
 # PythonOperator callables
@@ -495,8 +495,7 @@ def _run_mr_cleaning_job(**kwargs):
         hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
         hdfs_dir = 'mnt/cleaned'
         cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
-        #cleaning_job_input_path = options.full_run_input_path
-        cleaning_job_input_path = "s3://neon-tracker-logs-v2/v2.2/2089095449/2016/07/*/*"
+        cleaning_job_input_path = options.full_run_input_path
         _log.info("Increasing the number of task instances to %s" % options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
 
@@ -664,11 +663,6 @@ def _hdfs_maintenance(**kwargs):
     _run_cluster_command(remove_old_tmp)
 
 
-def _clear_all_tasks(operators=None, **kwargs):
-    for op in operators:
-        op.clear(**kwargs)
-
-
 def _checkpoint_hdfs_to_s3(**kwargs):
     """
     Copy the output of the first run from hdfs to S3
@@ -720,11 +714,6 @@ default_args = {
     'email_on_retry': True,
     'retries': 3,
     'retry_delay': timedelta(minutes=1),
-
-    # 'execution_timeout': timedelta(minutes=2)
-    # 'queue': 'bash_queue',
-    # 'pool': 'backfill',
-    # 'priority_weight': 10,
 }
 
 
@@ -734,23 +723,20 @@ default_args = {
 clicklogs = DAG('clicklogs', schedule_interval=timedelta(hours=options.clicklog_period),
                 default_args=default_args)
 
-# TODO(mdesnoyer): Delete this because a separate process should
-# handle bringing the cluster back up.
-
-# Start the EMR cluster if it isn't running
+# Check if the EMR cluster is running
 check_cluster = PythonOperator(
     task_id='check_cluster',
     dag=clicklogs,
     python_callable=_cluster_status,
     execution_timeout=timedelta(hours=1))
-# Use for alarming on failure
-# on_failure_callback=
+
 
 # Create Cloudwatch Alarms for the cluster
 cloudwatch_metrics = DummyOperator(
     task_id='cloudwatch_metrics',
     dag=clicklogs)
 cloudwatch_metrics.set_upstream(check_cluster)
+
 
 # Wait a while after the execution date interval has passed before
 # processing to allow Trackserver/Flume to transmit log files to be to
@@ -760,9 +746,9 @@ quiet_period = PythonOperator(
     dag=clicklogs,
     python_callable=_quiet_period,
     provide_context=True,
-    #op_kwargs=dict(quiet_period=timedelta(minutes=options.quiet_period)))
-    op_kwargs=dict(quiet_period=timedelta(seconds=1)))
+    op_kwargs=dict(quiet_period=timedelta(minutes=options.quiet_period)))
 quiet_period.set_upstream(check_cluster)
+
 
 # Determine if the execution date has input files
 has_input_files = BranchPythonOperator(
@@ -772,6 +758,7 @@ has_input_files = BranchPythonOperator(
     provide_context=True,
     op_kwargs=dict(input_path=options.input_path))
 has_input_files.set_upstream(cloudwatch_metrics)
+
 
 # Copy files for the execution date from S3 source location in to an
 # S3 staging location
@@ -784,11 +771,13 @@ stage_files = PythonOperator(
                    staging_path=options.staging_path))
 stage_files.set_upstream(has_input_files)
 
+
 # End point for execution dates which don't have input files
 no_input_files = DummyOperator(
     task_id='no_input_files',
     dag=clicklogs)
 no_input_files.set_upstream(has_input_files)
+
 
 # Run the Map/Reduce cleaning job on the staged files
 mr_cleaning_job = PythonOperator(
@@ -804,6 +793,8 @@ mr_cleaning_job = PythonOperator(
     depends_on_past=True)
 mr_cleaning_job.set_upstream(stage_files)
 
+
+# Checkpoint data from hdfs to s3
 s3copy = PythonOperator(
     task_id='copy_hdfs_to_s3',
     dag=clicklogs,
@@ -811,6 +802,7 @@ s3copy = PythonOperator(
     provide_context=True,
     op_kwargs=dict(output_path=options.output_path, timeout=60 * 600))
 s3copy.set_upstream(mr_cleaning_job)
+
 
 # Load the cleaned files from Map/Reduce into Impala
 load_impala_tables = []
@@ -820,7 +812,8 @@ for event in __EVENTS:
         task_id='create_table_%s' % event,
         dag=clicklogs,
         python_callable=_create_tables,
-        op_kwargs=dict(event=event))
+        op_kwargs=dict(event=event),
+        depends_on_past=True)
     create_op.set_upstream(mr_cleaning_job)
 
     # Load the data into the impala table
@@ -836,6 +829,7 @@ for event in __EVENTS:
     op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
 
+
 # Delete the staging files once the Map/Reduce job is done
 delete_staging_files = PythonOperator(
     task_id='delete_staging_files',
@@ -844,6 +838,7 @@ delete_staging_files = PythonOperator(
     provide_context=True,
     op_kwargs=dict(staging_path=options.staging_path))
 delete_staging_files.set_upstream(mr_cleaning_job)
+
 
 # Update the table build times
 update_table_build_times = PythonOperator(
@@ -855,6 +850,7 @@ update_table_build_times = PythonOperator(
     python_callable=_update_table_build_times,
     depends_on_past=True)
 update_table_build_times.set_upstream(load_impala_tables)
+
 
 hdfs_maintenance = PythonOperator(
     task_id='hdfs_maintenance',
