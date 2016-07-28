@@ -56,6 +56,14 @@ _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
 statemon.define('social_image_generated', int)
 statemon.define('social_image_invalid_request', int)
 
+statemon.define('get_internal_search_oks', int)
+_get_internal_search_oks_ref = statemon.state.get_ref(
+    'get_internal_search_oks')
+
+statemon.define('get_external_search_oks', int)
+_get_external_search_oks_ref = statemon.state.get_ref(
+    'get_external_search_oks')
+
 '''*****************************************************************
 AccountHandler
 *****************************************************************'''
@@ -2246,8 +2254,7 @@ class HealthCheckHandler(APIV2Handler):
         if response.code is 200:
             self.success('<html>Server OK</html>')
         else:
-            raise Exception('unable to get to the v1 api',
-                            ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+            raise NotFoundError('unable to get to the v1 api')
 
     @classmethod
     def get_access_levels(self):
@@ -2353,6 +2360,10 @@ class VideoSearchInternalHandler(APIV2Handler):
                        limit,
                        fields)
 
+        statemon.state.increment(
+            ref=_get_internal_search_oks_ref,
+            safe=False)
+
         self.success(vid_dict)
 
     @classmethod
@@ -2439,6 +2450,10 @@ class VideoSearchExternalHandler(APIV2Handler):
             fields,
             base_url=base_url,
             skip_deleted=True)
+
+        statemon.state.increment(
+            ref=_get_external_search_oks_ref,
+            safe=False)
 
         self.success(vid_dict)
 
