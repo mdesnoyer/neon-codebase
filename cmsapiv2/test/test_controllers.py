@@ -45,6 +45,7 @@ from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 from tornado.httputil import HTTPServerRequest
 import video_processor.video_processing_queue
 from utils.options import options
+from utils import statemon
 
 define('run_stripe_on_test_account', default=0, type=int,
        help='If set, will run tests that hit the real Stripe APIs')
@@ -4568,9 +4569,10 @@ class TestHealthCheckHandler(TestControllersBase):
                                callback=self.stop,
                                method='GET')
         response = self.wait()
-        self.assertEquals(response.code, 500)
+        self.assertEquals(response.code, 404)
         rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'Internal Server')
+        self.assertRegexpMatches(rjson['error']['message'], 
+            'unable to get to the v1 api')
 
 
 class TestVideoStatsHandler(TestControllersBase):
@@ -5968,6 +5970,10 @@ class TestVideoSearchInternalHandler(TestVerifiedControllersBase):
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)
+        self.assertEquals(
+            statemon.state.get('cmsapiv2.controllers.get_internal_search_oks'),
+            1)
+
         self.assertEquals(rjson['video_count'], 2)
 
     @tornado.testing.gen_test
@@ -6191,6 +6197,9 @@ class TestVideoSearchExternalHandler(TestVerifiedControllersBase):
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)
+        self.assertEquals(
+            statemon.state.get('cmsapiv2.controllers.get_external_search_oks'),
+            1)
         self.assertEquals(rjson['video_count'], 2)
 
     @tornado.testing.gen_test
