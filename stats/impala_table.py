@@ -507,8 +507,8 @@ def update_table_build_times(cluster):
     impala_conn = impala.dbapi.connect(host=cluster.master_ip,
                                        port=options.impala_port)
     cursor = impala_conn.cursor()
-    impala_cursor.execute("show tables")
-    tables = [x[0] for x in impala_cursor.fetchall()]
+    cursor.execute("show tables")
+    tables = [x[0] for x in cursor.fetchall()]
 
     if 'table_build_times' in tables:
         _log.info('table_build_times exists, updating it')
