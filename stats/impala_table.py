@@ -507,10 +507,17 @@ def update_table_build_times(cluster):
     impala_conn = impala.dbapi.connect(host=cluster.master_ip,
                                        port=options.impala_port)
     cursor = impala_conn.cursor()
-    cursor.execute('create table if not exists table_build_times '
-                   '(done_time timestamp) stored as PARQUET')
-    cursor.execute("insert into table_build_times (done_time) values ('%s')" %
-                   datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+
+    if self.table.exists('table_build_times'):
+        _log.info('table_build_times exists, updating it')
+        cursor.execute("insert into table_build_times (done_time) values ('%s')" %
+            datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    else:
+        _log.info('table_build_times does not exist, creating and updating')
+        cursor.execute('create table table_build_times '
+            '(done_time timestamp) stored as PARQUET')
+        cursor.execute("insert into table_build_times (done_time) values ('%s')" %
+            datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
 
     _log.debug('Finished building Impala tables')
 
