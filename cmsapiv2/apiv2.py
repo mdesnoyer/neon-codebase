@@ -235,7 +235,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             raise NotAuthorizedError('account does not exist')
 
         try:
-            payload = JWTHelper.decode_token(access_token)
+            payload = ShareJWTHelper.decode(access_token)
             username = payload.get('username')
 
             if username:
