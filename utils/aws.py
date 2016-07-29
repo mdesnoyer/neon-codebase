@@ -6,6 +6,7 @@ Copyright 2016
 '''
 
 import boto.utils
+import urllib2
 import utils.obj
 
 class InstanceMetadata(object):
@@ -16,7 +17,11 @@ class InstanceMetadata(object):
 
     def _get_metadata(self):
         if self.meta is None:
-            self.meta = boto.utils.get_instance_metadata()
+            try:
+                self.meta = boto.utils.get_instance_metadata()
+            except urllib2.URLError as e:
+                # We're not on AWS
+                self.meta = {}
 
     
     def get_current_az(self):

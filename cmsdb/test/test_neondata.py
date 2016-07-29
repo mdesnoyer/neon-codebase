@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# encoding: utf-8
 
 import os.path
 import sys
@@ -103,6 +104,10 @@ class NeonDbTestCase(test_utils.neontest.AsyncTestCase):
     @classmethod
     def tearDownClass(cls):
         cls.postgresql.stop()
+
+    @classmethod
+    def _get_object_type(cls):
+        return cls.__name__
 
 
 class TestNeondataDataSpecific(NeonDbTestCase):
@@ -2180,7 +2185,11 @@ class BasePGNormalObject(object):
 
     keys = [('dynamic', 'key')]
 
-    @classmethod
+    @classmethod 
+    def _create_key(cls): 
+        return uuid.uuid1().hex
+ 
+    @classmethod 
     def _get_object_type(cls):
         raise NotImplementedError()
 
@@ -2281,29 +2290,29 @@ class BasePGNormalObject(object):
 
     @tornado.testing.gen_test
     def test_save_object(self):
-        obj_id = uuid.uuid1().hex
+        obj_id = self._create_key() 
         obj_type = self._get_object_type()
         obj = obj_type(obj_id)
         rv = yield obj.save(async=True)
         get_obj = yield self._get_get_function(obj)
         self.assertTrue(rv)
-        self.assertEquals(get_obj.key, obj.key)
+        self.assertEquals(get_obj.key, obj.key) 
 
-    @tornado.testing.gen_test
-    def test_save_duplicate_objects(self):
-        unique_id = uuid.uuid1().hex
-        so1 = self._get_object_type()(unique_id, 'test1')
-        so2 = self._get_object_type()(unique_id, 'test1')
-        yield so1.save(async=True)
-        yield so2.save(async=True)
-        get_obj_one = yield self._get_get_function(so1)
-        get_obj_two = yield self._get_get_function(so2)
+    @tornado.testing.gen_test 
+    def test_save_duplicate_objects(self):     
+        unique_id = self._create_key() 
+        so1 = self._get_object_type()(unique_id, 'test1') 
+        so2 = self._get_object_type()(unique_id, 'test1') 
+        yield so1.save(async=True) 
+        yield so2.save(async=True)  
+        get_obj_one = yield self._get_get_function(so1) 
+        get_obj_two = yield self._get_get_function(so2) 
         self.assertEquals(get_obj_one.key,get_obj_two.key)
-
-    @tornado.testing.gen_test
-    def test_save_all_objects(self):
-        key1 = uuid.uuid1().hex
-        key2 = uuid.uuid1().hex
+    
+    @tornado.testing.gen_test 
+    def test_save_all_objects(self):    
+        key1 = self._create_key()
+        key2 = self._create_key() 
         so1 = self._get_object_type()(key1, 'test1')
         so2 = self._get_object_type()(key2, 'test2')
         self._get_object_type().save_all([so1, so2])
@@ -2311,19 +2320,19 @@ class BasePGNormalObject(object):
         get_obj_two = yield self._get_get_function(so2)
         self.assertEquals(get_obj_one.key,so1.key)
         self.assertEquals(get_obj_two.key,so2.key)
-
-    @tornado.testing.gen_test
-    def test_get_many_objects(self):
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+     
+    @tornado.testing.gen_test 
+    def test_get_many_objects(self):     
+        so1 = self._get_object_type()(self._create_key(), 'test')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         yield self._get_object_type().save_all([so1, so2], async=True)
         results = yield self._run_get_many_function([so1,so2])
         self.assertEquals(len(results), 2)
 
-    @tornado.testing.gen_test
-    def test_get_many_with_key_like_objects(self):
-        key1 = uuid.uuid1().hex
-        key2 = uuid.uuid1().hex
+    @tornado.testing.gen_test 
+    def test_get_many_with_key_like_objects(self):    
+        key1 = self._create_key() 
+        key2 = self._create_key()
         so1 = self._get_object_type()(key1, 'testabcdef')
         so2 = self._get_object_type()(key2, 'testfedcba')
         yield self._get_object_type().save_all([so1, so2], async=True)
@@ -2332,17 +2341,17 @@ class BasePGNormalObject(object):
         results = yield so1.get_many_with_key_like(so2.key, async=True)
         self.assertEquals(len(results), 1)
 
-    @tornado.testing.gen_test
-    def test_delete_object(self):
-        so1 = self._get_object_type()(uuid.uuid1().hex)
-        yield self._get_delete_function(so1)
+    @tornado.testing.gen_test 
+    def test_delete_object(self):  
+        so1 = self._get_object_type()(self._create_key()) 
+        yield self._get_delete_function(so1) 
         get1 = yield self._get_get_function(so1)
         self.assertEquals(None, get1)
 
-    @tornado.testing.gen_test
-    def test_delete_many_objects(self):
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+    @tornado.testing.gen_test 
+    def test_delete_many_objects(self): 
+        so1 = self._get_object_type()(self._create_key(), 'test1')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         yield so1.save(async=True)
         yield so2.save(async=True)
         yield self._run_delete_many_function([so1, so2])
@@ -2352,9 +2361,9 @@ class BasePGNormalObject(object):
         self.assertEquals(None, get2)
 
     @tornado.testing.gen_test
-    def test_delete_many_objects_key_dne(self):
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+    def test_delete_many_objects_key_dne(self): 
+        so1 = self._get_object_type()(self._create_key(), 'test1')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         so3 = self._get_object_type()('doesnotexist')
         yield so1.save(async=True)
         yield so2.save(async=True)
@@ -2366,18 +2375,18 @@ class BasePGNormalObject(object):
 
     @tornado.testing.gen_test
     def test_modify_object(self):
-        modify_me = MagicMock()
-        so = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        modify_me = MagicMock()  
+        so = self._get_object_type()(self._create_key(), 'test1')
         yield so.save(async=True)
         yield self._run_modify_function(so, modify_me)
         self.assertEquals(modify_me.call_args[0][0].key, so.key)
         self.assertEquals(modify_me.call_count, 1)
 
-    @tornado.testing.gen_test
-    def test_modify_many_objects(self):
-        modify_me = MagicMock()
-        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
-        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+    @tornado.testing.gen_test 
+    def test_modify_many_objects(self):     
+        modify_me = MagicMock()  
+        so1 = self._get_object_type()(self._create_key(), 'test1')
+        so2 = self._get_object_type()(self._create_key(), 'test2')
         yield so1.save(async=True)
         yield so2.save(async=True)
         yield self._run_modify_many_function([so1,so2], modify_me)
@@ -2389,8 +2398,46 @@ class BasePGNormalObject(object):
         self.assertTrue(so1.key in keys)
         self.assertEquals(modify_me.call_count, 1)
 
+class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')] 
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+    
+    @tornado.testing.gen_test 
+    def test_modify_many_objects_values(self):     
+        def modify_me(t):
+            for x in t.itervalues():
+                if x is not None:
+                    x.features = np.array([1.0,2.0,3.0,4.0])
+        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        yield so1.save(async=True)
+        yield so2.save(async=True)
+        rv = yield ThumbnailMetadata.modify_many(
+            [so1.key, so2.key], modify_me, async=True)
+        for x in rv.itervalues(): 
+            self.assertEquals(x.features[0], 1.0) 
+            self.assertEquals(x.features[1], 2.0) 
+            self.assertEquals(x.features[2], 3.0) 
+            self.assertEquals(x.features[3], 4.0) 
+        so1 = yield ThumbnailMetadata.get(so1.key, async=True)
+        self.assertEquals(so1.features[0], 1.0) 
 
 class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
+
     @classmethod
     def _get_object_type(cls):
         return VideoMetadata
@@ -2411,11 +2458,33 @@ class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
         videos = yield neondata.VideoMetadata.objects(async=True)
         self.assertEqual(1, len(videos))
 
+    @tornado.testing.gen_test
+    def test_video_results_list(self):
+        orig = neondata.VideoMetadata(
+            'a1_vid1',
+            job_results = [
+                neondata.VideoJobThumbnailList(thumbnail_ids=['tid1', 'tid2']),
+                neondata.VideoJobThumbnailList('50+', 'M',
+                                               ['tid3', 'tid4'],
+                                               ['bad1'],
+                                               'model_vers')])
+        yield orig.save(async=True)
 
-class TestVerification(NeonDbTestCase, BasePGNormalObject):
-    @classmethod
-    def _get_object_type(cls):
-        return neondata.Verification
+        found = yield neondata.VideoMetadata.get('a1_vid1', async=True)
+        self.assertItemsEqual(found.job_results[0].thumbnail_ids,
+                              ['tid1', 'tid2'])
+        self.assertIsNone(found.job_results[0].age)
+        self.assertIsNone(found.job_results[0].gender)
+        self.assertIsNone(found.job_results[0].model_version)
+        self.assertEquals(found.job_results[0].bad_thumbnail_ids, [])
+        self.assertItemsEqual(found.job_results[1].thumbnail_ids,
+                              ['tid3', 'tid4'])
+        self.assertEquals(found.job_results[1].age, '50+')
+        self.assertEquals(found.job_results[1].gender, 'M')
+        self.assertEquals(found.job_results[1].model_version, 'model_vers')
+        self.assertItemsEqual(found.job_results[1].bad_thumbnail_ids, ['bad1'])
+
+        self.assertEquals(orig, found)
 
 
 class TestAccountLimits(NeonDbTestCase, BasePGNormalObject):
@@ -2598,14 +2667,14 @@ class TestNeonUserAccount(NeonDbTestCase, BasePGNormalObject):
         tid = i_vid + "_t1"
         yield ThumbnailMetadata(tid, i_vid).save(async=True)
         yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
-        since_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        video_one = yield VideoMetadata.get(i_vid, async=True)
         yield VideoMetadata(i_vid_two, [tid],'job2').save(async=True)
         video = yield VideoMetadata.get(i_vid_two, async=True)
         so = NeonUserAccount('key', api_key='key')
         yield so.save(async=True)
         video_ids = yield so.get_internal_video_ids(
             async=True,
-            since=since_date)
+            since=video_one.created)
         self.assertEquals(len(video_ids), 1)
         self.assertEquals(video_ids[0], 'key_vid2')
 
@@ -2735,6 +2804,82 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
     def test_bad_arg(self):
         with self.assertRaises(KeyError):
             yield Tag.keys(title='bad argument')
+
+
+class TestFeature(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_save_and_get(self): 
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key).save(async=True)
+        feature = yield neondata.Feature.get(key, async=True)
+        self.assertEquals(feature.index, 1) 
+        self.assertEquals(feature.name, None) 
+        self.assertEquals(feature.model_name, 'kfmodel')
+ 
+    @tornado.testing.gen_test 
+    def test_modify(self): 
+        def _modify(f): 
+            f.name = 'newname'         
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key).save(async=True)
+        feature = yield neondata.Feature.modify(key, _modify, async=True)
+        self.assertEquals(feature.index, 1) 
+        self.assertEquals(feature.name, 'newname') 
+        self.assertEquals(feature.model_name, 'kfmodel')
+
+    @tornado.testing.gen_test 
+    def test_delete(self): 
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key, name='oldname').save(async=True)
+        yield neondata.Feature.delete(key, async=True)
+        feature = yield neondata.Feature.get(key, async=True)
+        self.assertEquals(feature.name, None)
+ 
+    @tornado.testing.gen_test 
+    def test_get_by_model_name(self): 
+        key = neondata.Feature.create_key('kfmodel', 1) 
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2) 
+        yield neondata.Feature(key).save(async=True)
+
+        fs = yield neondata.Feature.get_by_model_name('kfmodel', async=True)
+        f1 = fs[0]
+        f2 = fs[1] 
+        self.assertEquals(f1.index, 1)  
+        self.assertEquals(f2.index, 2)  
+
+
+class TestStoredObject(test_utils.neontest.AsyncTestCase):
+
+
+    def test_to_json_utf8(self):
+
+        class SomeClass(neondata.StoredObject):
+            def __init__(self, key, utf_property):
+                self.utf_property = utf_property
+                super(SomeClass, self).__init__(key)
+
+        key = 'key'
+        given = u'Lucía'
+        obj = SomeClass(key, given)
+        result = json.loads(obj.to_json())
+        self.assertEqual(given, result['_data']['utf_property'])
 
 
 if __name__ == '__main__':

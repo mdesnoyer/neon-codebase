@@ -171,6 +171,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import cv2
+import model
 import model.errors
 import numpy as np
 from model.colorname import ColorName
@@ -744,18 +745,28 @@ class _Result(object):
     def __init__(self, frameno=None, score=-np.inf, image=None,
                  feat_score=None, meta=None,
                  feat_score_weight=None, feat_score_func=None,
-                 combination_function=None):
+                 combination_function=None, model_vers=None,
+                 aq_features=None):
+        # Fields that are generally useful for the returned values
+        self.image = image
+        self.score = score
+        self.frameno = frameno
+        self.model_version = model_vers
+        self.aq_features = aq_features # Feature vector representing the image
+
+        # Extra features that are useful when keeping track of the
+        # best images found so far.
         self._defined = False
         if score and frameno:
             self._defined = True
             _log.debug(('Instantiating result object at frame %i with'
                         ' score %.3f') % (frameno, score))
-        self.score = score
-        self.frameno = frameno
+
+        self.model_vers = model_vers
+        self.aq_feautres = aq_features
         self._feat_score = feat_score
         self._feat_score_func = feat_score_func
         self._hash = getrandbits(128)
-        self.image = image
         if combination_function is None:
             combination_function = lambda ms, fs, w: ms + fs * w
         self._combination_function = combination_function
@@ -929,7 +940,8 @@ class ResultsList(object):
             self.dists[entry_idx, idx] = dst
 
     def accept_replace(self, frameno, score, image=None, feat_score=None,
-                       meta=None, feat_score_func=None):
+                       meta=None, feat_score_func=None, model_vers=None,
+                       aq_features=None):
         '''
         Attempts to insert a result into the results list. If it does not
         qualify, it returns False, otherwise returns True
@@ -939,7 +951,9 @@ class ResultsList(object):
                           feat_score=feat_score, meta=meta,
                           feat_score_weight=self._feat_score_weight,
                           feat_score_func=feat_score_func,
-                          combination_function=self._combination_function)
+                          combination_function=self._combination_function,
+                          model_vers=model_vers,
+                          aq_features=aq_features)
             self._considered_thumbs += 1
             if score < self.min:
                 _log.debug('Frame %i [%.3f] rejected due to score' % (frameno,
@@ -1095,7 +1109,7 @@ class ResultsList(object):
     def get_results(self):
         '''
         Returns the results in sorted order, sorted by score. Returns them
-        as (image, score, frameno)
+        as (image, score, frameno, model_vers, aq_features)
         '''
         with self._lock:
             _log.debug('Dumping results')
@@ -1105,8 +1119,8 @@ class ResultsList(object):
                 res_obj = self.results[idx]
                 if not res_obj._defined:
                     continue
-                image = self._improve_raw_img(res_obj.image)
-                res.append([image, res_obj.score, res_obj.frameno])
+                self._improve_img(res_obj)
+                res.append(res_obj)
             return res
 
 
@@ -1133,7 +1147,8 @@ class LocalSearcher(object):
                  testing_dir=None,
                  filter_text=True,
                  text_filter_params=None,
-                 filter_text_thresh=0.04):
+                 filter_text_thresh=0.04,
+                 m_thumbs=6):
         '''
         Inputs:
             predictor:
@@ -1147,6 +1162,8 @@ class LocalSearcher(object):
                      across 12 frames (about 0.5 sec)
             n_thumbs:
                 The number of top images to store.
+            m_thumbs:
+                The number of bottom images to store.
             feat_score_weight:
                 The degree to which the combined feature score should effect
                 the rank of the frames. New frames are added to results
@@ -1256,6 +1273,7 @@ class LocalSearcher(object):
         self._orig_local_search_width = local_search_width
         self._orig_local_search_step = local_search_step
         self.n_thumbs = n_thumbs
+        self.m_thumbs = m_thumbs
         self._feat_score_weight = feat_score_weight
         self.mixing_samples = mixing_samples
         self._search_algo = search_algo
@@ -1307,6 +1325,9 @@ class LocalSearcher(object):
         # this, if necessary at all, will be set by update_processing_strategy
         self.analysis_crop = None
         # determine the generators to cache.
+        if feature_generators is None:
+            raise ValueError('Valid feature generators are required. '
+                             'Grab them from model.features')
         for f in feature_generators:
             gen_name = f.get_feat_name()
             self.generators[gen_name] = f
@@ -1330,6 +1351,7 @@ class LocalSearcher(object):
         self.video = None
         self.video_name = None
         self.results = None
+        self.worst_results = []
         self.stats = dict()
         self.fps = None
         self.col_stat = None
@@ -1358,6 +1380,7 @@ class LocalSearcher(object):
         self._orig_local_search_width = processing_strategy.local_search_width
         self._orig_local_search_step = processing_strategy.local_search_step
         self.n_thumbs = processing_strategy.n_thumbs
+        self.m_thumbs = processing_strategy.m_thumbs
         self._feat_score_weight = processing_strategy.feat_score_weight
         self.mixing_samples = processing_strategy.mixing_samples
         self.max_variety = processing_strategy.max_variety
@@ -1387,17 +1410,19 @@ class LocalSearcher(object):
     def min_score(self):
         return self.results.min
 
-    def choose_thumbnails(self, video, n=None, video_name='',):
+    def choose_thumbnails(self, video, n=None, video_name='', m=None):
         self._reset()
         if n is None:
             n = self.n_thumbs
+        if m is None:
+            m = self.m_thumbs
         rand_seed = int(1000*time()) % 2 ** 32
         _log.info('Beginning thumbnail selection for video %s, random seed '
                   'for this run is %i with max thumbs %i', video_name,
                   rand_seed, n)
         np.random.seed(rand_seed)
-        thumbs = self.choose_thumbnails_impl(video, n, video_name)
-        return thumbs
+        best, worst = self.choose_thumbnails_impl(video, n, video_name, m)
+        return best, worst
 
     def _set_up_testing(self):
         vname = self.video_name
@@ -1417,7 +1442,7 @@ class LocalSearcher(object):
         else:
             raise Exception("Could not create testing dir!")
 
-    def choose_thumbnails_impl(self, video, n=None, video_name=''):
+    def choose_thumbnails_impl(self, video, n=None, video_name='', m=None):
         # start up the threads
         self._inq = Queue(maxsize=2)
         threads = [threading.Thread(target=self._worker, args=(x,))
@@ -1430,6 +1455,8 @@ class LocalSearcher(object):
             self.stats[gen_name] = Statistics()
         if n is not None:
             self.n_thumbs = n
+        if m is not None:
+            self.m_thumbs = m
         # create a prep object for analysis crops
         self._prep = pycvutils.ImagePrep(crop_frac=self.analysis_crop)
         self.stats['score'] = Statistics()
@@ -1448,6 +1475,9 @@ class LocalSearcher(object):
                            adapt_improve=self.adapt_improve,
                            max_variety=self.max_variety,
                            combination_function=self.combiner.result_combine)
+        # Storage for the bottom m frames
+        self.worst_results = []
+
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
@@ -1456,20 +1486,28 @@ class LocalSearcher(object):
         self.video_name = video_name
         if TESTING:
             self._set_up_testing()
-        fps = video.get(cv2.CAP_PROP_FPS) or 30.0
+        self.fps = video.get(cv2.CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         self.num_frames = num_frames
         # account for the case where the video is very short
         search_divisor = (self._orig_local_search_width /
                           self._orig_local_search_step)
-        self.local_search_width = min(self._orig_local_search_width,
-                                      max(search_divisor,
-                                          self.num_frames / self.n_thumbs))
-        self.local_search_step = max(1, self.local_search_width /
-                                     search_divisor)
+        if num_frames < 600:
+            self.local_search_width = 8
+            self.local_search_step = 1
+        elif num_frames < 1800:
+            self.local_search_width = 16
+            self.local_search_step = 2
+        else:
+            self.local_search_width = 32
+            self.local_search_step = 4
+        self.mixing_samples = min(
+            self.mixing_samples,
+            int(num_frames / self.local_search_width))
+
         _log.info('Search width: %i' % (self.local_search_width))
         _log.info('Search step: %i' % (self.local_search_step))
-        video_time = float(num_frames) / fps
+        video_time = float(num_frames) / self.fps
         self.search_algo = self._search_algo(num_frames,
                                              self.local_search_width,
                                              self.startend_clip)
@@ -1517,32 +1555,49 @@ class LocalSearcher(object):
                    self.video_name)
             _log.error(msg)
             raise model.errors.PredictionError(msg)
-        raw_results = self.results.get_results()
+
+        result_objs = self.results.get_results()
+
         # format it into the expected format
-        results = []
-        if not len(raw_results):
+        if not len(result_objs):
             _log.debug('No suitable frames have been found for video %s!'
                       ' Will uniformly select frames', video_name)
             # increment the statemon
             statemon.state.increment('all_frames_filtered')
-            # select which frames to use
-            frames = np.linspace(int(self.num_frames * self.startend_clip),
-                                 int(self.num_frames * (1 - self.startend_clip)),
-                                 self.n_thumbs).astype(int)
+
+            # Select which frames to use.
+            frames = np.linspace(
+                int(self.num_frames * self.startend_clip),
+                int(self.num_frames * (1 - self.startend_clip)),
+                self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
+
+            best = []
             for frame, frameno in zip(rframes, frames):
                 # TODO: get the scores of these frames more efficiently (async)
-                score = self.predictor.predict(frame)
-                formatted_result = (frame, score, frameno,
-                                    frameno / float(fps), '')
-                results.append(formatted_result)
+                (score, features, model_vers) = self.predictor.predict(frame)
+                best.append(model.VideoThumbnail(frameno=frameno,
+                                                    score=score,
+                                                    image=frame,
+                                                    model_version=model_vers,
+                                                    features=features))
+                best = sorted(result_objs, key=lambda x: x.score, reverse=True)
         else:
-            _log.debug('%i thumbs found', len(raw_results))
-            for rr in raw_results:
-                formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
-                                    '')
-                results.append(formatted_result)
-        return results
+            _log.debug('%i thumbs found', len(result_objs))
+            best = [model.VideoThumbnail(x.image, x.score, x.frameno,
+                                         x.model_version, x.aq_features)
+                                         for x in result_objs]
+
+        # Sort worst-to-best in worst.
+        worst = [model.VideoThumbnail(
+            x.image,
+            x.score,
+            x.frameno,
+            x.model_version,
+            x.aq_features)
+            for _, x in sorted(self.worst_results)]
+
+        return best, worst
 
     def _worker(self, workerno=None):
         '''
@@ -1600,7 +1655,7 @@ class LocalSearcher(object):
                 except Exception, e:
                     start = args[0]
                     stop = args[2]
-                    _log.warn('Problem local searching %i <---> %i: %s',
+                    _log.error('Problem local searching %i <---> %i: %s',
                         start, stop, e.message)
                     statemon.state.increment('searching_problem')
 
@@ -1707,10 +1762,11 @@ class LocalSearcher(object):
             else:
                 meta = None
         try:
-            indi_framescore = self.predictor.predict(best_frame)
+            (indi_framescore, features, model_vers) = self.predictor.predict(
+                best_frame)
         except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
-            _log.warn('Problem obtaining score localsearch frame %s: %s',
+            _log.warn('Problem obtaining score localsearch frame %s: %s' %
                       (best_frameno, e))
             with self._proc_lock:
                 self.results.register_failure()
@@ -1727,7 +1783,8 @@ class LocalSearcher(object):
                                    start_score, end_frame, end_score, best_frameno,
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
-                np.max(comb), meta=meta, feat_score_func=feat_score_func)
+                np.max(comb), meta=meta, feat_score_func=feat_score_func,
+                model_vers=model_vers, aq_features=features)
 
     def _take_sample(self, frameno):
         '''
@@ -1744,19 +1801,38 @@ class LocalSearcher(object):
                 # uh-oh, something went wrong! Update the knowledge
                 # state of the search algo with the knowledge that the
                 # frame is bad.
-                self.search_algo.update(frameno, bad=True)
+                
+                # TODO(Nick): Define how it should be updated. bad
+                #isn't a keyword in MCMH right now
+                #self.search_algo.update(frameno, bad=True)
                 return
             frames = self._prep(frames)
         try:
-            frame_score = self.predictor.predict(frames[0])
+            frame_score, features, model_vers = self.predictor.predict(
+                frames[0])
         except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
-            _log.warn('Problem obtaining score for frame %s: %s',
+            _log.warn('Problem obtaining score for frame %s: %s' %
                       (frameno, e))
             with self._proc_lock:
                 self.results.register_failure()
             return
         with self._proc_lock:
+
+            # Keep a small heap of the worst frames.
+            if self.m_thumbs > 0:
+                _res = _Result(
+                    frameno=frameno,
+                    score=frame_score,
+                    image=frames[0],
+                    model_vers=model_vers,
+                    aq_features=features)
+                # Invert score for sorting.
+                _item = (-frame_score, _res)
+                if len(self.worst_results) < self.m_thumbs:
+                    heapq.heappush(self.worst_results, _item)
+                _ = heapq.heappushpop(self.worst_results, _item)
+
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
             self.search_algo.update(frameno, frame_score)
@@ -1784,10 +1860,11 @@ class LocalSearcher(object):
             if frameno is not None:
                 # then there are still samples to be taken
                 self._inq.put(('samp', frameno))
-            else:
+                return
+            elif self._active_samples <= 0:
                 self.done_sampling = True
                 _log.info('Finished sampling')
-            return
+                return
         # okay, let's get a search frame instead.
         try:
             srch_info = self.search_algo.get_search()

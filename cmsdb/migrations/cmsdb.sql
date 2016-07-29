@@ -44,7 +44,25 @@ CREATE TABLE abstractintegration (
 ALTER TABLE abstractintegration OWNER TO pgadmin;
 
 --
+<<<<<<< HEAD
 -- Name: brightcoveplayer; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+=======
+-- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE accountlimits (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp, 
+    updated_time timestamp DEFAULT current_timestamp 
+);
+
+
+ALTER TABLE accountlimits OWNER TO pgadmin;
+
+--
+-- Name: brightcoveplayer; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+>>>>>>> working
 --
 
 CREATE TABLE brightcoveplayer (
@@ -110,14 +128,17 @@ CREATE TABLE experimentstrategy (
     updated_time timestamp DEFAULT current_timestamp
 );
 
-
 ALTER TABLE experimentstrategy OWNER TO pgadmin;
 
 --
+<<<<<<< HEAD
 -- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+=======
+-- Name: feature; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+>>>>>>> working
 --
 
-CREATE TABLE accountlimits (
+CREATE TABLE feature (
     _data jsonb,
     _type character varying(128) NOT NULL,
     created_time timestamp DEFAULT current_timestamp,
@@ -125,7 +146,7 @@ CREATE TABLE accountlimits (
 );
 
 
-ALTER TABLE accountlimits OWNER TO pgadmin;
+ALTER TABLE feature OWNER TO pgadmin;
 
 --
 -- Name: neonapikey; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
@@ -245,6 +266,9 @@ CREATE TABLE thumbnailmetadata (
     _type character varying(128) NOT NULL,
     created_time timestamp DEFAULT current_timestamp,
     updated_time timestamp DEFAULT current_timestamp
+    created_time timestamp DEFAULT current_timestamp,
+    updated_time timestamp DEFAULT current_timestamp,
+    features bytea DEFAULT NULL
 );
 
 
@@ -290,7 +314,7 @@ CREATE TABLE trackeraccountidmapper (
 );
 
 
-ALTER TABLE thumbnailstatus OWNER TO pgadmin;
+ALTER TABLE trackeraccountidmapper OWNER TO pgadmin;
 
 --
 -- Name: users; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
@@ -372,9 +396,9 @@ COPY brightcoveplayer (_data, _type) FROM stdin;
 --
 
 COPY billingplans (_data, _type) FROM stdin;
-{"key": "demo", "plan_type": "demo", "max_video_posts": 10, "seconds_to_refresh_video_posts":123456789, "max_video_size":900.0}	BillingPlans
-{"key": "pro_monthly", "plan_type": "pro_monthly", "max_video_posts": 100, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
-{"key": "pro_yearly", "plan_type": "pro_yearly", "max_video_posts": 100, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
+{"key": "demo", "plan_type": "demo", "max_video_posts": 25, "seconds_to_refresh_video_posts":86400, "max_video_size":900.0}	BillingPlans
+{"key": "pro_monthly", "plan_type": "pro_monthly", "max_video_posts": 500, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
+{"key": "pro_yearly", "plan_type": "pro_yearly", "max_video_posts": 500, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
 {"key": "premeire", "plan_type": "premeire", "max_video_posts": 500000, "seconds_to_refresh_video_posts":1800, "max_video_size":500000.0}	BillingPlans
 \.
 
@@ -510,6 +534,7 @@ CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (
 CREATE UNIQUE INDEX brightcoveplayer_key ON brightcoveplayer USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX cdnhostingmetadatalist_key ON cdnhostingmetadatalist USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX feature_key ON feature USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX accountlimits_key ON accountlimits USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX billingplans_key ON billingplans USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonapikey_key ON neonapikey USING btree (((_data ->> 'key'::text)));
@@ -640,6 +665,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER experimentstrategy_update_updated_time_trig
 BEFORE UPDATE
 ON experimentstrategy
+FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column();
+
+CREATE TRIGGER feature_update_updated_time_trig
+BEFORE UPDATE
+ON feature
 FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column();
 
 CREATE TRIGGER accountlimits_update_updated_time_trig

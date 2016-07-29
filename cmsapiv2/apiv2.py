@@ -37,7 +37,7 @@ from utils.http import ResponseCode, HTTPVerbs
 import utils.sync
 from utils.options import define, options
 import uuid
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url, ALLOW_EXTRA
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url, In, ALLOW_EXTRA
 
 _log = logging.getLogger(__name__)
 
@@ -54,6 +54,8 @@ _already_exists_errors_ref = statemon.state.get_ref('already_exists_errors')
 
 statemon.define('internal_server_errors', int)
 _internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
+statemon.define('mandrill_template_not_found', int)
+statemon.define('mandrill_email_not_sent', int)
 
 define("token_secret",
     default="9gRvLemgdfHUlzpv",
@@ -87,7 +89,14 @@ define("check_subscription_interval",
     default=3600,
     help="how many seconds in between checking the billing integration",
     type=int)
-
+define("mandrill_api_key", 
+    default='Y7N4ELi5hMDp_RbTQH9OqQ', 
+    help="key from mandrillapp.com used to make api calls", 
+    type=str)
+define("mandrill_base_url", 
+    default='https://mandrillapp.com/api/1.0', 
+    help="mandrill base api url", 
+    type=str)
 define("stripe_api_key",
     default=None,
     help='The API key we use to talk to stripe.')
@@ -98,7 +107,6 @@ class TokenTypes(object):
     VERIFY_TOKEN = 2
     RESET_PASSWORD_TOKEN = 3
     SHARE_TOKEN = 4
-
 
 class APIV2Sender(object):
     def success(self, data, code=ResponseCode.HTTP_OK):
@@ -124,6 +132,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.uri = self.request.uri
         self.account = None
         self.account_limits = None
+        self.adjust_limits = True
         self.origin = self.request.headers.get("Origin") or\
             options.frontend_base_url
         self.executor = concurrent.futures.ThreadPoolExecutor(5)
@@ -161,8 +170,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.args = {}
         if len(self.request.query_arguments) > 0:
             for key, value in self.request.query_arguments.iteritems():
-                if key != 'token' or keep_token:
-                    self.args[key] = value[0]
+                if key not in ['share_token', 'token'] or keep_token:
+                    args[key] = value[0]
         if len(self.request.body) > 0:
             content_type = self.request.headers.get('Content-Type', None)
             # Allow either multipart/form-data or application/json.
@@ -180,6 +189,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 raise BadRequestError(
                     'Content-Type must be JSON or multipart/form-data')
 
+        self.args = args
         return self.args
 
     def set_account_id(request):
@@ -220,15 +230,14 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         account = request.account
         access_token = request.access_token
-        if account_required and not account:
-            raise NotAuthorizedError('account does not exist')
         if not access_token:
             raise NotAuthorizedError('this endpoint requires an access token')
+        if account_required and not account:
+            raise NotAuthorizedError('account does not exist')
 
         try:
             payload = JWTHelper.decode_token(access_token)
             username = payload.get('username')
-            account_id = payload.get('account_id')
 
             if username:
                 user = yield neondata.User.get(username, async=True)
@@ -265,17 +274,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
                     raise NotAuthorizedError('You cannot access this resource.')
                 raise NotAuthorizedError('user does not exist')
-            elif account_id:
-                # Handle account not associated with any user.
-                if account_id != account.get_id():
-                    # Mismatch of token and path.
-                    raise NotAuthorizedError('You cannot access this resource.')
-                if request.account:
-                    # No account-only acccessor is an internal account.
-                    if internal_only:
-                        raise NotAuthorizedError('Internal only resource.')
-                    raise tornado.gen.Return(True)
-                raise NotAuthorizedError('Account does not exist.')
             else:
                 raise jwt.InvalidTokenError
 
@@ -586,7 +584,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     @tornado.gen.coroutine
     def _handle_limit_inc_dec(self):
 
-        if self.account_limits is None:
+        if self.account_limits is None or not self.adjust_limits:
             return
         if self.get_status() not in [ResponseCode.HTTP_OK,
                                      ResponseCode.HTTP_ACCEPTED]:
@@ -594,7 +592,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         defined_limits_dict = self.get_limits()
         if defined_limits_dict is None:
-            return
+            defined_limits_dict = self.get_limits_after_prepare()
+            if defined_limits_dict is None: 
+                return  
 
         def _modify_limits(al): 
             try: 
@@ -645,6 +645,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 statemon.state.increment(ref=_unauthorized_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_UNAUTHORIZED)
+            if isinstance(exception, ForbiddenError):
+                statemon.state.increment(ref=_unauthorized_errors_ref,
+                                         safe=False)
+                self.set_status(ResponseCode.HTTP_FORBIDDEN)
             if isinstance(exception, NotImplementedError):
                 statemon.state.increment(ref=_not_implemented_errors_ref,
                                          safe=False)
@@ -679,15 +683,17 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             self.set_status(ResponseCode.HTTP_CONFLICT)
             statemon.state.increment(ref=_already_exists_errors_ref,
                                      safe=False)
-            self.error('this item already exists', extra_data=get_exc_message(exception))
+            self.error(get_exc_message(exception))
 
         elif isinstance(exception, neondata.ThumbDownloadError):
             self.set_status(ResponseCode.HTTP_BAD_REQUEST)
             self.error('failed to download thumbnail',
                        extra_data=get_exc_message(exception))
         elif isinstance(exception, IOError):
-            self.set_status(exception.errno)
-            self.error(exception.strerror, code=self.get_status())
+            if exception.errno in tornado.httputil.responses:
+                self.set_status(exception.errno)
+            message = exception.strerror or exception.message
+            self.error(message, code=self.get_status())
         else:
             _log.exception(''.join(traceback.format_tb(kwargs['exc_info'][2])))
             statemon.state.increment(ref=_internal_server_errors_ref,
@@ -722,7 +728,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
     @classmethod
     @tornado.gen.coroutine
-    def db2api(cls, obj, fields=None):
+    def db2api(cls, obj, fields=None, **kwargs):
         """Converts a database object to a response dictionary
 
         Keyword arguments:
@@ -740,7 +746,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 if field in passthrough_fields:
                     retval[field] = getattr(obj, field)
                 else:
-                    retval[field] = yield cls._convert_special_field(obj, field)
+                    retval[field] = yield cls._convert_special_field(
+                        obj, field, **kwargs)
             except AttributeError:
                 pass
         raise tornado.gen.Return(retval)
@@ -784,22 +791,35 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 class ShareableContentHandler(APIV2Handler):
     """Enable authorization by URL parameter share_token."""
 
+    def initialize(self):
+        super(ShareableContentHandler, self).initialize()
+        self.share_payload = None
+
     @tornado.gen.coroutine
     def is_authorized(request,
                       access_level_required,
                       account_required=True,
                       internal_only=False):
-        """Allow access if request has query token and matches resource"""
+        """Allow access if request has share token and matches resource"""
         args = request.parse_args(True)
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
-            # Implement for just video resources reads for now.
-            pl_account_id, pl_video_id = payload['content_id'].split('_')
+            pl_account_id, pl_content_id = str(payload['content_id']).split('_', 1)
             if (access_level_required & neondata.AccessLevels.READ and
-                payload['content_type'] == 'VideoMetadata' and
-                pl_account_id == request.account_id and
-                pl_video_id == args['video_id']):
-                   raise tornado.gen.Return(True)
+                pl_account_id == request.account_id):
+
+                if payload['content_type'] == 'VideoMetadata':
+                    pl_key = neondata.InternalVideoID.generate(
+                        pl_account_id,
+                        pl_content_id)
+                    video = yield neondata.VideoMetadata.get(pl_key, async=True)
+                    # Getting the video implicitly validates the account id.
+                    if video is None:
+                        raise NotAuthorizedError('Invalid token')
+                    # Keep the valid payload around for security checks.
+                    request.share_payload = payload
+                    raise tornado.gen.Return(True)
+
         except (ValueError, KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.
             pass
@@ -809,6 +829,101 @@ class ShareableContentHandler(APIV2Handler):
                 account_required,
                 internal_only)
         raise tornado.gen.Return(rv)
+
+class MandrillEmailSender(object): 
+    @staticmethod
+    @tornado.gen.coroutine 
+    def send_mandrill_email(send_to_email,
+                            template_slug,
+                            template_args=None, 
+                            reply_to=None, 
+                            subject=None, 
+                            from_email=None, 
+                            from_name=None):
+  
+        url = '{base_url}/templates/info.json?key={api_key}&name={slug}'.format(
+            base_url=options.mandrill_base_url, 
+            api_key=options.mandrill_api_key, 
+            slug=template_slug) 
+            
+        request = tornado.httpclient.HTTPRequest(
+            url=url,
+            method="GET",
+            request_timeout=8.0)
+
+        response = yield utils.http.send_request(request, async=True)
+
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_template_not_found')
+            raise BadRequestError('Mandrill template unable to be loaded.')
+        
+        template_obj = json.loads(response.body) 
+        template_string = template_obj['code'] 
+
+        if template_args: 
+            email_html = template_string.format(**template_args)
+        else: 
+            email_html = template_string
+ 
+        # send email via mandrill
+        headers_dict = { 
+            'Reply-To' : reply_to if reply_to else 'noreply@neon-lab.com' 
+        }
+        
+        to_list = [{ 
+            'email' : send_to_email, 
+            'type' : 'to'     
+        }]  
+ 
+        message_dict = { 
+            'html' : email_html, 
+            'headers' : headers_dict, 
+            'to' : to_list  
+        }
+
+        if subject:
+            message_dict['subject'] = subject
+        elif template_obj.get('subject'):
+            message_dict['subject'] = template_obj['subject']
+
+        if from_email:
+            message_dict['from_email'] = from_email
+        elif template_obj.get('from_email'):
+            message_dict['from_email'] = template_obj['from_email']
+
+        if from_name:
+            message_dict['from_name'] = from_name
+        elif template_obj.get('from_name'):
+            message_dict['from_name'] = template_obj['from_name']
+
+        json_body = { 
+            'key' : options.mandrill_api_key, 
+            'message' : message_dict  
+        }
+ 
+        url = '{base_url}/messages/send.json'.format(
+            base_url=options.mandrill_base_url)
+        
+        request = tornado.httpclient.HTTPRequest( 
+            url=url, 
+            body=json.dumps(json_body),
+            method='POST', 
+            headers = {"Content-Type" : "application/json"},
+            request_timeout=20.0)
+ 
+        response = yield utils.http.send_request(request, async=True)
+
+        resp_body = json.loads(response.body) 
+        try:  
+            if response.code != ResponseCode.HTTP_OK or \
+               resp_body[0].get('reject_reason') is not None:
+                statemon.state.increment('mandrill_email_not_sent')
+                raise BadRequestError(
+                    'Unable to send email, response = %s' % resp_body) 
+        except KeyError: 
+            pass 
+
+        raise tornado.gen.Return(True)  
 
 class ShareJWTHelper(object):
     """Implements encode and decode of shared user content JWT tokens.
@@ -874,10 +989,13 @@ class SaveError(Error):
         self.msg = msg
         self.code = code
 
-class SubmissionError(tornado.web.HTTPError):
+class InternalError(Error):
     def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR):
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
+
+class SubmissionError(InternalError): pass
+class ResourceDownloadError(InternalError): pass
  
 class NotFoundError(tornado.web.HTTPError):
     def __init__(self,
@@ -890,6 +1008,13 @@ class NotAuthorizedError(tornado.web.HTTPError):
     def __init__(self,
                  msg='not authorized',
                  code=ResponseCode.HTTP_UNAUTHORIZED):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+
+class ForbiddenError(tornado.web.HTTPError):
+    def __init__(self,
+                 msg='Forbidden',
+                 code=ResponseCode.HTTP_FORBIDDEN):
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 
