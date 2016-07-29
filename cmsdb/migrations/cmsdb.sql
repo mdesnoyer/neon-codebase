@@ -44,25 +44,21 @@ CREATE TABLE abstractintegration (
 ALTER TABLE abstractintegration OWNER TO pgadmin;
 
 --
-<<<<<<< HEAD
--- Name: brightcoveplayer; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
-=======
--- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+-- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 
 CREATE TABLE accountlimits (
     _data jsonb,
     _type character varying(128) NOT NULL,
-    created_time timestamp DEFAULT current_timestamp, 
-    updated_time timestamp DEFAULT current_timestamp 
+    created_time timestamp DEFAULT current_timestamp,
+    updated_time timestamp DEFAULT current_timestamp
 );
 
 
 ALTER TABLE accountlimits OWNER TO pgadmin;
 
 --
--- Name: brightcoveplayer; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
->>>>>>> working
+-- Name: brightcoveplayer; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 
 CREATE TABLE brightcoveplayer (
@@ -131,11 +127,7 @@ CREATE TABLE experimentstrategy (
 ALTER TABLE experimentstrategy OWNER TO pgadmin;
 
 --
-<<<<<<< HEAD
--- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
-=======
--- Name: feature; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
->>>>>>> working
+-- Name: feature; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 
 CREATE TABLE feature (
@@ -264,8 +256,6 @@ ALTER TABLE tag_thumbnail OWNER TO pgadmin;
 CREATE TABLE thumbnailmetadata (
     _data jsonb,
     _type character varying(128) NOT NULL,
-    created_time timestamp DEFAULT current_timestamp,
-    updated_time timestamp DEFAULT current_timestamp
     created_time timestamp DEFAULT current_timestamp,
     updated_time timestamp DEFAULT current_timestamp,
     features bytea DEFAULT NULL

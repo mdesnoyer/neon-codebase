@@ -1240,10 +1240,10 @@ class ThumbnailResponse(object):
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['video_id', 'thumbnail_id', 'rank', 'frameno',
+        return ['video_id', 'thumbnail_id', 'rank', 'frameno', 'tag_ids',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions',
-                'tag_ids']
+                'type', 'external_ref', 'created', 'updated', 'renditions']
+
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1252,7 +1252,7 @@ class ThumbnailResponse(object):
 
     @classmethod
     @tornado.gen.coroutine
-    def _convert_special_field(cls, obj, field):
+    def _convert_special_field(cls, obj, field, age=None, gender=None):
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
@@ -1262,7 +1262,7 @@ class ThumbnailResponse(object):
             tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key, async=True)
             retval = list(tag_ids)
         elif field == 'neon_score':
-            retval = obj.get_neon_score()
+            retval = obj.get_neon_score(age=age, gender=gender)
         elif field == 'url':
             retval = obj.urls[0] if obj.urls else []
         elif field == 'external_ref':
@@ -1413,7 +1413,7 @@ class TagSearchInternalHandler(ThumbnailResponse, APIV2Handler):
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
-class ThumbnailHandler(ShareableContentHandler):
+class ThumbnailHandler(ThumbnailResponse, ShareableContentHandler):
 
     def _initialize_predictor(self):
         '''Instantiate and connect an Aquila predictor.'''
@@ -1480,14 +1480,6 @@ class ThumbnailHandler(ShareableContentHandler):
 
         # Save the image file and thumbnail data object.
         yield self._set_thumb(rank)
-
-        # Update video's thumbnail list.
-        video = yield neondata.VideoMetadata.modify(
-            _video_id,
-            lambda x: x.thumbnail_ids.append(self.thumb.key),
-            async=True)
-        if not video:
-            raise SaveError("Can't save thumbnail to video {}".format(_video_id))
 
         statemon.state.increment('post_thumbnail_oks')
         yield self._respond_with_thumb()
@@ -1696,42 +1688,6 @@ class ThumbnailHandler(ShareableContentHandler):
             HTTPVerbs.POST: neondata.AccessLevels.CREATE,
             HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
             'account_required': [HTTPVerbs.PUT, HTTPVerbs.POST]}
-
-    @classmethod
-    def _get_default_returned_fields(cls):
-        return ['video_id', 'thumbnail_id', 'rank', 'frameno',
-                'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions']
-    @classmethod
-    def _get_passthrough_fields(cls):
-        return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
-                'created', 'updated']
-
-    @classmethod
-    @tornado.gen.coroutine
-    def _convert_special_field(cls, obj, field, age=None, gender=None):
-        if field == 'video_id':
-            retval = neondata.InternalVideoID.to_external(
-                neondata.InternalVideoID.from_thumbnail_id(obj.key))
-        elif field == 'thumbnail_id':
-            retval = obj.key
-        elif field == 'neon_score':
-            retval = obj.get_neon_score(age=age, gender=gender)
-        elif field == 'url':
-            retval = obj.urls[0] or []
-        elif field == 'external_ref':
-            retval = obj.external_id
-        elif field == 'renditions':
-            urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
-            retval = ThumbnailHelper.renditions_of(urls)
-        elif field == 'feature_ids': 
-            retval = ThumbnailHelper.get_feature_ids(obj,
-                                                     age=age,
-                                                     gender=gender) 
-        else:
-            raise BadRequestError('invalid field %s' % field)
-
-        raise tornado.gen.Return(retval)
 
 
 '''*********************************************************************
@@ -2026,6 +1982,41 @@ class VideoHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
+    def get_search_results(account_id=None, since=None, until=None,
+                           query=None, limit=None, fields=None,
+                           base_url='/api/v2/videos/search', show_hidden=False):
+
+        videos, until_time, since_time = yield neondata.VideoMetadata.objects_and_times(
+            account_id=account_id,
+            since=since,
+            until=until,
+            limit=limit,
+            query=query,
+            show_hidden=show_hidden,
+            async=True)
+
+        vid_dict = yield VideoHelper.build_response(videos, fields)
+
+        vid_dict['next_page'] = VideoHelper.build_page_url(
+            base_url,
+            until_time if until_time else 0.0,
+            limit=limit,
+            page_type='until',
+            query=query,
+            fields=fields,
+            account_id=account_id)
+        vid_dict['prev_page'] = VideoHelper.build_page_url(
+            base_url,
+            since_time if since_time else 0.0,
+            limit=limit,
+            page_type='since',
+            query=query,
+            fields=fields,
+            account_id=account_id)
+        raise tornado.gen.Return(vid_dict)
+
+    @staticmethod
+    @tornado.gen.coroutine
     def build_response(videos, fields, video_ids=None):
 
         vid_dict = {}
@@ -2127,7 +2118,7 @@ class VideoHelper(object):
                         main_tids = video.job_results[0].thumbnail_ids
                 new_video['thumbnails'] = yield \
                   VideoHelper.get_thumbnails_from_ids(
-                      main_tids + video.non_job_thumb_ids)
+                      (main_tids + video.non_job_thumb_ids))
             elif field == 'demographic_thumbnails':
                 new_video['demographic_thumbnails'] = []
                 for video_result in video.job_results:
@@ -2136,9 +2127,9 @@ class VideoHelper(object):
                         age=video_result.age,
                         gender=video_result.gender)
                     cur_entry = {
-                        'gender' : video_result.gender,
-                        'age' : video_result.age,
-                        'thumbnails' : cur_thumbs}
+                        'gender': video_result.gender,
+                        'age': video_result.age,
+                        'thumbnails': cur_thumbs}
                     if 'bad_thumbnails' in fields:
                         cur_entry['bad_thumbnails'] = yield \
                           VideoHelper.get_thumbnails_from_ids(
@@ -2239,9 +2230,9 @@ class VideoHandler(ShareableContentHandler):
                 Length(min=1, max=2048)),
             'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
             'callback_email': All(Coerce(str), Length(min=1, max=2048)),
-            'n_thumbs': All(Coerce(int), Range(min=1, max=32))
-              'gender': In(model.predictor.VALID_GENDER),
-              'age': In(model.predictor.VALID_AGE_GROUP)
+            'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
+            'gender': In(model.predictor.VALID_GENDER),
+            'age': In(model.predictor.VALID_AGE_GROUP)
         })
 
         args = self.parse_args()
@@ -2376,12 +2367,10 @@ class VideoHandler(ShareableContentHandler):
                 args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
-            video = yield neondata.VideoMetadata.modify(
-                internal_video_id,
-                _update_video,
-                async=True)
-        else:
-            video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
+        video = yield neondata.VideoMetadata.modify(
+            internal_video_id,
+            _update_video,
+            async=True)
 
         if not video:
             raise NotFoundError('video does not exist with id: %s' %

@@ -5940,7 +5940,7 @@ class VideoJobThumbnailList(UnsaveableStoredObject):
         self.age = age
         self.gender = gender
 
-class VideoMetadata(StoredObject):
+class VideoMetadata(Searchable, StoredObject):
     '''
     Schema for metadata associated with video which gets stored
     when the video is processed
@@ -6104,7 +6104,7 @@ class VideoMetadata(StoredObject):
         # to the two objects are atomic. For now, put in the thumbnail
         # data and then update the video metadata.
         if save_objects:
-            sucess = yield tornado.gen.Task(thumb.save)
+            sucess = yield thumb.save(async=True)
             if not sucess:
                 raise IOError("Could not save thumbnail")
 
@@ -6116,8 +6116,8 @@ class VideoMetadata(StoredObject):
             if updated_video is None:
                 # It wasn't in the database, so save this object
                 _add_thumb_to_video_object(self)
-                sucess = yield self.save(async=True)
-                if not sucess:
+                success = yield self.save(async=True)
+                if not success:
                     raise IOError("Could not save video data")
             else:
                 self.__dict__ = updated_video.__dict__

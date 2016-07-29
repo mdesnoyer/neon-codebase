@@ -53,6 +53,9 @@ define('run_stripe_on_test_account', default=0, type=int,
 
 _log = logging.getLogger(__name__)
 
+# Supress momoko debug.
+logging.getLogger('momoko').setLevel(logging.INFO)
+
 class TestBase(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.send_email_mocker = patch(
@@ -3093,14 +3096,15 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals({
-            'estimated_time_remaining': None,
-            'job_id': 'job1',
-            'testing_enabled' : False,
-            'url' : 'http://someurl.com',
-            'state': neondata.ExternalRequestState.PROCESSED,
-            'video_id': 'vid1',
-            'publish_date' : '2015-06-10',
-            'title' : 'Title'
+                'estimated_time_remaining': None,
+                'job_id': 'job1',
+                'testing_enabled' : False,
+                'url' : 'http://someurl.com',
+                'state': neondata.ExternalRequestState.PROCESSED,
+                'video_id': 'vid1',
+                'publish_date' : '2015-06-10',
+                'title' : 'Title',
+                'tag_ids': []
             },
             rjson['videos'][0])
 
@@ -3983,7 +3987,8 @@ class TestThumbnailHandler(TestControllersBase):
         self.video = self.video0 = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(
                 self.account_id_api_key,
-                self.video_id))
+                self.video_id),
+            tids=[self.thumb.get_id()])
         self.video0.save()
         self.video1_id = 'vid1'
         self.video1 = neondata.VideoMetadata(
@@ -4054,10 +4059,10 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(response.code, 202)
 
         video = neondata.VideoMetadata.get(self.video.get_id())
-        self.assertEqual(len(video.thumbnail_ids), 1)
+        self.assertEqual(len(video.thumbnail_ids), 2)
         self.assertEqual(self.im_download_mock.call_args[0][0], image_filename)
 
-        thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
+        thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[-1])
         self.assertEqual(thumbnail.external_id, thumbnail_ref)
         self.assertEqual(thumbnail.video_id, self.video.get_id())
 
@@ -4067,7 +4072,8 @@ class TestThumbnailHandler(TestControllersBase):
         response = yield self.http_client.fetch(url2)
         rjson = json.loads(response.body)
         valid_tag_ids = {'tag_0', 'tag_2'}
-        self.assertEqual(set(rjson['tag_ids']), valid_tag_ids)
+        thumb1 = rjson['thumbnails'][0]
+        self.assertEqual(set(thumb1['tag_ids']), valid_tag_ids)
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_with_some_there(self):
@@ -4095,14 +4101,14 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(response.code, 202)
 
         video = neondata.VideoMetadata.get(self.video.get_id())
-        self.assertEqual(len(video.thumbnail_ids), 2)
+        self.assertEqual(len(video.thumbnail_ids), 3)
         self.assertEqual(self.im_download_mock.call_args[0][0], 'blah.jpg')
 
-        thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[1])
-        self.assertEquals(thumbnail.external_id, 'kevin')
-        self.assertEquals(thumbnail.video_id, video.get_id())
-        self.assertEquals(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
-        self.assertEquals(thumbnail.rank, 0)
+        thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[-1])
+        self.assertEqual(thumbnail.external_id, 'kevin')
+        self.assertEqual(thumbnail.video_id, video.get_id())
+        self.assertEqual(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
+        self.assertEqual(thumbnail.rank, 0)
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body(self):
@@ -4126,9 +4132,9 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(response.code, 202)
 
         video = neondata.VideoMetadata.get(self.video.get_id())
-        self.assertEqual(len(video.thumbnail_ids), 1)
+        self.assertEqual(len(video.thumbnail_ids), 2)
 
-        thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
+        thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[-1])
         self.assertEqual(thumbnail.external_id, 'kevin')
         self.assertEqual(thumbnail.video_id, video.get_id())
         self.assertEqual(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
@@ -4217,6 +4223,9 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
+
+        self.assertEqual(1, len(self.video.thumbnail_ids))
+
         url = self.get_url('/api/v2/%s/thumbnails?video_id=%s&url=%s' % (
             self.account_id_api_key,
             self.video_id,
@@ -4224,7 +4233,7 @@ class TestThumbnailHandler(TestControllersBase):
         response = yield self.http_client.fetch(url, body='', method='POST')
 
         self.assertEqual(response.code, 202)
-        self.im_download_mock.side_effect = [self.random_image]
+        self.im_download_mock.side_effect = [PILImageUtils.create_random_image(480, 640)]
         self.assertEqual(self.im_download_mock.call_args[0][0], 'blah.jpg')
 
         url = self.get_url('/api/v2/%s/thumbnails?video_id=%s&url=%s' % (
@@ -4237,7 +4246,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(response.code, 202)
         video = neondata.VideoMetadata.get(self.video.get_id())
         thumbnail_ids = video.thumbnail_ids
-        self.assertEquals(len(video.thumbnail_ids), 2)
+        self.assertEqual(len(video.thumbnail_ids), 3)
 
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
@@ -8690,9 +8699,8 @@ class TestTagHandler(TestVerifiedControllersBase):
         acct.save()
         self.account_id = acct.neon_api_key
         thumbnails = [neondata.ThumbnailMetadata(
-                          uuid.uuid1().hex,
-                          account_id=self.account_id)
-                      for _ in xrange(5)]
+                          uuid.uuid1().hex)
+                      for _ in range(5)]
         [t.save() for t in thumbnails]
         self.thumbnail_ids = [t.get_id() for t in thumbnails]
         self.url = self.get_url('/api/v2/%s/tags/' % self.account_id)

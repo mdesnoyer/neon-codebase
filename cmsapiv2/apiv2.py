@@ -171,7 +171,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if len(self.request.query_arguments) > 0:
             for key, value in self.request.query_arguments.iteritems():
                 if key not in ['share_token', 'token'] or keep_token:
-                    args[key] = value[0]
+                    self.args[key] = value[0]
         if len(self.request.body) > 0:
             content_type = self.request.headers.get('Content-Type', None)
             # Allow either multipart/form-data or application/json.
@@ -189,7 +189,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 raise BadRequestError(
                     'Content-Type must be JSON or multipart/form-data')
 
-        self.args = args
         return self.args
 
     def set_account_id(request):
