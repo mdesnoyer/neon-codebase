@@ -1,11 +1,13 @@
 """
 Airflow DAG for running the Neon Big Data Pipeline. 
 
-This DAG comprises of the following major tasks,
-Stage files for the MapReduce Job based on time
-RawTracker MapReduce Cleaning Job
-Loading of the Impala Tables
-Clean up
+This DAG comprises of the following major tasks, 1) Stage files for the MapReduce Job based on time, 
+2) RawTracker MapReduce Cleaning Job, 3) Loading of the Impala Tables, 4) Clean up
+
+***************************************************************************************************
+* Airflow start date should be equal to current UTC date when rebuilding airflow from scratch.    *
+* This start date needs to be passed through the JSON in stack settings.                          * 
+***************************************************************************************************
 
 ---------------- 
 Airflow commands
@@ -16,6 +18,27 @@ sudo su -c "airflow clear -t 'create_table.*' -d -c clicklogs" -s /bin/sh statsm
 To burn down and re-build Airflow metadata database,
 sudo su -c "airflow resetdb -y" -s /bin/sh statsmanager
 sudo su -c "airflow initdb" -s /bin/sh statsmanager
+
+------------------
+Possible Run Cases
+------------------
+When airflow start date == execution date (Day 1, HOUR OO): Beginning of time
+    The input for this will be the full S3 path and output will be HDFS. This run will also include
+    a task to copy/checkpoint the data from HDFS to S3. This is going to be a big run hence the task
+    instances will be spun up and later brought down once run is complete.
+
+When airflow start date != execution date (Any day, HOUR 00):
+    For the first run of each day, the input data will still be pulled off the previous day's 
+    S3 bucket for processing. Reason being, the previous day's last run will be at 21:00 so we
+    dont want to miss processing the data between 21:00 to 23:59 of previous day.
+
+When airflow start date != execution date (Any day, HOUR XX):
+    Incremental processing
+
+When cluster goes down:
+    Dag will be paused for cluster creation. Once new cluster comes up, the airflow tasks 
+    pertaining to impala loads will be cleared. The first run is going to be big hence the task
+    instances will be spun up and later brought down once run is complete.
 
 Author: Robb Wagoner (@robbwagoner), Nadeem Ahmed Nazeer (@nadeem86)
 Copyright Neon Labs 2016
@@ -200,7 +223,7 @@ def _get_s3_cleaned_prefix(execution_date, prefix=''):
     :return type: str
     """
     return _do_s3_prefix_fixup(
-        os.path.join(prefix, execution_date.strftime("%Y/%m/%d"), ''))
+        os.path.join(prefix, execution_date.strftime("%Y/%m/%d/%H"), ''))
 
 
 def _get_s3_input_files(dag, execution_date, task, input_path):
@@ -420,19 +443,26 @@ def _stage_files(**kwargs):
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
 
-    _log.info('Airflow start date is %s' % airflow_start_date)
-
     # Check if this is the first run and take appropriate action
     is_first_run, is_first_instance_run = check_first_run(execution_date)
     if is_first_run and is_first_instance_run:
         _log.info("This is first run, skipping of stage files as none would exist")
         return
 
+    # Check if this is the first run of the day, if so pull the previous day files for processing
+    if execution_date.strftime("%H") == '00':
+        staging_date = execution_date - timedelta(days=1)
+    else:
+        staging_date = execution_date
+
+    _log.info('Airflow start date is %s' % airflow_start_date)
+    _log.info('Staging date is %s' % staging_date.strftime('%Y/%m/%d'))
+
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
 
     input_files = _get_s3_input_files(dag=dag,
-                                      execution_date=execution_date,
+                                      execution_date=staging_date,
                                       task=task,
                                       input_path=kwargs['input_path'])
 
@@ -509,7 +539,6 @@ def _run_mr_cleaning_job(**kwargs):
                                    'com.neon.stats.RawTrackerMR',
                                    cleaning_job_input_path,
                                    cleaning_job_output_path,
-                                   #cleaned_output_path,
                                    map_memory_mb=options.cleaning_mr_memory,
                                    timeout=kwargs['timeout'])
     except Exception as e:
