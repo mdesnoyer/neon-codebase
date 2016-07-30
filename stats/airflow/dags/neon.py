@@ -426,6 +426,8 @@ def _quiet_period(**kwargs):
     :param kwargs:
     :return:
     """
+    _log.info('Quiet Period is %s' % options.quiet_period)
+
     deadline = (kwargs['execution_date'] + kwargs['dag'].schedule_interval + 
                 kwargs['quiet_period'])
     now = datetime.now()
