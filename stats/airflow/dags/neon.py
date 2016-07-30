@@ -426,14 +426,19 @@ def _quiet_period(**kwargs):
     :param kwargs:
     :return:
     """
-    _log.info('Quiet Period is %s' % options.quiet_period)
 
-    deadline = (kwargs['execution_date'] + kwargs['dag'].schedule_interval + 
-                kwargs['quiet_period'])
-    now = datetime.now()
-    if now < deadline:
-        _log.info("waiting for clicklog files to be written to S3 (quiet period): {deadline}".format(deadline=deadline))
-        time.sleep((deadline - now).total_seconds())
+    wait_time = kwargs['quiet_period']
+
+    _log.info('execution_date is %s' % execution_date.strftime("%Y/%m/%d/%H"))
+    _log.info('datetime.utcnow() is %s' % datetime.utcnow().strftime("%Y/%m/%d/%H"))
+    _log.info('Quiet Period is %s seconds' % wait_time)
+
+    # Do not wait when doing backfill
+    if execution_date.strftime("%Y/%m/%d/%H") < datetime.utcnow().strftime("%Y/%m/%d/%H"):
+        _log.info('Skipping quiet period as this is a backfill run')
+    else:
+        _log.info('Sleeping for quiet period')
+        time.sleep(wait_time)
 
 
 def _stage_files(**kwargs):
@@ -777,7 +782,7 @@ quiet_period = PythonOperator(
     dag=clicklogs,
     python_callable=_quiet_period,
     provide_context=True,
-    op_kwargs=dict(quiet_period=timedelta(minutes=options.quiet_period)))
+    op_kwargs=dict(quiet_period=(options.quiet_period * 60)))
 quiet_period.set_upstream(check_cluster)
 
 
