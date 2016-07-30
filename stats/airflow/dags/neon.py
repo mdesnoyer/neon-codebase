@@ -428,6 +428,7 @@ def _quiet_period(**kwargs):
     """
 
     wait_time = kwargs['quiet_period']
+    execution_date = kwargs['execution_date']
 
     _log.info('execution_date is %s' % execution_date.strftime("%Y/%m/%d/%H"))
     _log.info('datetime.utcnow() is %s' % datetime.utcnow().strftime("%Y/%m/%d/%H"))
