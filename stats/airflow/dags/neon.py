@@ -638,12 +638,18 @@ def _execution_date_has_input_files(**kwargs):
 
     input_path = kwargs['input_path']
     
-    # Check if this is the first run and take appropriate action
+    # Check if this is the first run and allow only first hour run ('00') to run
+    # Skip all other runs for the current date. This will get get processed at 
+    # hour ('00') run of next day. This is to ensure to minimize the backfill
     is_first_run, is_first_instance_run = check_first_run(execution_date)
 
-    if is_first_run and is_first_instance_run:
-        _log.info("This is first run, skipping the check for existence of files")
-        return 'stage_files'
+    if is_first_run:
+        if is_first_instance_run:
+            _log.info("This is first instance of run, skipping the check for existence of files")
+            return 'stage_files'
+        else:
+            _log.info("Skipping the run for other instances of first run")
+            return 'no_input_files'
 
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
 
@@ -844,8 +850,7 @@ for event in __EVENTS:
         task_id='create_table_%s' % event,
         dag=clicklogs,
         python_callable=_create_tables,
-        op_kwargs=dict(event=event),
-        depends_on_past=True)
+        op_kwargs=dict(event=event))
     create_op.set_upstream(mr_cleaning_job)
 
     # Load the data into the impala table
@@ -856,8 +861,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        priority_weight=9,
-        depends_on_past=True)
+        priority_weight=9)
     op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
 
