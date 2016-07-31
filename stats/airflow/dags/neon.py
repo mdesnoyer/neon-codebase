@@ -426,13 +426,8 @@ def _quiet_period(**kwargs):
     :param kwargs:
     :return:
     """
-
     wait_time = kwargs['quiet_period']
     execution_date = kwargs['execution_date']
-
-    _log.info('execution_date is %s' % execution_date.strftime("%Y/%m/%d/%H"))
-    _log.info('datetime.utcnow() is %s' % datetime.utcnow().strftime("%Y/%m/%d/%H"))
-    _log.info('Quiet Period is %s seconds' % wait_time)
 
     # Do not wait when doing backfill
     if execution_date.strftime("%Y/%m/%d/%H") < datetime.utcnow().strftime("%Y/%m/%d/%H"):
@@ -861,7 +856,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        priority_weight=10,
+        priority_weight=9,
         depends_on_past=True)
     op.set_upstream([create_op, mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
@@ -883,7 +878,7 @@ update_table_build_times = PythonOperator(
     dag=clicklogs,
     trigger_rule='all_done',
     provide_context=True,
-    priority_weight=9,
+    priority_weight=10,
     python_callable=_update_table_build_times,
     depends_on_past=True)
 update_table_build_times.set_upstream(load_impala_tables)
