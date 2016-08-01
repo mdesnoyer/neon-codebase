@@ -4032,7 +4032,10 @@ class TestThumbnailHandler(TestControllersBase):
            'model.predictor.DeepnetPredictor.predict')
         self.model_predict_mock = self._future_wrap_mock(
             self.model_predict_mocker.start())
-        self.model_predict_mock.side_effect = [.5]
+        self.model_predict_mock.side_effect = [(
+            .5,
+            np.random.rand(1024),
+            '20160713-test')]
         self.verify_account_mock.return_value = True
 
         super(TestThumbnailHandler, self).setUp()

@@ -1592,10 +1592,7 @@ class ThumbnailHandler(ThumbnailResponse, ShareableContentHandler):
     def _score_image(self):
         if not hasattr(self, 'predictor'):
             self._initialize_predictor()
-        yield self.thumb.score_image(
-            self.predictor,
-            self.image,
-            True)
+        yield self.thumb.score_image(self.predictor, self.image, False)
 
     @tornado.gen.coroutine
     def _respond_with_thumb(self):
