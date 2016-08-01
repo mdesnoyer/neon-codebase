@@ -52,7 +52,10 @@ def get_total_conversions(fn):
         for line in f:
             fields = line.strip().split(',')
             if len(fields) >= 2:
-                retval[fields[0]] = float(fields[1])
+                try:
+                    retval[fields[0]] = float(fields[1])
+                except ValueError as e:
+                    pass
     return retval
 
 def get_videoids_with_data():
