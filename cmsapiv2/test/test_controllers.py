@@ -8712,8 +8712,8 @@ class TestTagHandler(TestVerifiedControllersBase):
             name='Green',
             tag_type=neondata.TagType.GALLERY)
         tag_1.save()
-        thumb_1 = neondata.ThumbnailMetadata('t1', account_id=self.account_id)
-        thumb_2 = neondata.ThumbnailMetadata('t2', account_id=self.account_id)
+        thumb_1 = neondata.ThumbnailMetadata('%s_t1' % self.account_id)
+        thumb_2 = neondata.ThumbnailMetadata('%s_t2' % self.account_id)
         neondata.TagThumbnail.save_many(
             tag_id=tag_1.get_id(),
             thumbnail_id=[thumb_1.get_id(), thumb_2.get_id()])
@@ -8745,8 +8745,7 @@ class TestTagHandler(TestVerifiedControllersBase):
             tag_type=neondata.TagType.GALLERY)
         tag.save()
         thumbnails = [neondata.ThumbnailMetadata(
-            't%d' % i,
-            account_id=self.account_id) for i in range(20)]
+            '%s_%d' % (self.account_id, i)) for i in range(20)]
         [t.save() for t in thumbnails]
         thumb_ids = [t.get_id() for t in thumbnails]
         body = json.dumps({
@@ -9004,9 +9003,10 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
         # Make some thumbnails.
         thumbnails = [neondata.ThumbnailMetadata(
-                          uuid.uuid1().hex,
-                          account_id=self.account_id)
-                      for _ in range(5)]
+            '%s_%s' % (
+                uuid.uuid1().hex,
+                self.account_id))
+              for _ in range(5)]
         removed_thumb = random.choice(thumbnails)
         [t.save() for t in thumbnails]
         given_thumb_ids = {t.get_id() for t in thumbnails

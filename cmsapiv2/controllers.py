@@ -1148,7 +1148,7 @@ class TagHandler(APIV2Handler):
         if thumbs:
             valid_thumb_ids = [
                 thumb.get_id() for thumb in thumbs
-                if thumb and thumb.account_id == tag.account_id]
+                if thumb and thumb.get_account_id() == tag.account_id]
             if valid_thumb_ids:
                 result = yield neondata.TagThumbnail.save_many(
                     tag_id=tag.get_id(),
@@ -1590,7 +1590,6 @@ class ThumbnailHandler(ThumbnailResponse, ShareableContentHandler):
             self._initialize_predictor()
         yield self.thumb.score_image(
             self.predictor,
-            self.model_version,
             self.image,
             True)
 
@@ -1947,38 +1946,11 @@ class VideoHelper(object):
             thumbnails = yield [ThumbnailHandler.db2api(x, gender=gender,
                                                         age=age) for
                                 x in thumbnails]
-            renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
+            renditions = yield ThumbnailHelper.get_renditions(tids)
             for thumbnail, tid in zip(*(thumbnails, tids)):
                 thumbnail['renditions'] = renditions[tid]
 
-        videos, until_time, since_time = yield neondata.VideoMetadata.objects_and_times(
-            account_id=account_id,
-            since=since,
-            until=until,
-            limit=limit,
-            query=query,
-            show_hidden=show_hidden,
-            async=True)
-
-        vid_dict = yield VideoHelper.build_response(videos, fields)
-
-        vid_dict['next_page'] = VideoHelper.build_page_url(
-            base_url,
-            until_time if until_time else 0.0,
-            limit=limit,
-            page_type='until',
-            query=query,
-            fields=fields,
-            account_id=account_id)
-        vid_dict['prev_page'] = VideoHelper.build_page_url(
-            base_url,
-            since_time if since_time else 0.0,
-            limit=limit,
-            page_type='since',
-            query=query,
-            fields=fields,
-            account_id=account_id)
-        raise tornado.gen.Return(vid_dict)
+        raise tornado.gen.Return(thumbnails)
 
     @staticmethod
     @tornado.gen.coroutine
@@ -2390,7 +2362,7 @@ class VideoHandler(ShareableContentHandler):
                 _update_request,
                 async=True)
 
-            db2api_fields.append('title')
+            db2api_fields.add('title')
 
         statemon.state.increment('put_video_oks')
         output = yield self.db2api(
