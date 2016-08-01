@@ -73,7 +73,7 @@ class TestSmartCrop(unittest.TestCase):
                                           'test_crop_images/vertical.jpg'))
         bad_crop = cv2.imread(os.path.join(os.path.dirname(__file__),
                         'test_crop_images/vertical_bad_resize.jpg'))
-        smart_crop = smartcrop.SmartCrop(saliency_im, with_saliency=False)
+        smart_crop = smartcrop.SmartCrop(vertical_im, with_saliency=False)
         cropped_im = smart_crop.crop_and_resize(350, 350)                
         # cv2.imshow('smart cropped vertical image', cropped_im)
         gist = features.MemCachedFeatures.create_shared_cache(
