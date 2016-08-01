@@ -139,8 +139,7 @@ utils.monitor.start_agent()
 # NEON HELPER METHODS
 # ----------------------------------
 
-__EVENTS = ['EventSequence', 'VideoPlay', 'ImageLoad', 'ImageVisible', 'ImageClick',
-           'VideoViewPercentage', 'Adplay']
+__EVENTS = ['EventSequence', 'VideoPlay']
 
 # Tracker Account Ids: alpha-numeric string 3-15 chars long
 TAI = re.compile(r'^[\w]{3,15}$')  
