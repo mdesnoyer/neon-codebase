@@ -2185,11 +2185,11 @@ class BasePGNormalObject(object):
 
     keys = [('dynamic', 'key')]
 
-    @classmethod 
-    def _create_key(cls): 
+    @classmethod
+    def _create_key(cls):
         return uuid.uuid1().hex
- 
-    @classmethod 
+
+    @classmethod
     def _get_object_type(cls):
         raise NotImplementedError()
 
@@ -2416,6 +2416,10 @@ class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
     def tearDownClass(cls): 
         cls.postgresql.stop()
     
+    @classmethod
+    def _get_object_type(cls):
+        return neondata.ThumbnailMetadata
+
     @tornado.testing.gen_test 
     def test_modify_many_objects_values(self):     
         def modify_me(t):
