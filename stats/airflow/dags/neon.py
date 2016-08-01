@@ -139,8 +139,8 @@ utils.monitor.start_agent()
 # NEON HELPER METHODS
 # ----------------------------------
 
-__EVENTS = ['ImageLoad', 'ImageVisible','ImageClick', 'AdPlay', 'VideoPlay',
-           'VideoViewPercentage', 'EventSequence']
+_EVENTS = ['EventSequence', 'VideoPlay', 'ImageLoad', 'ImageVisible', 'ImageClick',
+           'VideoViewPercentage', 'Adplay']
 
 # Tracker Account Ids: alpha-numeric string 3-15 chars long
 TAI = re.compile(r'^[\w]{3,15}$')  
@@ -880,11 +880,9 @@ delete_staging_files.set_upstream(mr_cleaning_job)
 update_table_build_times = PythonOperator(
     task_id='update_table_build_times',
     dag=clicklogs,
-    trigger_rule='all_done',
     provide_context=True,
     priority_weight=10,
-    python_callable=_update_table_build_times,
-    depends_on_past=True)
+    python_callable=_update_table_build_times)
 update_table_build_times.set_upstream(load_impala_tables)
 
 
