@@ -1066,6 +1066,7 @@ class TagHandler(APIV2Handler):
             'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
             'type': CustomVoluptuousTypes.TagType
         })(self.args)
+
         tag_type = self.args['type'] if self.args.get('type') \
             else TagType.GALLERY
         tag = neondata.Tag(
@@ -1144,6 +1145,7 @@ class TagHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def _set_thumb_ids(self, tag, thumb_ids):
+
         thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
         if thumbs:
             valid_thumb_ids = [
@@ -1270,6 +1272,8 @@ class ThumbnailResponse(object):
         elif field == 'renditions':
             urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
             retval = ThumbnailHelper.renditions_of(urls)
+        elif field == 'feature_ids':
+            retval = ThumbnailHelper.get_feature_ids(obj, age=age, gender=gender)
         else:
             raise BadRequestError('invalid field %s' % field)
 
@@ -1632,11 +1636,11 @@ class ThumbnailHandler(ThumbnailResponse, ShareableContentHandler):
         """handles a thumbnail endpoint get request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'gender': In(['M', 'F', None]),
-          'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])})
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'gender': In(['M', 'F', None]),
+            'age': In(['18-19', '20-29', '30-39', '40-49', '50+', None])})
 
         args = self.parse_args()
         args['account_id'] = str(account_id)

@@ -3629,6 +3629,8 @@ class TestVideoHandler(TestControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         request = neondata.NeonApiRequest.get('j1', self.account_id_api_key)
         self.assertEqual('New title', request.video_title)
+
+    @tornado.testing.gen_test
     def test_update_video_cb_email(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=vid1'\
@@ -3640,6 +3642,7 @@ class TestVideoHandler(TestControllersBase):
             self.get_url(url),
             method='POST',
             allow_nonstandard_methods=True)
+
         rjson = json.loads(response.body)
         job_id = rjson['job_id']
         url = '/api/v2/%s/videos?video_id=vid1&callback_email=a@a.com' % (
@@ -3649,13 +3652,13 @@ class TestVideoHandler(TestControllersBase):
             method='PUT',
             allow_nonstandard_methods=True)
 
-        self.assertEquals(response.code, 200)
+        self.assertEqual(response.code, 200)
         rjson = json.loads(response.body)
         request = yield neondata.NeonApiRequest.get(
             job_id,
             self.account_id_api_key,
             async=True)
-        self.assertEquals(request.callback_email, 'a@a.com')
+        self.assertEqual(request.callback_email, 'a@a.com')
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_active(self):
@@ -4261,6 +4264,7 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_feature_ids(self):
+
         thumbnail_id = '%s_vid0_testingtid' % self.account_id_api_key
         url = '/api/v2/%s/thumbnails?thumbnail_id=%s&fields=%s' % (
             self.account_id_api_key, thumbnail_id, 'thumbnail_id,feature_ids')
@@ -4268,15 +4272,15 @@ class TestThumbnailHandler(TestControllersBase):
         rjson = json.loads(response.body)['thumbnails'][0]
 
         feature_ids = rjson['feature_ids']
-        self.assertEquals(len(feature_ids), 1024)
-        self.assertEquals(len(feature_ids[0]), 2)
-        self.assertEquals(feature_ids, sorted(feature_ids, reverse=True,
-                                              key=lambda x: x[1]))
+        self.assertEqual(len(feature_ids), 1024)
+        self.assertEqual(len(feature_ids[0]), 2)
+        self.assertEqual(feature_ids, sorted(feature_ids, reverse=True,
+                                             key=lambda x: x[1]))
 
         # Check the format of the keys
         splits = feature_ids[0][0].split('_')
-        self.assertEquals(len(splits), 2)
-        self.assertEquals(splits[0], '20160713-test')
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(splits[0], '20160713-test')
         self.assertGreaterEqual(int(splits[1]), 0)
         self.assertLess(int(splits[1]), 1024)
 
@@ -8699,8 +8703,8 @@ class TestTagHandler(TestVerifiedControllersBase):
         acct.save()
         self.account_id = acct.neon_api_key
         thumbnails = [neondata.ThumbnailMetadata(
-                          uuid.uuid1().hex)
-                      for _ in range(5)]
+            '%s_%s' % (self.account_id, uuid.uuid1().hex))
+            for _ in range(5)]
         [t.save() for t in thumbnails]
         self.thumbnail_ids = [t.get_id() for t in thumbnails]
         self.url = self.get_url('/api/v2/%s/tags/' % self.account_id)
@@ -8973,10 +8977,10 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
     @tornado.testing.gen_test
     def test_search_one_tag_some_thumbs(self):
-        thumbnails = [neondata.ThumbnailMetadata(
-                          uuid.uuid1().hex,
-                          account_id=self.account_id)
-                      for _ in xrange(5)]
+        thumbnails = [
+            neondata.ThumbnailMetadata(
+                '%s_%s' % (self.account_id_api_key, uuid.uuid1().hex))
+            for _ in range(5)]
         [t.save() for t in thumbnails]
         tag = neondata.Tag(
             None,
