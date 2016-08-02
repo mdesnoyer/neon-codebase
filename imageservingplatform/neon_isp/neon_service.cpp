@@ -698,10 +698,6 @@ neon_service_client_api(ngx_http_request_t *request,
     ngx_str_t ipAddress = ngx_string("");
     int width;
     int height;
-    //static ngx_str_t qs_arg = ngx_string("query_string");
-    //static ngx_uint_t qs_arg_key = ngx_hash_key(qs_arg.data, qs_arg.len); 
-     
-    //ngx_http_variable_value_t * qs_var = ngx_http_get_variable(request, &qs_arg, qs_arg_key);
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
                                            &account_id_size, &video_id, &pub_id,
