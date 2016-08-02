@@ -10,8 +10,11 @@ namespace url_utils
          ostringstream oss("");
          oss << baseUrl;  
          if (*baseUrl.rbegin() != '/') 
-             oss << "/"; 
-         oss << "neontn" << tid << "_w" << width << "_h" << height << ".jpg" << queryString;
+             oss << "/";
+         oss << "neontn" << tid << "_w" << width << "_h" << height << ".jpg";
+         if (strlen(queryString) > 0) { 
+             oss << "?" << queryString; 
+         }
          // should get the benefit of RVO here 
          return oss.str(); 
      }  

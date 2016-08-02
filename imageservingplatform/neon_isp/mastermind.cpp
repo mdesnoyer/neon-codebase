@@ -549,6 +549,9 @@ Mastermind::GetImageUrl(const char * account_id,
     // If either or both height or width are empty, then serve the default image URL
     if (height == -1 || width == -1) {
         image_url = *fraction->default_url();
+        if (strlen(queryString) > 0 && directive->sendQueryString) { 
+            image_url = image_url.append("?").append(queryString);   
+        } 
     }
     else { 
         const ScaledImage * image = fraction->GetScaledImage(height, width);

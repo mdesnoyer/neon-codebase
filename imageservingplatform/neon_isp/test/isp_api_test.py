@@ -309,7 +309,12 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
             headers = {"X-Client-IP" : ip}
         return self.make_api_request(url, headers)
 
-    def client_api_request(self, pub_id, vid, width, height, ip=None,
+    def client_api_request(self, 
+                           pub_id, 
+                           vid, 
+                           width=None, 
+                           height=None, 
+                           ip=None,
                            **kwargs):
         '''
         Client request api requester 
@@ -320,7 +325,11 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         opener = urllib2.build_opener(MyHTTPRedirectHandler, cookieprocessor)
         
         url = self.base_url % ("client", pub_id, vid)
-        url += self.get_params % (width, height)
+        if width and height: 
+            url += self.get_params % (width, height)
+        query_string = kwargs.get('query_string', None) 
+        if query_string: 
+            url += query_string 
         headers = kwargs.get('headers', {})
         if ip is not None:
             if len(headers) == 0: 
@@ -803,7 +812,6 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         response = self.client_api_request("pub5", prefix + "vidar1", 960, 540, "12.2.2.4")
         redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
         headers = redirect_response.headers
-        self.assertIsNotNone(redirect_response)
 
         #Assert location header and cookie
         im_url = None
@@ -815,6 +823,20 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
 
         self.assertIsNotNone(im_url)
         self.assertEqual(im_url, "http://kevin_test/neontnthumb1_w640_h360.jpg")
+
+    def test_client_api_send_back_query_string(self):
+        prefix = "neonvid_"
+        response = self.client_api_request("pub5", prefix + "qs1", query_string='?test=test')
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+
+        im_url = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+        self.assertIsNotNone(redirect_response)
+        self.assertEqual(im_url, "http://kevin_test/neontnthumb1_w800_h700.jpg?test=test")
 
     # ISP should understand and support request having a .jpg extension in
     # lower and upper case
