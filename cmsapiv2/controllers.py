@@ -1530,7 +1530,9 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
     def _score_image(self):
         if not hasattr(self, 'predictor'):
             self._initialize_predictor()
-        yield self.thumb.score_image(self.predictor, self.image, False)
+        # Convert from PIL ImageFile to cv2 for predict.
+        cv_image = PILImageUtils.to_cv(self.image)
+        yield self.thumb.score_image(self.predictor, cv_image, False)
 
     @tornado.gen.coroutine
     def _respond_with_thumb(self):
