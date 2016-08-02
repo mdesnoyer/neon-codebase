@@ -4523,12 +4523,19 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_thumbnail_does_not_exist(self):
+
+        tid = '%s_%s_%s' % (
+            self.account_id_api_key,
+            self.video_id,
+            'doesnotexist')
+
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            url = ('/api/v2/%s/thumbnails?thumbnail_id=testingtiddoesnotexist'
-                   % (self.account_id_api_key))
+            url = ('/api/v2/%s/thumbnails?thumbnail_id=%s' % (
+                self.account_id_api_key,
+                tid))
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='GET')
-        self.assertEquals(e.exception.code, 404)
+        self.assertEqual(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'do not exist')
 

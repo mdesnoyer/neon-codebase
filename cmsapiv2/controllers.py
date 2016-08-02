@@ -1180,46 +1180,38 @@ class TagHandler(ShareableContentHandler):
                                  HTTPVerbs.POST]}
 
 
-class ThumbnailResponse(object):
+class ThumbnailAuthorize(object):
+    """Mixin for checking if thumbnails or their keys are authorized"""
 
-    @classmethod
-    def _get_default_returned_fields(cls):
-        return ['video_id', 'thumbnail_id', 'rank', 'frameno', 'tag_ids',
-                'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions']
+    def _authorize_tids_or_raise(self, tids):
+        """Check format of thumbnail id against request ids"""
 
-    @classmethod
-    def _get_passthrough_fields(cls):
-        return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
-                'created', 'updated']
+        share_video_id = None
+        if self.share_payload:
+            _, share_video_id = self.share_payload['content_id'].split('_', 2)
 
+        for tid in tids:
+            try:
+                a_id, v_id, t_id = tid.split('_', 3)
+            except ValueError:
+                raise ForbiddenError()
+            if a_id != self.account_id:
+                raise ForbiddenError()
+            if share_video_id and v_id != share_video_id:
+                raise ForbiddenError()
 
-    @classmethod
-    @tornado.gen.coroutine
-    def _convert_special_field(cls, obj, field, age=None, gender=None):
-        if field == 'video_id':
-            retval = neondata.InternalVideoID.to_external(
-                neondata.InternalVideoID.from_thumbnail_id(obj.key))
-        elif field == 'thumbnail_id':
-            retval = obj.key
-        elif field == 'tag_ids':
-            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key, async=True)
-            retval = list(tag_ids)
-        elif field == 'neon_score':
-            retval = obj.get_neon_score(age=age, gender=gender)
-        elif field == 'url':
-            retval = obj.urls[0] if obj.urls else []
-        elif field == 'external_ref':
-            retval = obj.external_id
-        elif field == 'renditions':
-            urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
-            retval = ThumbnailHelper.renditions_of(urls)
-        elif field == 'feature_ids':
-            retval = ThumbnailHelper.get_feature_ids(obj, age=age, gender=gender)
-        else:
-            raise BadRequestError('invalid field %s' % field)
+    def _authorize_thumbs_or_raise(self, thumbs):
+        """Check ids in thumbnail object against request ids"""
 
-        raise tornado.gen.Return(retval)
+        share_video_id = None
+        if self.share_payload:
+            share_video_id = self.share_payload['content_id']
+
+        for thumb in thumbs:
+            if thumb.get_account_id() != self.account_id:
+                raise ForbiddenError()
+            if self.share_payload and thumb.video_id != share_video_id:
+                raise ForbiddenError()
 
 
 '''*********************************************************************
@@ -1324,7 +1316,7 @@ TagSearchInternalHandler : class responsible for searching tags
                            from an internal source
    HTTP Verbs     : get
 *********************************************************************'''
-class TagSearchInternalHandler(ThumbnailResponse, APIV2Handler):
+class TagSearchInternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         Schema({
@@ -1363,7 +1355,7 @@ class TagSearchInternalHandler(ThumbnailResponse, APIV2Handler):
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
-class ThumbnailHandler(ThumbnailResponse, ShareableContentHandler):
+class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
 
     def _initialize_predictor(self):
         '''Instantiate and connect an Aquila predictor.'''
@@ -1590,42 +1582,78 @@ class ThumbnailHandler(ThumbnailResponse, ShareableContentHandler):
         schema(args)
 
         query_tids = args['thumbnail_id'].split(',')
+
+        self._authorize_tids_or_raise(query_tids)
+
         fields = args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
         gender = args.get('gender', None)
         age = args.get('age', None)
 
-        if fields:
-            fields = set(fields.split(','))
 
         _thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True)
         thumbs = [t for t in _thumbs if t]
 
-        # Raise Forbidden if any requested thumb doesn't belong to the account.
-        if any([t for t in thumbs if t.get_account_id() != account_id]):
-            raise ForbiddenError('Access forbidden for a requested thumbnail')
-
-        # Check the thumbs against the share token payload's video id, if set.
-        if self.share_payload:
-            video_id = self.share_payload['content_id']
-            if any([t for t in thumbs if t.video_id != video_id]):
-                raise ForbiddenError('Access forbidden for a requested thumbnail')
+        self._authorize_thumbs_or_raise(thumbs)
 
         thumbnails = yield [
             ThumbnailHandler.db2api(
                 t,
                 gender=gender,
                 age=age,
-                fields=fields) for t in thumbs]
+                fields=fields)
+            for t in thumbs]
 
         if not thumbnails:
-            raise NotFoundError('thumbnails do not exist with ids = %s' %
-                                (query_tids))
+            raise NotFoundError(
+                'thumbnails do not exist with ids = %s' % (query_tids))
 
-        rv = { 'thumb_count': len(thumbnails), 'thumbnails': thumbnails }
+        rv = {
+            'thumb_count': len(thumbnails),
+            'thumbnails': thumbnails}
         statemon.state.increment('get_thumbnail_oks')
         self.success(rv)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['video_id', 'thumbnail_id', 'rank', 'frameno', 'tag_ids',
+                'neon_score', 'enabled', 'url', 'height', 'width',
+                'type', 'external_ref', 'created', 'updated', 'renditions']
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
+                'created', 'updated']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field, age=None, gender=None):
+        if field == 'video_id':
+            retval = neondata.InternalVideoID.to_external(
+                neondata.InternalVideoID.from_thumbnail_id(obj.key))
+        elif field == 'thumbnail_id':
+            retval = obj.key
+        elif field == 'tag_ids':
+            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key, async=True)
+            retval = list(tag_ids)
+        elif field == 'neon_score':
+            retval = obj.get_neon_score(age=age, gender=gender)
+        elif field == 'url':
+            retval = obj.urls[0] if obj.urls else []
+        elif field == 'external_ref':
+            retval = obj.external_id
+        elif field == 'renditions':
+            urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
+            retval = ThumbnailHelper.renditions_of(urls)
+        elif field == 'feature_ids':
+            retval = ThumbnailHelper.get_feature_ids(obj, age=age, gender=gender)
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
 
     @classmethod
     def get_access_levels(self):
@@ -2423,6 +2451,7 @@ class VideoStatsHandler(APIV2Handler):
 
         raise tornado.gen.Return(retval)
 
+
 '''*********************************************************************
 ThumbnailStatsHandler
 *********************************************************************'''
@@ -2529,7 +2558,7 @@ class ThumbnailStatsHandler(APIV2Handler):
 *********************************************************************
 LiftStatsHandler
 *********************************************************************'''
-class LiftStatsHandler(ShareableContentHandler):
+class LiftStatsHandler(ThumbnailAuthorize, ShareableContentHandler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -2543,42 +2572,34 @@ class LiftStatsHandler(ShareableContentHandler):
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
 
-        # Check that the base thumbnail id contains this account id
-        # before checking if the thumbnail exists.
-        thumb_acct_part = args['base_id'].split('_', 1)[0]
-        if thumb_acct_part != args['account_id']:
-            raise ForbiddenError('Access forbidden for base thumbnail')
+        # Check that all the thumbs are keyed to the account.
+        query_tids = args['thumbnail_ids'].split(',')
+        self._authorize_tids_or_raise([args['base_id']] + query_tids)
 
-        # Check that the base thumbnail exists.
         base_thumb = yield neondata.ThumbnailMetadata.get(
             args['base_id'],
             async=True)
+
+        # Check that the base thumbnail exists.
         if not base_thumb:
             raise NotFoundError('Base thumbnail does not exist')
 
-        query_tids = args['thumbnail_ids'].split(',')
         _thumbs = yield neondata.ThumbnailMetadata.get_many(
             query_tids,
             async=True,
             as_dict=True)
         thumbs = {k: t for (k, t) in _thumbs.items() if t}
 
-        # Check that all the thumbs are owned by the account.
-        if any([t for t in thumbs.values() if t and t.get_account_id() != account_id]):
-            raise ForbiddenError('Access forbidden for a requested thumbnail')
+        self._authorize_thumbs_or_raise([base_thumb] + thumbs.values())
 
-        # Check the thumbs against the share token payload's video id, if set.
-        if self.share_payload:
-            video_id = self.share_payload['content_id']
-            if any([t for t in thumbs.values() if t.video_id != video_id]):
-                raise ForbiddenError('Access forbidden for a requested thumbnail')
-
-        lift = [{'thumbnail_id': k, 
-                 'lift': t.get_estimated_lift(base_thumb,
-                                              gender=args.get('gender', None),
-                                              age=args.get('age', None)) 
-                                              if t else None}
-                for k, t in thumbs.items()]
+        lift = [
+            {'thumbnail_id': k,
+            'lift': t.get_estimated_lift(
+                base_thumb,
+                gender=args.get('gender', None),
+                age=args.get('age', None))
+                if t else None}
+            for k, t in thumbs.items()]
 
         # Check thumbnail exists.
         rv = {
