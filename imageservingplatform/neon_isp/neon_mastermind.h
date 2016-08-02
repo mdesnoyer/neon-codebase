@@ -81,7 +81,8 @@ neon_mastermind_image_url_lookup(const char * accountId,
                                  ngx_str_t * ipAddress,
                                  int height,
                                  int width, 
-                                 std::string & image_url);
+                                 std::string & image_url, 
+                                 const char * query_string);
     
 typedef enum  {
     NEON_MASTERMIND_TID_LOOKUP_OK = 0,

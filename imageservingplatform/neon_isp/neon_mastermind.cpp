@@ -159,7 +159,8 @@ neon_mastermind_image_url_lookup(const char * accountId,
                                     ngx_str_t * bucketId,
                                     int height,
                                     int width, 
-                                    std::string & image_url)
+                                    std::string & image_url, 
+                                    const char * query_string)
 {
     Mastermind * mastermind = neon_get_mastermind();
     
@@ -169,7 +170,7 @@ neon_mastermind_image_url_lookup(const char * accountId,
 
     mastermind->GetImageUrl(accountId, videoId, 
                             bucketId->data, bucketId->len,
-                            height, width, image_url);
+                            height, width, image_url, query_string);
     
     if(image_url.size() == 0) { 
         return; 

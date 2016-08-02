@@ -611,6 +611,10 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
         neon_service_server_api_not_found(request, chain);
         return API_FAIL;
     }
+
+    u_char* query_string = (u_char *)ngx_palloc(request->pool, request->args.len+1);
+    memset(query_string, 0, request->args.len+1);
+    ngx_copy(query_string, request->args.data, request->args.len);
     
     
     //dummy bucket id, server api doesn't use bucket id currently 
@@ -631,7 +635,8 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
                      &bucket_id,
                      height,
                      width, 
-                     image_url);
+                     image_url, 
+                     (char*)query_string);
     
     if (image_url.size() == 0) {  
         ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, "IM URL Not Found");
@@ -693,11 +698,19 @@ neon_service_client_api(ngx_http_request_t *request,
     ngx_str_t ipAddress = ngx_string("");
     int width;
     int height;
+    //static ngx_str_t qs_arg = ngx_string("query_string");
+    //static ngx_uint_t qs_arg_key = ngx_hash_key(qs_arg.data, qs_arg.len); 
+     
+    //ngx_http_variable_value_t * qs_var = ngx_http_get_variable(request, &qs_arg, qs_arg_key);
 
     int ret = neon_service_parse_api_args(request, &base_url, &account_id, 
                                            &account_id_size, &video_id, &pub_id,
                                            &ipAddress, &width, &height, 1);
-       
+
+    u_char* query_string = (u_char *)ngx_palloc(request->pool, request->args.len+1);
+    memset(query_string, 0, request->args.len+1);
+    ngx_copy(query_string, request->args.data, request->args.len);
+
     if (ret !=0){
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
         neon_service_set_no_content_headers(request);
@@ -740,7 +753,8 @@ neon_service_client_api(ngx_http_request_t *request,
                       &bucket_id,
                       height,
                       width, 
-                      image_url);
+                      image_url, 
+                      (char*)query_string);
 
     if (image_url.size() == 0) { 
         if (neon_stats[NEON_CLIENT_API_URL_NOT_FOUND]++ % 5 == 0) { 
