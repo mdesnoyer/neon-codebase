@@ -64,7 +64,8 @@ public:
                      int bucketIdLen,
                      int height, 
                      int width, 
-                     std::string& image_url);
+                     std::string& image_url,
+                     const char * queryString);
     
     void GetThumbnailID(const char * c_accountId, 
                         const char * c_videoId, 

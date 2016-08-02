@@ -46,6 +46,8 @@ public:
     
     Fraction * GetFraction(int index) {return fractions[index];};
 
+    bool sendQueryString; 
+
 protected:
     
     int InitSafe(const rapidjson::Document & document);

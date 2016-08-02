@@ -341,8 +341,15 @@ class ChangeSubscriber(threading.Thread):
                 try:
                     del self.video_db_watcher.directive_pusher.default_thumbs[account_id]
                 except KeyError: pass
-            
-            new_options = (account.abtest, account.serving_enabled)
+           
+            # should the directive send the query_string
+            self.video_db_watcher.directive_pusher.send_query_string[account_id] = \
+                account.send_query_string 
+
+            new_options = (
+                account.abtest, 
+                account.serving_enabled)
+
             # if the serving_enabled/abtest state has not changed, don't 
             # do anything 
             old_options = self.video_db_watcher._accounts_options.get(account_id, None)
@@ -1099,7 +1106,8 @@ class DirectivePublisher(threading.Thread):
     '''
     def __init__(self, mastermind, tracker_id_map=None, serving_urls=None,
                  default_sizes=None, default_thumbs=None,
-                 activity_watcher=utils.ps.ActivityWatcher()):
+                 activity_watcher=utils.ps.ActivityWatcher(), 
+                 send_query_string=None):
         '''Creates the publisher.
 
         Inputs:
@@ -1117,6 +1125,7 @@ class DirectivePublisher(threading.Thread):
         self.serving_urls = serving_urls or {}
         self.default_sizes = default_sizes or {}
         self.default_thumbs = default_thumbs or {}
+        self.send_query_string = send_query_string or {}
         self.activity_watcher = activity_watcher
 
         self.last_publish_time = datetime.datetime.utcnow()
@@ -1383,6 +1392,12 @@ class DirectivePublisher(threading.Thread):
             account_id, video_id = key
             fractions = []
             missing_urls = False
+
+            try: 
+                send_qs = self.send_query_string[account_id]
+            except KeyError: 
+                send_qs = False
+ 
             for thumb_id, frac in directive:
                 try:
                     serving_urls = unpack_obj(self.serving_urls[thumb_id])
@@ -1403,12 +1418,13 @@ class DirectivePublisher(threading.Thread):
 
             if missing_urls:
                 continue
-            
+           
             data = {
                 'type': 'dir',
                 'aid': account_id,
                 'vid': video_id,
                 'sla': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'send_query_string' : send_qs, 
                 'fractions': fractions
             }
             stream.write('\n' + json.dumps(data))

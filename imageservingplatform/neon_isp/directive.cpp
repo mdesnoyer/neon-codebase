@@ -158,6 +158,12 @@ Directive::InitSafe(const rapidjson::Document & document)
             fractions[i]->SetPct(pcnt);
         } 
     }
+    if (document.HasMember("send_query_string") && document["send_query_string"].IsInt()) { 
+        sendQueryString = (bool)document["send_query_string"].GetInt();
+    } 
+    else { 
+        sendQueryString = false; 
+    } 
     
     return 0;
 }

@@ -511,7 +511,8 @@ Mastermind::GetImageUrl(const char * account_id,
                         int bucketIdLen,
                         int height, 
                         int width, 
-                        std::string & image_url){
+                        std::string & image_url, 
+                        const char * queryString){
     
     string accountId = account_id;
     string videoId = video_id;
@@ -548,6 +549,9 @@ Mastermind::GetImageUrl(const char * account_id,
     // If either or both height or width are empty, then serve the default image URL
     if (height == -1 || width == -1) {
         image_url = *fraction->default_url();
+        if (strlen(queryString) > 0 && directive->sendQueryString) { 
+            image_url = image_url.append("?").append(queryString);   
+        } 
     }
     else { 
         const ScaledImage * image = fraction->GetScaledImage(height, width);
@@ -560,8 +564,22 @@ Mastermind::GetImageUrl(const char * account_id,
             image_url = *image->scoped_url(); 
         } 
         // generate a url given information in the mastermind file 
-        else { 
-            image_url = url_utils::GenerateUrl(fraction->base_url(), *fraction->tid(), image->GetHeight(), image->GetWidth()); 
+        else {
+            if (directive->sendQueryString) { 
+                image_url = url_utils::GenerateUrl(
+                    fraction->base_url(), 
+                    *fraction->tid(), 
+                    image->GetHeight(), 
+                    image->GetWidth(), 
+                    (char*)queryString); 
+            }
+            else {  
+                image_url = url_utils::GenerateUrl(
+                    fraction->base_url(), 
+                    *fraction->tid(), 
+                    image->GetHeight(), 
+                    image->GetWidth()); 
+            }
         }
     }  
 }

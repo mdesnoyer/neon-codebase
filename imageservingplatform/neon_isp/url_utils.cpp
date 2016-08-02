@@ -5,13 +5,16 @@ using namespace std;
 namespace url_utils
 { 
      string 
-     GenerateUrl(const string baseUrl, const string tid, int height, int width) 
+     GenerateUrl(const string baseUrl, const string tid, int height, int width, const char* queryString) 
      { 
          ostringstream oss("");
          oss << baseUrl;  
          if (*baseUrl.rbegin() != '/') 
-             oss << "/"; 
+             oss << "/";
          oss << "neontn" << tid << "_w" << width << "_h" << height << ".jpg";
+         if (strlen(queryString) > 0) { 
+             oss << "?" << queryString; 
+         }
          // should get the benefit of RVO here 
          return oss.str(); 
      }  
