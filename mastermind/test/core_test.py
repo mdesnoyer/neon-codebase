@@ -114,8 +114,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Mock out the pg connection so that it doesn't throw an error
         self.postgres_patcher = patch(
             'cmsdb.neondata.PostgresDB._PostgresDB')
-        self.postgres_mock = self.postgres_patcher.start()
-        self.postgres_mock().get_connection.return_value = None
+        self.get_conn_mock = self._future_wrap_mock(
+            self.postgres_patcher.start()().get_connection)
+        self._future_wrap_mock(self.get_conn_mock().execute)
+        #self.postgres_mock.return_value = None
         logging.getLogger('cmsdb.neondata').propagate = False
 
         # TODO(wiley): Once we actually listen to the priors but keep
@@ -129,8 +131,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        neondata.PostgresDB.instance = None  
-        self.postgres_patcher.stop()
+        #neondata.PostgresDB.instance = None  
+        #self.postgres_patcher.stop()
         logging.getLogger('cmsdb.neondata').propagate = True
         super(TestCurrentServingDirective, self).tearDown()
 
@@ -1801,7 +1803,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1_vid1_n2' : 0.03,
             'acct1_vid1_n3' : 0.01
             })
-        N_SIMS = 100
+        N_SIMS = 50
         IMP_PER_STEP = 500
         CTR_DECAY_RATE = 0.98
         turned_off = pandas.Series(0.0, index=TRUE_CTRS.index)
@@ -1874,8 +1876,9 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         # Mock out the PG connection so that it doesn't throw an error
         self.postgres_patcher = patch(
             'cmsdb.neondata.PostgresDB._PostgresDB')
-        self.postgres_mock = self.postgres_patcher.start()
-        self.postgres_mock().get.return_value = None
+        self.postgres_mock = self._future_wrap_mock(
+            self.postgres_patcher.start()().get_connection)
+        self.postgres_mock.return_value = None
 
         self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
@@ -2179,8 +2182,9 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         # Mock out the PG connection so that it doesn't throw an error
         self.postgres_patcher = patch(
             'cmsdb.neondata.PostgresDB._PostgresDB')
-        self.postgres_mock = self.postgres_patcher.start()
-        self.postgres_mock().get.return_value = None
+        self.postgres_mock = self._future_wrap_mock(
+            self.postgres_patcher.start()().get_connection)
+        self.postgres_mock.return_value = None
 
         self.mastermind = Mastermind()
 
@@ -2647,6 +2651,7 @@ class TestStatusUpdatesInDb(CorePostgresTest):
         self.request = neondata.NeonApiRequest('job1', 'acct1', 'vid1')
         self.request.state = neondata.RequestState.FINISHED
         self.request.save()
+        neondata.NeonUserAccount('a1', 'acct1').save()
         
         self.mastermind.update_video_info(self.video_metadata, self.thumbnails)
         self._wait_for_db_updates()
@@ -2806,8 +2811,17 @@ class TestStatusUpdatesInDb(CorePostgresTest):
         self.assertAlmostEqual(ctrs['acct1_vid1_n2'], 200./5000)
         self.assertAlmostEqual(ctrs['acct1_vid1_ctr'], 20./5000)
 
-        # Check the callback was not sent
-        self.assertEquals(self.http_mock.call_count, 0)
+        # Check the callback was sent
+        self.assertEquals(self.http_mock.call_count, 1)
+        cargs, kwargs = self.http_mock.call_args
+        cb_request = cargs[0]
+        self.assertEquals(cb_request.url, 'http://some_callback.url')
+        self.assertDictContainsSubset(
+            { 'experiment_state' : neondata.ExperimentState.COMPLETE,
+              'winner_thumbnail' : 'acct1_vid1_n2',
+              'processing_state' : neondata.ExternalRequestState.PROCESSED
+              },
+            json.loads(cb_request.body))
         
 
     def test_db_override_thumb(self):
