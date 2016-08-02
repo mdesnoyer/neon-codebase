@@ -159,7 +159,7 @@ Directive::InitSafe(const rapidjson::Document & document)
         } 
     }
     if (document.HasMember("send_query_string") && document["send_query_string"].IsInt()) { 
-        sendQueryString = true; 
+        sendQueryString = (bool)document["send_query_string"].GetInt();
     } 
     else { 
         sendQueryString = false; 
