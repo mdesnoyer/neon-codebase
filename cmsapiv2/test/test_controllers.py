@@ -9079,7 +9079,6 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
                     set(_tag['thumbnails']))
 
 
-
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
     unittest.main(argv=(['%prog']+args))
