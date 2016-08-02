@@ -655,7 +655,7 @@ class ThumbnailType(object):
 class TagType(object):
     '''All valid Tag types'''
     VIDEO = 'video'
-    GALLERY = 'gallery'
+    COLLECTION = 'col'
 
 class ExperimentState:
     '''A class that acts like an enum for the state of the experiment.'''
@@ -2530,7 +2530,7 @@ class Tag(Searchable, StoredObject):
         self.name = name
         # System's definition of how this tag is used
         self.tag_type = tag_type if tag_type in [
-            TagType.VIDEO, TagType.GALLERY] else None
+            TagType.VIDEO, TagType.COLLECTION] else None
 
         super(Tag, self).__init__(tag_id)
 

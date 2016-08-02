@@ -3612,7 +3612,7 @@ class TestVideoHandler(TestControllersBase):
             method='PUT',
             headers=headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
 
         video_id = neondata.InternalVideoID.generate(self.account_id_api_key, 'v1')
         video = neondata.VideoMetadata(video_id, request_id='j1')
@@ -3626,7 +3626,7 @@ class TestVideoHandler(TestControllersBase):
             method='PUT',
             headers=headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         request = neondata.NeonApiRequest.get('j1', self.account_id_api_key)
         self.assertEqual('New title', request.video_title)
 
@@ -8717,7 +8717,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         tag_1 = neondata.Tag(
             account_id=self.account_id,
             name='Green',
-            tag_type=neondata.TagType.GALLERY)
+            tag_type=neondata.TagType.COLLECTION)
         tag_1.save()
         thumb_1 = neondata.ThumbnailMetadata('%s_t1' % self.account_id)
         thumb_2 = neondata.ThumbnailMetadata('%s_t2' % self.account_id)
@@ -8737,7 +8737,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual({tag_1.get_id(), tag_2.get_id()}, set(rjson.keys()))
         green_gallery_tag = rjson[tag_1.get_id()]
         self.assertEqual('Green', green_gallery_tag['name'])
-        self.assertEqual(neondata.TagType.GALLERY, green_gallery_tag['tag_type'])
+        self.assertEqual(neondata.TagType.COLLECTION, green_gallery_tag['tag_type'])
         ids = set([thumb_1.get_id(), thumb_2.get_id()])
         self.assertEqual(ids, set(green_gallery_tag['thumbnails']))
         blue_tag = rjson[tag_2.get_id()]
@@ -8749,7 +8749,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         tag = neondata.Tag(
             account_id=self.account_id,
             name='Green',
-            tag_type=neondata.TagType.GALLERY)
+            tag_type=neondata.TagType.COLLECTION)
         tag.save()
         thumbnails = [neondata.ThumbnailMetadata(
             '%s_%d' % (self.account_id, i)) for i in range(20)]
@@ -8786,7 +8786,7 @@ class TestTagHandler(TestVerifiedControllersBase):
             method='POST',
             headers=self.headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
@@ -8804,7 +8804,7 @@ class TestTagHandler(TestVerifiedControllersBase):
             method='POST',
             headers=self.headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertIsNotNone(rjson['tag_id'])
         self.assertEqual(name, rjson['name'])
@@ -8826,7 +8826,7 @@ class TestTagHandler(TestVerifiedControllersBase):
             method='POST',
             headers=self.headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
         self.assertNotIn(thumbnail_id, rjson['thumbnails'])
@@ -8853,7 +8853,7 @@ class TestTagHandler(TestVerifiedControllersBase):
             method='POST',
             headers=self.headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
         self.assertEqual(set(thumbnail_ids), set(rjson['thumbnails']))
@@ -8877,7 +8877,7 @@ class TestTagHandler(TestVerifiedControllersBase):
             method='POST',
             headers=self.headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
         self.assertEqual(set(thumbnail_ids), set(rjson['thumbnails']))
@@ -8895,7 +8895,7 @@ class TestTagHandler(TestVerifiedControllersBase):
             method='POST',
             headers=self.headers,
             body=body)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
         self.assertEqual([], rjson['thumbnails'])
@@ -8968,12 +8968,15 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
     def setUp(self):
         super(TestTagSearchExternalHandler, self).setUp()
-        self.url = self.get_url('/api/v2/%s/tags/search/' % self.account_id)
+        self.url = self.get_url(
+            '/api/v2/%s/tags/search/' % self.account_id)
+        self.thumbs_url = self.get_url(
+            '/api/v2/%s/tags/?tag_id={tag_id}' % self.account_id)
 
     @tornado.testing.gen_test
     def test_search_no_item(self):
         response = yield self.http_client.fetch(self.url, headers=self.headers)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual([], rjson['items'])
         self.assertEqual(0, rjson['count'])
@@ -8989,20 +8992,28 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
             None,
             name='My Photos',
             account_id=self.account_id,
-            tag_type=neondata.TagType.GALLERY)
+            tag_type=neondata.TagType.COLLECTION)
         tag.save()
+
         neondata.TagThumbnail.save_many(
             tag_id=tag.get_id(),
             thumbnail_id=[t.get_id() for t in thumbnails])
 
         response = yield self.http_client.fetch(self.url, headers=self.headers)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(1, rjson['count'])
-        items = rjson['items']
-        self.assertEqual('My Photos', items[0]['name'])
+        tags = rjson['items']
+        self.assertEqual('My Photos', tags[0]['name'])
+
+        tag_id = ','.join([t['key'] for t in tags])
+        tags_response = yield self.http_client.fetch(
+            self.thumbs_url.format(tag_id=tag_id),
+            headers=self.headers)
+        self.assertEqual(ResponseCode.HTTP_OK, tags_response.code)
+        tags_rjson = json.loads(tags_response.body)
+        response_ids = set(tags_rjson[tag_id]['thumbnails'])
         given_ids = {thumb.get_id() for thumb in thumbnails}
-        response_ids = {thumb['thumbnail_id'] for thumb in items[0]['thumbnails']}
         self.assertEqual(given_ids, response_ids)
 
     @tornado.testing.gen_test
@@ -9014,21 +9025,24 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
                 uuid.uuid1().hex,
                 self.account_id))
               for _ in range(5)]
+        # This won't appear in the results.
         removed_thumb = random.choice(thumbnails)
         [t.save() for t in thumbnails]
         given_thumb_ids = {t.get_id() for t in thumbnails
             if t.get_id() != removed_thumb.get_id()}
+
         # Make some tags.
         tags = [neondata.Tag(
                 i,
                 name='name' + i,
                 account_id=self.account_id,
-                tag_type=neondata.TagType.GALLERY)
+                tag_type=neondata.TagType.COLLECTION)
             for i in 'abced']
         [t.save() for t in tags]
         removed_tag = random.choice(tags)
         given_tag_ids = {t.get_id() for t in tags
             if t.get_id() != removed_tag.get_id()}
+
         # Map each tag to each thumbnail, minus the removed one.
         neondata.TagThumbnail.save_many(
             tag_id=given_tag_ids,
@@ -9036,22 +9050,34 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
         # Do search.
         r = yield self.http_client.fetch(self.url, headers=self.headers)
-        self.assertEqual(utils.http.ResponseCode.HTTP_OK, r.code)
+        self.assertEqual(ResponseCode.HTTP_OK, r.code)
         r = json.loads(r.body)
         self.assertIn('next_page', r)
         self.assertIn('prev_page', r)
         self.assertNotEqual(r['next_page'], r['prev_page'])
+
         # Even the empty tag is in the response.
         self.assertEqual(len(tags), r['count'])
+
+        # Get the tags thumbs.
+        tag_id = ','.join([t.key for t in tags])
+        tags_response = yield self.http_client.fetch(
+            self.thumbs_url.format(tag_id=tag_id))
+        self.assertEqual(ResponseCode.HTTP_OK, tags_response.code)
+        tags_rjson = json.loads(tags_response.body)
+
         # Each item is a tag->thumbs mapping.
         for item in r['items']:
-            if item['id'] == removed_tag.get_id():
-                self.assertEqual('name' + item['id'], item['name'])
-                self.assertFalse(item['thumbnails'])
+            _tag = tags_rjson[item['key']]
+            if item['key'] == removed_tag.get_id():
+                self.assertEqual('name' + item['key'], item['name'])
+                self.assertFalse(_tag['thumbnails'])
             else:
-                self.assertEqual('name' + item['id'], item['name'])
-                response_thumb_ids = {t['thumbnail_id'] for t in item['thumbnails']}
-                self.assertEqual(given_thumb_ids, response_thumb_ids)
+                self.assertEqual('name' + item['key'], item['name'])
+                self.assertEqual(
+                    given_thumb_ids,
+                    set(_tag['thumbnails']))
+
 
 
 if __name__ == "__main__" :

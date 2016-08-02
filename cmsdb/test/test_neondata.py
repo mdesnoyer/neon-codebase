@@ -2777,7 +2777,7 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
 
     @tornado.testing.gen_test
     def test_tag_type(self):
-        [Tag(tag_type=neondata.TagType.GALLERY).save() for _ in range(3)]
+        [Tag(tag_type=neondata.TagType.COLLECTION).save() for _ in range(3)]
         [Tag(tag_type=neondata.TagType.VIDEO).save() for _ in range(5)]
 
         # Search for all.
@@ -2787,9 +2787,9 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         self.assertEqual(3 + 5, len(result))
 
         # Search for GALLERY.
-        result = yield Tag.keys(tag_type=neondata.TagType.GALLERY, async=True)
+        result = yield Tag.keys(tag_type=neondata.TagType.COLLECTION, async=True)
         self.assertEqual(3, len(result))
-        result = yield Tag.objects(tag_type=neondata.TagType.GALLERY, async=True)
+        result = yield Tag.objects(tag_type=neondata.TagType.COLLECTION, async=True)
         self.assertEqual(3, len(result))
 
         # Search for VIDEO.

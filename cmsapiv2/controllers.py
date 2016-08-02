@@ -1041,7 +1041,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 '''*********************************************************************
 TagHandler
 *********************************************************************'''
-class TagHandler(APIV2Handler):
+class TagHandler(ShareableContentHandler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -1068,7 +1068,7 @@ class TagHandler(APIV2Handler):
         })(self.args)
 
         tag_type = self.args['type'] if self.args.get('type') \
-            else TagType.GALLERY
+            else TagType.COLLECTION
         tag = neondata.Tag(
             None,
             account_id=self.args['account_id'],
@@ -1179,64 +1179,6 @@ class TagHandler(APIV2Handler):
                                  HTTPVerbs.PUT,
                                  HTTPVerbs.POST]}
 
-class ContentResponse(object):
-
-    @tornado.gen.coroutine
-    def result(self, tags, fields):
-        '''Build a result in api response-format from Tags.
-
-        Since the input is a bunch of object ids, the work here is to pull
-        in the corresponding objects and build the result list.
-
-        Input- list of Tag object
-        Returns - list of tag with nested lists of thumbnail or video:
-            [tag dict{
-                id: tag id,
-                name: tag name,
-                videos: [<list of video dicts>]
-                thumbnails: [<list of thumbnail dicts>]'''
-
-        # Map of tag id to tag
-        tag_map = {tag.get_id(): tag for tag in tags}
-        _tagged_map = yield neondata.TagThumbnail.get_many(
-            tag_id=[t.get_id() for t in tags],
-            async=True)
-        tagged_map = OrderedDict(_tagged_map)
-        video_tag_ids = [tag.get_id() for tag in tags if tag.tag_type == TagType.VIDEO]
-        video_ids_map = yield neondata.VideoMetadata.get_by_tag(
-            video_tag_ids,
-            async=True)
-        video_ids = list(set(itertools.chain.from_iterable(video_ids_map.values())))
-
-        # All video objects
-        videos = yield neondata.VideoMetadata.get_many(video_ids, async=True)
-        # Join their request objects
-        job_ids = [v.job_id for v in videos]
-        requests = yield neondata.NeonApiRequest.get_many(job_ids, async=True)
-        # Map of video id to api-format video
-        # @TODO optimize pulling out the thumbnails db read inside of db2api.
-        video_map = yield {v.get_id(): VideoHelper.db2api(v, r, fields) if v and r else None
-                for v, r in zip(videos, requests)}
-
-        # De-duped list of thumb id
-        gallery_tag_ids = [tag.get_id() for tag in tags if tag.tag_type == TagType.GALLERY]
-        thumb_ids_map = yield neondata.TagThumbnail.get_many(tag_id=gallery_tag_ids, async=True)
-        thumb_ids = list(set(itertools.chain.from_iterable(thumb_ids_map.values())))
-
-        # All thumbnail objects
-        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
-        # Map of thumb id to api-format thumbnail
-        thumb_map = yield {t.get_id(): ThumbnailHandler.db2api(t, fields) for t in thumbs}
-
-        # Collate the tag id with the video and thumb lists in the order received.
-        result = [{
-            'id': tag_id,
-            'name': tag_map[tag_id].name,
-            'videos': [video_map[vid] for vid in ids if video_map.get(vid)],
-            'thumbnails': [thumb_map[tid] for tid in ids if thumb_map.get(tid)]}
-                for tag_id, ids in tagged_map.items()]
-        raise tornado.gen.Return(result)
-
 
 class ThumbnailResponse(object):
 
@@ -1285,7 +1227,8 @@ TagSearchExternalHandler : class responsible for searching tags
                            from an external source
    HTTP Verbs     : get
 *********************************************************************'''
-class TagSearchExternalHandler(ContentResponse, APIV2Handler):
+class TagSearchExternalHandler(APIV2Handler):
+
     @tornado.gen.coroutine
     def get(self, account_id):
         Schema({
@@ -1295,29 +1238,33 @@ class TagSearchExternalHandler(ContentResponse, APIV2Handler):
             'since': Coerce(float),
             'until': Coerce(float),
             'show_hidden': Coerce(bool),
-            'fields': CustomVoluptuousTypes.CommaSeparatedList(),
             'tag_type': CustomVoluptuousTypes.TagType
         })(self.args)
         self.args['base_url'] = '/api/v2/%s/tags/search/' % self.account_id
         searcher = ContentSearcher(**self.args)
-        tags, count, prev_page, next_page = yield searcher.get()
-
-        _fields = self.args.get('fields')
-        fields = _fields.split(',') if _fields else None
-
-        items = yield self.result(tags, fields)
+        _tags, count, prev_page, next_page = yield searcher.get()
+        tags = yield [self.db2api(t) for t in _tags]
 
         self.success({
-            'items': items,
-            'count': len(items),
+            'items': tags,
+            'count': count,
             'next_page': next_page,
             'prev_page': prev_page})
 
-    @classmethod
-    def get_access_levels(self):
+    @staticmethod
+    def get_access_levels():
         return {
             HTTPVerbs.GET: neondata.AccessLevels.READ,
             'account_required': [HTTPVerbs.GET]}
+
+    @staticmethod
+    def _get_default_returned_fields():
+        return ['updated', 'created', 'name', 'key', 'tag_type']
+
+    @staticmethod
+    def _get_passthrough_fields():
+        return TagSearchExternalHandler._get_default_returned_fields()
+
 
 class ContentSearcher(object):
     '''A searcher to run search requests and make results.'''
@@ -1410,8 +1357,7 @@ class TagSearchInternalHandler(ThumbnailResponse, APIV2Handler):
     def get_access_levels(self):
         return {
             HTTPVerbs.GET: neondata.AccessLevels.READ,
-            'internal_only': True,
-            'account_required': []}
+            'internal_only': True}
 
 
 '''*********************************************************************
