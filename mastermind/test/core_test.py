@@ -131,8 +131,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        #neondata.PostgresDB.instance = None  
-        #self.postgres_patcher.stop()
+        neondata.PostgresDB.instance = None  
+        self.postgres_patcher.stop()
         logging.getLogger('cmsdb.neondata').propagate = True
         super(TestCurrentServingDirective, self).tearDown()
 
