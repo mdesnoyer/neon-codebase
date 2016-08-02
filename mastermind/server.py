@@ -1645,11 +1645,7 @@ class DirectivePublisher(threading.Thread):
                 async=True)
 
             # And send the callback
-            if (request is not None and 
-                request.callback_state == 
-                neondata.CallbackState.NOT_SENT and 
-                request.callback_url):
-
+            if request is not None:
                 statemon.state.increment('pending_callbacks')
                 yield self._send_callback(request)
 

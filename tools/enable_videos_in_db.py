@@ -144,10 +144,7 @@ class Enabler(object):
                 async=True)
 
             # And send the callback
-            if (request is not None and 
-                request.callback_state == 
-                neondata.CallbackState.NOT_SENT and 
-                request.callback_url):
+            if (request is not None and request.callback_url):
                 _log.info('sending callback for request %s', request) 
                 yield self._send_callback(request)
 
