@@ -2328,7 +2328,7 @@ class NeonUserAccount(NamespacedStoredObject):
         # about this customer 
         self.billing_provider_ref = billing_provider_ref
 
-        # List of ExternalRequestStates where we will not send a callback 
+        # List of CallbackStates where we will not send a callback 
         # Needed for backwards compatibility
         self.callback_states_ignored = callback_states_ignored or []
         
@@ -4472,7 +4472,7 @@ class NeonApiRequest(NamespacedStoredObject):
 
                 internal_vid = InternalVideoID.generate(self.api_key,
                                                         self.video_id)
-                vstatus = yield tornado.gen.Task(VideoStatus.get, internal_vid)
+                vstatus = yield VideoStatus.get(internal_vid, async=True)
                 response.experiment_state = vstatus.experiment_state
                 response.winner_thumbnail = vstatus.winner_tid
                 response.set_processing_state(self.state)
@@ -4480,48 +4480,62 @@ class NeonApiRequest(NamespacedStoredObject):
                 response.video_id = self.video_id
 
                 # If we have sucessfully sent this callback already, we're done
-                if (self.callback_state != _get_successful_state(response) or
+                next_callback_state = _get_successful_state(response)
+                if (self.callback_state == next_callback_state or
                     self.callback_state in [CallbackState.SUCESS,
                                             CallbackState.ERROR]):
                     return
+
+                # Check to see if this account wants this callback
+                acct = yield NeonUserAccount.get(self.api_key,
+                                                 async=True)
+                if acct is None:
+                    raise DBStateError('Could not find account %s' % 
+                                       self.api_key)
+                
+                if next_callback_state not in acct.callback_states_ignored:
             
-                # Send the callback
-                self.response = response.to_dict()
-                send_kwargs = send_kwargs or {}
-                cb_request = tornado.httpclient.HTTPRequest(
-                    url=self.callback_url,
-                    method='PUT',
-                    headers={'content-type' : 'application/json'},
-                    body=response.to_json(),
-                    request_timeout=20.0,
-                    connect_timeout=10.0)
-                cb_response = yield utils.http.send_request(
-                    cb_request,
-                    no_retry_codes=[405],
-                    async=True,
-                    **send_kwargs)
-                if cb_response.error:
-                    # Now try a POST for backwards compatibility
-                    cb_request.method='POST'
-                    cb_response = yield utils.http.send_request(cb_request,
-                                                                async=True,
-                                                                **send_kwargs)
+                    # Send the callback
+                    self.response = response.to_dict()
+                    send_kwargs = send_kwargs or {}
+                    cb_request = tornado.httpclient.HTTPRequest(
+                        url=self.callback_url,
+                        method='PUT',
+                        headers={'content-type' : 'application/json'},
+                        body=response.to_json(),
+                        request_timeout=20.0,
+                        connect_timeout=10.0)
+                    cb_response = yield utils.http.send_request(
+                        cb_request,
+                        no_retry_codes=[405],
+                        async=True,
+                        **send_kwargs)
                     if cb_response.error:
-                        statemon.state.define_and_increment(
-                            'callback_error.%s' % self.api_key)
-                                                            
-                        statemon.state.increment('callback_error')
-                        _log.warn('Error when sending callback to %s for '
-                                  'video %s: %s' %
-                                  (self.callback_url, self.video_id,
-                                   cb_response.error))
-                        new_callback_state = CallbackState.ERROR
+                        # Now try a POST for backwards compatibility
+                        cb_request.method='POST'
+                        cb_response = yield utils.http.send_request(
+                            cb_request,
+                            async=True,
+                            **send_kwargs)
+                        if cb_response.error:
+                            statemon.state.define_and_increment(
+                                'callback_error.%s' % self.api_key)
+
+                            statemon.state.increment('callback_error')
+                            _log.warn('Error when sending callback to %s for '
+                                      'video %s: %s' %
+                                      (self.callback_url, self.video_id,
+                                       cb_response.error))
+                            new_callback_state = CallbackState.ERROR
+                        else:
+                           statemon.state.increment('sucessful_callbacks')
+                           new_callback_state = _get_successful_state(response)
                     else:
-                       statemon.state.increment('sucessful_callbacks')
-                       new_callback_state = _get_successful_state(response)
+                        statemon.state.increment('sucessful_callbacks')
+                        new_callback_state = _get_successful_state(response)
+
                 else:
-                    statemon.state.increment('sucessful_callbacks')
-                    new_callback_state = _get_successful_state(response)
+                    new_callback_state = next_callback_state
 
             # Modify the database state
             def _mod_obj(x):

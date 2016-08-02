@@ -1531,6 +1531,10 @@ class DirectivePublisher(threading.Thread):
                                request_keys,
                                _set_state, 
                                async=True)
+                for request in requests:
+                    tornado.ioloop.IOLoop.current().spawn_callback( 
+                        functools.partial(self._send_callback, 
+                            request))
 
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
