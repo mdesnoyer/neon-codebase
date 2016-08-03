@@ -1064,7 +1064,7 @@ class TagHandler(ShareableContentHandler):
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('name'): All(Coerce(unicode), Length(min=1, max=256)),
             'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
-            'type': CustomVoluptuousTypes.TagType
+            'type': CustomVoluptuousTypes.TagType()
         })(self.args)
 
         tag_type = self.args['type'] if self.args.get('type') \
@@ -1089,7 +1089,7 @@ class TagHandler(ShareableContentHandler):
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
             'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
             'name': All(Coerce(unicode), Length(min=1, max=256)),
-            'type': CustomVoluptuousTypes.TagType
+            'type': CustomVoluptuousTypes.TagType()
         })(self.args)
 
         # Update the tag itself.
@@ -1230,7 +1230,7 @@ class TagSearchExternalHandler(APIV2Handler):
             'since': Coerce(float),
             'until': Coerce(float),
             'show_hidden': Coerce(bool),
-            'tag_type': CustomVoluptuousTypes.TagType
+            'tag_type': CustomVoluptuousTypes.TagType()
         })(self.args)
         self.args['base_url'] = '/api/v2/%s/tags/search/' % self.account_id
         searcher = ContentSearcher(**self.args)
@@ -1327,7 +1327,7 @@ class TagSearchInternalHandler(APIV2Handler):
             'until': All(Coerce(float)),
             'show_hidden': Coerce(bool),
             'fields': CustomVoluptuousTypes.CommaSeparatedList(),
-            'tag_type': CustomVoluptuousTypes.TagType
+            'tag_type': CustomVoluptuousTypes.TagType()
         })(self.args)
 
         self.args['base_url'] = '/api/v2/tags/search/'
