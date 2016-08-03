@@ -10,7 +10,7 @@ boto==2.32.1
 coverage==3.7
 dateutils==0.6.6
 flickrapi==1.4.2
-futures==2.1.5
+futures==2.2
 google-api-python-client==1.1
 happybase==0.9
 httpagentparser==1.6.0
@@ -31,7 +31,6 @@ pygeoip==0.2.7
 pyhs2==0.6.0
 pyleargist==2.0.5
 pylint==1.1.0
-redis==2.10.3
 scipy==0.9.0
 shortuuid==0.3
 simplejson==2.3.2
@@ -49,4 +48,8 @@ momoko==2.2.2
 xlwt==1.0.0
 dill==0.2.4
 passlib==1.6.5
-youtube_dl
+stripe==1.32.2
+youtube_dl>=2016.07.13
+hdfs==2.0.6
+grpcio==0.13.1
+requests-toolbelt==0.6.2

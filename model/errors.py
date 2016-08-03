@@ -5,3 +5,4 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 
 class VideoReadError(IOError): pass
+class PredictionError(IOError): pass

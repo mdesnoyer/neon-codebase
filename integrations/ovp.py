@@ -10,11 +10,13 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import cmsapiv2.client
 from cmsdb import neondata
 import datetime
 from integrations.exceptions import IntegrationError
 import json
 import logging
+import re
 import tornado.gen
 import utils.http
 from utils.inputsanitizer import InputSanitizer
@@ -39,6 +41,9 @@ define('cmsapi_host', default='services.neon-lab.com',
        help='Host where the cmsapi is')
 define('cmsapi_port', default=80, type=int, help='Port where the cmsapi is')
 
+define("cmsapi_user", default=None, help='User to make api requests with')
+define("cmsapi_pass", default=None, help='Password for the cmsapi user')
+
 _log = logging.getLogger(__name__)
 
 
@@ -47,7 +52,7 @@ class OVPRefIDError(OVPError): pass
 class OVPCustomRefIDError(OVPError): pass
 class OVPNoValidURL(OVPError): pass
 class CMSAPIError(IntegrationError): pass
-
+class RateLimitError(IntegrationError): pass
 
 class OVPIntegration(object):
     def __init__(self, account_id, platform):
@@ -105,7 +110,10 @@ class OVPIntegration(object):
                     added_jobs += 1 
             except (KeyError, OVPCustomRefIDError, OVPRefIDError):
                 # pass here, we do not have enough to submit 
-                pass 
+                pass
+            except RateLimitError:
+                # just break here, we don't want to update last_processed 
+                break  
             except OVPNoValidURL: 
                 _log.error('Unable to find a valid url for video_id : %s' % \
                     self.get_video_id(video))
@@ -167,11 +175,10 @@ class OVPIntegration(object):
         try:
             job_id = yield self._submit_one_video_object_impl(
                     video, grab_new_thumb=grab_new_thumb)
-        except CMSAPIError:
-            raise
-        except OVPError:
-            raise
-        except TypeError:
+        except (CMSAPIError, 
+                OVPError,
+                TypeError,
+                RateLimitError):
             raise
         except Exception:
             _log.exception('Unexpected error submitting video %s' % video)
@@ -285,49 +292,55 @@ class OVPIntegration(object):
         json returned by the CMSAPI
         '''
         body = {
-            'video_id': video_id,
-            'video_url': video_url,
-            'video_title': video_title,
-            'default_thumbnail': default_thumbnail,
-            'external_thumbnail_id': external_thumbnail_id,
+            'external_video_ref': video_id,
+            'url': video_url,
+            'title': video_title,
+            'default_thumbnail_url': default_thumbnail,
+            'thumbnail_ref': external_thumbnail_id,
             'callback_url': callback_url,
             'custom_data': custom_data,
             'duration': duration,
+            'integration_id': self.platform.integration_id,  
             'publish_date': publish_date
         }
-        headers = {"X-Neon-API-Key": self.neon_api_key,
-                   "Content-Type": "application/json"}
-        url = ('http://%s:%s/api/v1/accounts/%s/neon_integrations/%s/'
-               'create_thumbnail_api_request') % (
-                   options.cmsapi_host,
-                   options.cmsapi_port,
-                   self.account_id,
-                   self.platform.integration_id)
-        request = tornado.httpclient.HTTPRequest(
-            url=url,
-            method='POST',
+        headers = {"Content-Type": "application/json"}
+
+        url = '/api/v2/%s/videos' % ( 
+            self.account_id)
+ 
+        req = tornado.httpclient.HTTPRequest(
+            url, 
+            method='POST', 
             headers=headers,
-            body=json.dumps(body),
-            request_timeout=300.0,
-            connect_timeout=30.0)
+            body=json.dumps(dict((k, v) 
+                for k, v in body.iteritems() if v or v is 0)))
 
-        response = yield tornado.gen.Task(utils.http.send_request, request,
-                                          base_delay=4.0, ntries=2)
+        client = cmsapiv2.client.Client(
+            options.cmsapi_user,
+            options.cmsapi_pass)
 
-        if response.code == 409:
-            _log.warn('Video %s for account %s already exists' %
-                      (video_id, self.neon_api_key))
-            raise tornado.gen.Return(json.loads(response.body))
-        elif response.error is not None:
-            statemon.state.increment('job_submission_error')
-            _log.error('Error submitting video %s: %s' % (video_id,
-                                                          response.error))
-            raise CMSAPIError('Error submitting video: %s' % response.error)
+        res = yield client.send_request(
+            req, 
+            no_retry_codes=[402,409,429], 
+            ntries=3)
+        if res.error: 
+            if res.error.code == 409:
+                _log.warn('Video %s for account %s already exists' %
+                    (video_id, self.neon_api_key))
+                raise tornado.gen.Return(json.loads(res.body))
+            elif res.error.code == 402 or res.error.code == 429: 
+                _log.warn('Rate limit for account %s has been met' %
+                    (self.neon_api_key))
+                raise RateLimitError(str(res.error))
+            else: 
+                statemon.state.increment('job_submission_error')
+                _log.error('Error submitting video: %s' % res.error)
+                raise CMSAPIError(str(res.error))
 
         _log.info('New video was submitted for account %s video id %s'
                   % (self.neon_api_key, video_id))
         statemon.state.increment('new_job_submitted')
-        raise tornado.gen.Return(json.loads(response.body))
+        raise tornado.gen.Return(json.loads(res.body))
 
     @tornado.gen.coroutine
     def _update_video_info(self, data, video_id, job_id):
@@ -388,6 +401,13 @@ class OVPIntegration(object):
             return
         ext_thumb_urls = [self._normalize_thumbnail_url(x)
                           for x in self._extract_image_urls(data)]
+
+        # Check if the url is our video serving url. If so, we can
+        # ignore the thumb
+        neon_url_re = re.compile('/neonvid_%s' % 
+                                 neondata.InternalVideoID.VALID_EXTERNAL_REGEX)
+        if any([neon_url_re.search(x) for x in ext_thumb_urls if x]):
+            return
 
         # Get our video and thumbnail metadata objects
         video_meta = yield tornado.gen.Task(
@@ -468,13 +488,14 @@ class OVPIntegration(object):
                         save_objects=False,
                         async=True)
 
-                    # Validate the new_thumb key exists or not. We noticed that
-                    # Brightcove can send the same thumbnail with different
-                    # external ids multiple times. This triggers the same
-                    # thumbnail as new and restart the experiment. Since the
-                    # thumbnail key is generated by md5 hashing, we will compare
-                    # the hash with existing thumbnail hashes, if find a match
-                    # we will disgard the thumbnail.
+                    # Validate the new_thumb key exists or not. We
+                    # noticed that Brightcove can send the same
+                    # thumbnail with different external ids multiple
+                    # times. This triggers the same thumbnail as new
+                    # and restart the experiment. Since the thumbnail
+                    # key is generated by md5 hashing, we will compare
+                    # the hash with existing thumbnail hashes, if find
+                    # a match we will disgard the thumbnail.
                     is_exist = \
                         any([new_thumb.key == old_thumb.key
                             for old_thumb in thumbs_meta]) or \
@@ -492,10 +513,13 @@ class OVPIntegration(object):
                     # We will modify in database first. Also, modify is used
                     # first instead of using save directively, as other process
                     # can modify the video_meta as well.
-                    updated_video = yield tornado.gen.Task(
-                        video_meta.modify,
+                    def _add_thumb_key(x):
+                        x.thumbnail_ids.append(new_thumb.key)
+                        x.non_job_thumb_ids.append(new_thumb.key)
+                    updated_video = yield neondata.VideoMetadata.modify(
                         video_meta.key,
-                        lambda x: x.thumbnail_ids.append(new_thumb.key))
+                        _add_thumb_key,
+                        async=True)
                     if updated_video is None:
                         # It wasn't in the database, so save this object
                         sucess = yield tornado.gen.Task(video_meta.save)
@@ -561,6 +585,16 @@ class OVPIntegration(object):
            If using submit_many_videos:
              Child classes must implement this even if it
              is just to return None
+        '''
+        raise NotImplementedError()
+
+    @tornado.gen.coroutine
+    def lookup_videos(self, ovp_video_ids):
+        '''Looks up videos by id and returns a list of video object.
+
+        Videos that don't exist will not be returned.
+
+        Must be implemented by the subclass
         '''
         raise NotImplementedError()
 

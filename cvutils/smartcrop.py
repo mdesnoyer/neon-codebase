@@ -123,6 +123,7 @@ class SmartCrop(object):
                 SmartCrop._dlib_face_detector = \
                   dlib.get_frontal_face_detector()
             self.dlib_face_detector = SmartCrop._dlib_face_detector
+            
             self.haar_params = {'minNeighbors': 8,
                                 'minSize': (100, 100),
                                 'scaleFactor': 1.1}
@@ -291,7 +292,7 @@ class SmartCrop(object):
         if not upper_text_y_array:
             return self.image[y:y+height, x:x+width]
         upper_text_y = min(upper_text_y_array) - 3
-        new_height = upper_text_y - y
+        new_height = min(height, upper_text_y - y)
         new_width = new_height * width / height
         new_x = x + (width - new_width)/2
         new_x_end = x + new_width
@@ -465,7 +466,7 @@ class SmartCrop(object):
         center_horizontal = width / 2
         center_vertical = height / 2
         new_x = center_horizontal - new_width / 2
-        new_y = center_vertical - height / 2
+        new_y = center_vertical - new_height / 2
 
 
         if self.with_saliency:

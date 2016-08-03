@@ -74,8 +74,6 @@ from utils import statemon
 statemon.define("master_connection_error", int)
 statemon.define("cluster_creation_error", int)
 
-s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
-
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
 class MasterMissingError(ClusterInfoError): pass
@@ -83,6 +81,8 @@ class ClusterConnectionError(ClusterException): pass
 class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
 class MapReduceError(ExecutionError): pass
+
+s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
     '''Function that iterates through the responses to list_* functions
@@ -250,8 +250,7 @@ class Cluster():
                            self.cluster_id))
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path, map_memory_mb=None,
-                           timeout=None, name='Raw Tracker Data Cleaning'):
+                           output_path, extra_ops, timeout=None, name='Raw Tracker Data Cleaning'):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -272,54 +271,14 @@ class Cluster():
             budget_time = datetime.datetime.now() + \
                           datetime.timedelta(seconds=timeout)
 
-        # Define extra options for the job
-        extra_ops = {
-            'mapreduce.output.fileoutputformat.compress' : 'true',
-            'avro.output.codec' : 'snappy',
-            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
-            'mapreduce.task.timeout' : 1800000,
             'mapreduce.map.speculative': 'false',
-            'mapreduce.reduce.speculative': 'false',
-            'mapreduce.map.speculative': 'false',
-            'io.file.buffer.size': 65536
-        }
-
-        # If the requested map memory is different, set it
-        if map_memory_mb is not None:
-            extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
-            extra_ops['mapreduce.map.java.opts'] = (
-                '-Xmx%im' % int(map_memory_mb * 0.8))
 
 
-        # Figure out the number of reducers to use by aiming for files
-        # that are 1GB on average.
-        input_data_size = 0
-        s3AddrMatch = s3AddressRe.match(input_path)
-        if s3AddrMatch:
 
-            # First figure out the size of the data
-            bucket_name, key_name = s3AddrMatch.groups()
-            s3conn = S3Connection()
-            prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
-            for key in s3conn.get_bucket(bucket_name).list(prefix):
-                input_data_size += key.size
-
-            n_reducers = math.ceil(input_data_size / (1073741824. / 2))
-            extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
-
-        # If the cluster's core has larger instances, the memory
-        # allocated in the reduce can get very large. However, we max
-        # out the reduce to 1GB, so limit the reducer to use at most
-        # 5GB of memory.
-        core_group = self._get_instance_group_info('CORE')
-        if core_group is None:
-            raise ClusterInfoError('Could not find the CORE instance group')
         if (output_path.startswith("s3") and
                     core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
                                                 'r3.8xlarge', 'i2.8xlarge',
                                                 'i2.4xlarge', 'cr1.8xlarge']):
-            extra_ops['mapreduce.reduce.memory.mb'] = 5000
-            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
 
         self.connect()
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
@@ -382,7 +341,6 @@ class Cluster():
                                      step_args)
         res = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = res.stepids[0].value
-            if wait_count > 80:
 
         timeout_step = 80
         self.monitor_job_progress_emr(step_id, emrconn, timeout_step);
@@ -801,7 +759,7 @@ class Cluster():
                  x[2], cur_price, avg_price)
         #}
         avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'} 
+                                    'us-east-1d' : 'subnet-abf214f2'}
  
                  for availability_zone in avail_zone_to_subnet_id.keys()
                  for itype, x in Cluster.instance_info.items()
@@ -1060,6 +1018,8 @@ class Cluster():
                        self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
             raise MapReduceError('Error loading job into Hadoop. '
                                  'See earlier logs for job logs')
+                                 'See earlier logs for job logs')
+
 
 class ClusterSSHConnection:
     '''Class that allows an ssh connection to the master cluster node.'''

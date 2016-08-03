@@ -28,6 +28,24 @@ from model import local_video_searcher
 
 _log = logging.getLogger(__name__)
 
+class VideoThumbnail(object):
+    '''Holds data about a video thumbnail.'''
+    def __init__(self, image=None, score=None, frameno=None,
+                 model_version=None, features=None, filtered_reason=None):
+        self.image = image # CV Image object
+        self.score = score # Model score of this image
+        self.frameno = frameno # What frame number this image came from
+        # The version of the model used to score this image
+        self.model_version = model_version 
+        # A numpy array of the feature vector for this image
+        self.features = features
+        # String describing why this thumbnail was filtered
+        self.filtered_reason = filtered_reason
+
+    def __str__(self):
+        return utils.obj.full_object_str(self, ['features', 'image'])
+    
+
 class Model(object):
     '''The whole model, which consists of a predictor and a filter.'''    
     def __init__(self, predictor, filt=None, vid_searcher=None):
@@ -35,22 +53,15 @@ class Model(object):
         self.predictor = predictor
         self.filt = filt
         if video_searcher is None:
-            # while it's tempting to modify this to use the LocalSearcher,
-            # this would require adding numerous arguments to the
-            # instantiation of the Model class, and as such convention will
-            # now become that BisectSearcher is the default video searcher,
-            # and is what will be adopted in the event there is insufficient
-            # information available.
-            self.video_searcher = video_searcher.BisectSearcher(
-                predictor, filt)
+            raise ValueError('A vid_searcher is required')
         else:
             self.video_searcher = vid_searcher
 
 
     def __setstate__(self, state):
         if 'video_searcher' not in state:
-            state['video_searcher'] = video_searcher.BisectSearcher(
-                state['predictor'], state['filt'])
+            self.video_searcher = local_video_searcher.LocalSearcher(
+                state['predictor'])
         self.__dict__ = state
 
 
@@ -76,24 +87,24 @@ class Model(object):
         image - Image in numpy BGR format (aka OpenCV)
         do_filtering - Should the filter be applied?
 
-        Returns: (score, attribute_string) of the image. If it was
-        filtered, the score will be -inf and the attribute will
-        describe how it was filtered.
-
+        Returns: (score, attribute_string, feature_vector, model_version) 
+                 of the image. If it was filtered, the score will be -inf and
+                 the attribute will describe how it was filtered.
         '''
         if (self.filt is None or not do_filtering or 
             self.filt.accept(image, None, None)):
-            return (self.predictor.predict(image), '')
-        return (float('-inf'), self.filt.short_description())
+            score, features, model_version = self.predictor.predict(image)
+            return (score, features, model_version, '')
+        return (float('-inf'), None, None, self.filt.short_description())
 
        
-    def choose_thumbnails(self, video, n=1, video_name=''):
-        '''Select the top n thumbnails from a video.
+    def choose_thumbnails(self, video, n=1, video_name='', m=0):
+        '''Select the top n and/or bottom m thumbnails from a video.
 
         Returns:
-        ([(image,score,frame_no,timecode,attribute)]) sorted by score
+        List of VideoThumbnail objects sorted by score
         '''
-        return self.video_searcher.choose_thumbnails(video, n, video_name)
+        return self.video_searcher.choose_thumbnails(video, n, video_name, m)
 
 
     def restore_additional_data(self, filename):
@@ -131,3 +142,19 @@ def load_model(filename):
     
     return model 
 
+def generate_model(ls_inp_filename, predictor):
+    '''
+    Given a filename pointing to an input dict for 
+    local video searcher and a functioning instance
+    of the predictor, generates a new model.
+
+    ls_inp_filename: A filename that contains a pickled dictionary of the
+        inputs required for local search (the combiner, face finder, etc)
+    predictor: an instance of the predictor.
+    '''
+    with open(ls_inp_filename) as f:
+        ls_in_dict = pickle.load(f)
+    loc_srch = local_video_searcher.LocalSearcher(predictor, **ls_in_dict)
+    model = Model(predictor, vid_searcher=loc_srch)
+    model.restore_additional_data(ls_inp_filename)
+    return model
