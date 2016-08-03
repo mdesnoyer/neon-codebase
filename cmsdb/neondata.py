@@ -1864,10 +1864,10 @@ class Searchable(object):
                     parts.append("t._data->>'{}' = %s".format(key))
             return ' WHERE %s' % ' AND '.join(parts) if parts else ''
         def _limit():
-            return ' LIMIT %d' % kwargs.get('limit') \
+            return ' LIMIT %s' % kwargs.get('limit') \
                     if kwargs.get('limit') else ''
         def _offset():
-            return ' OFFSET %d' % kwargs.get('offset') \
+            return ' OFFSET %s' % kwargs.get('offset') \
                     if kwargs.get('offset') else ''
         def _order():
             if reverse:
