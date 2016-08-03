@@ -28,7 +28,8 @@ import time
 from utils.options import define, options
 
 define('region', type=str, default="us-east-1", help='region to connect to')
-define('customer_callback_sqs', type=str, default="neon-customer-callback", help='SQS Q')
+define('customer_callback_sqs', type=str, default="neon-customer-callback",
+       help='SQS queue name')
 
 statemon.define('callbacks_in_flight', int)
 statemon.define('callback_errors', int)
@@ -205,7 +206,7 @@ class CustomerCallbackManager(SQSManager):
                     self.callback_messages.setdefault(ccm.video_id, ccm)
             except ValueError:
                 _log.error('Bad message in SQS. removing: %s' % msg.get_body())
-                self.sq.delete_message(msg)
+                yield self.remove_message(msg)
 
         raise tornado.gen.Return(self.callback_messages.values())
 

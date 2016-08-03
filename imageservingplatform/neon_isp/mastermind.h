@@ -58,19 +58,22 @@ public:
     // searches the publisher hashtable
     const char * GetAccountId(const char * publisherId, int & size);
     
-    const char * GetImageUrl(const char * accountId, 
-                                const char * videoId, 
-                                unsigned char * bucketId,
-                                int bucketIdLen,
-                                int height, 
-                                int width, 
-                                int & size);
+    void GetImageUrl(const char * accountId, 
+                     const char * videoId, 
+                     unsigned char * bucketId,
+                     int bucketIdLen,
+                     int height, 
+                     int width, 
+                     std::string& image_url);
     
-    const char * GetThumbnailID(const char * c_accountId, 
-                                const char * c_videoId, 
-                                unsigned char * bucketId,
-                                int bucketIdLen,
-                                int &size);
+    void GetThumbnailID(const char * c_accountId, 
+                        const char * c_videoId, 
+                        unsigned char * bucketId,
+                        int bucketIdLen,
+                        std::string & tid);
+
+    bool DoesDirectiveExist(const char * account_id, 
+                            const char * video_id);
    
 
 protected:
@@ -109,20 +112,4 @@ protected:
 using namespace std;
 using namespace __gnu_cxx;
 
-
-namespace __gnu_cxx {
-    template<>
-    struct hash<std::string>
-    {
-        hash<char*> h;
-        size_t operator()(const std::string &s) const
-        {
-            return h(s.c_str());
-        };
-    };
-}
-
-
 #endif
-
-

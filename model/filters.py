@@ -4,13 +4,22 @@ Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 import cv2
+from glob import glob
 import logging
 import numpy as np
+import os
+import pickle
 import scipy
 import scipy.ndimage.filters
-from . import TextDetectionPy
+from sklearn import svm 
+from sklearn.externals import joblib
+import tempfile 
 import utils.obj
-import utils.pycvutils
+from utils import pycvutils
+import dlib
+from score_eyes import ScoreEyes
+from parse_faces import FindAndParseFaces
+import cPickle
 
 _log = logging.getLogger(__name__)
 
@@ -35,7 +44,7 @@ class Filter(object):
 
         Returns: True of the image passed the filter, False otherwise
         '''
-        return self._accept_impl(self._resize_image(image), frameno, video)
+        return self.accept_score(self._resize_image(image), frameno, video)[0]
 
     def _resize_image(self, image):
         '''Resizes the image according to max_height.'''
@@ -62,10 +71,62 @@ class Filter(object):
         '''Returns the score of an image related to the filter.'''
         raise NotImplementedError()
 
+    def accept_score(self, image, frameno=None, video=None):
+        '''Returns (accept, score) simultaneously'''
+        raise NotImplementedError()
+
     def __setstate__(self, state):
         if not 'max_height' in state:
             state['max_height'] = None
         self.__dict__ = state
+
+    def restore_additional_data(self, filename):
+        '''
+        This function is to be defined in individual classes, and restores 
+        additional data that is required by a given filter but is static and
+        not easily filtered. 
+
+        When implemented in actual filter classes, this function accepts the 
+        filename of the pickled model that is being loaded and uses that 
+        filename to locate the appropriate data. This is based on the 
+        presumption that other (non-model) pickled files are stored in a 
+        consistent way in the model_data directory. 
+        '''
+        pass 
+
+class LocalFilter(object):
+    '''
+    Abstract local filter. In contrast with other filters, this one
+    relies on the output of a feature generator. Therefore, it accepts
+    a list or 1D numpy array of feature and returns an equal-sized list
+    of booleans indicating whether or not the frame should be filtered.
+
+    FALSE -> Filter frame.
+    TRUE  -> Do not filter frame.
+    '''
+    def __init__(self):
+        self.__version__ = 1
+        self.feature = None
+
+    def _ensure_np(self, feat_vec):
+        '''Makes sure the input vec is a numpy-style array'''
+        if not type(feat_vec).__module__ == np.__name__:
+            feat_vec = np.array(feat_vec)
+        return feat_vec
+
+    def filter(self, feat_vec):
+        '''
+        Inputs:
+            A 1D numpy array or list of features (floats or ints)
+        Returns:
+            a list of type boolean with size
+            equal to that of the feat_vec.
+        '''
+        feat_vec = self._ensure_np(feat_vec)
+        return self._filter_impl(feat_vec)
+
+    def _filter_impl(self, feat_vec):
+        raise NotImplementedError()
 
 class VideoFilter(Filter):
     '''Abstract video filter'''
@@ -77,6 +138,142 @@ class VideoFilter(Filter):
             # This isn't a video, so the image passes automatically
             return True
         return self._accept_impl(self._resize_image(image), frameno, video)
+
+class ThreshFilt(LocalFilter):
+    '''
+    Removes frames for whom the value of the feature is too low. Accepts
+    a function as the thresh, so that it may be calculated dynamically. The
+    function must accept no arguments and return only a single value.
+    '''
+    def __init__(self, thresh, feature='pixvar'):
+        super(ThreshFilt, self).__init__()
+        self._thresh = thresh
+        self.feature = feature
+
+    @property
+    def thresh(self):
+        try:
+            return self._thresh()
+        except TypeError:
+            return self._thresh
+
+    def _filter_impl(self, feat_vec):
+        return feat_vec > self.thresh
+
+    def short_description(self):
+        return 'thresholdfilter'
+
+class SceneChangeFilter(LocalFilter):
+    '''
+    Removes frames that are near scene changes. 
+    '''
+    def __init__(self, mean_mult=2., std_mult=1.5, 
+                 min_thresh=None, max_thresh=None):
+        '''
+        Scene Change filtering. 
+        Parameters:
+            mean_mult : defines thresh1, see below
+            std_mult  : defines thresh2, see below
+            min_thresh : images with SAD < min_thresh are never filtered
+            max_thresh : images with SAD > max_thresh are always filtered
+
+        Note: min_thresh and max_thresh may be calculated dynamically, similar
+        to ThreshFilt, if passed as a function that takes no parameter. 
+
+        Note: There is an edge case in which filtering is performed on only
+        one image. This can occur if the previous filters reject all-but-one
+        image, in which case the SAD feature generator cannot calculate SAD,
+        and hence the entire interval is thrown out (as it's likely to be bad
+        anyway). 
+
+        Constructs parameters based on mean and std.
+
+        thresh1 = mean(SAD) * mean_mult
+        thresh2 = std(SAD) * std_mult
+
+        Images are filtered if:
+        ((SAD_i > thresh1) AND (SAD_i > thresh2) AND SAD_i > min_thresh)
+        OR 
+        (SAD_i > max_thresh)
+
+        If any input parameters are None, then they do not affect the
+        calculation. 
+
+        '''
+        super(SceneChangeFilter, self).__init__()
+        self.mean_mult = mean_mult
+        self.std_mult = std_mult
+        self._min_thresh = min_thresh
+        self._max_thresh = max_thresh
+        self.feature = 'sad'
+
+    def mean_thresh(self, feat_vec):
+        return np.mean(feat_vec) * self.mean_mult 
+
+    def std_thresh(self, feat_vec):
+        return np.std(feat_vec) * self.std_mult + np.mean(feat_vec)
+
+    @property
+    def min_thresh(self):
+        try:
+            return self._min_thresh()
+        except TypeError:
+            return self._min_thresh
+
+    @property
+    def max_thresh(self):
+        try:
+            return self._max_thresh()
+        except TypeError:
+            return self._max_thresh
+
+    def _filter_impl(self, feat_vec):
+        if len(feat_vec) < 2:
+            # nothing can be determined. Throw the whole thing out.
+            return np.array([False])
+        crit = np.ones(feat_vec.shape, dtype=bool)
+        if self.mean_mult is not None:
+            crit = np.logical_and(crit, feat_vec < self.mean_thresh(feat_vec))
+        if self.std_mult is not None:
+            crit = np.logical_and(crit, feat_vec < self.std_thresh(feat_vec))
+        if self.min_thresh is not None:
+            crit = np.logical_or(crit, feat_vec < self.min_thresh)
+        if self.max_thresh is not None:
+            crit = np.logical_and(crit, feat_vec < self.max_thresh)
+        return crit
+
+    def short_description(self):
+        return 'scenechange'
+
+class FaceFilter(LocalFilter):
+    '''
+    Removes frames that have less faces than other frames.
+    '''
+    def __init__(self):
+        super(FaceFilter, self).__init__()
+        self.feature = 'faces'
+
+    def _filter_impl(self, feat_vec):
+        return feat_vec == np.max(feat_vec)
+
+    def short_description(self):
+        return 'faces'
+
+class EyeFilter(LocalFilter):
+    '''
+    Removes frames that definitely have closed eyes (i.e.,
+    the eye scores do not cross the separating hyperplane
+    of the classifier)
+    '''
+    def __init__(self):
+        super(EyeFilter, self).__init__()
+        self.feature = 'eyes'
+
+    def _filter_impl(self, feat_vec):
+        return feat_vec >= 0
+
+    def short_description(self):
+        return 'eyes'
 
 class CascadeFilter(Filter):
     '''A sequence of filters where if one cuts out the image, it fails.'''
@@ -103,6 +300,40 @@ class CascadeFilter(Filter):
         if self.last_failed is None:
             return ''
         return self.last_failed.short_description()
+
+    def restore_additional_data(self, filename):
+        for filt in self.filters:
+            filt.restore_additional_data(filename)
+
+class CachedCascadeFilter(CascadeFilter):
+    '''Wraps CascadeFilter, but stores the image values such that
+    they can be accessed later. If initialized with force, it will
+    always run through all the filters.'''
+    def __init__(self, filters, max_height=None, force=False):
+        super(CachedCascadeFilter, self).__init__(max_height)
+        self.last_scores = None
+        
+    def _accept_impl(self, image, frameno, video):
+        self.last_failed = None
+        self.last_scores = []
+        for filt in self.filters:
+            accepted, score = filt.accept_score(image, frameno, video)
+            self.last_scores.append((accepted, score))
+            if (not accepted) and (self.last_failed is None):
+                self.last_failed = filt
+                if not force:
+                    return False
+
+        return True
+
+    def short_description(self):
+        if self.last_failed is None:
+            return ''
+        return self.last_failed.short_description()
+
+    def restore_additional_data(self, filename):
+        for filt in self.filters:
+            filt.restore_additional_data(filename)
 
 class UniformColorFilter(Filter):
     '''Filters an image that is too uniform a color.'''
@@ -149,13 +380,18 @@ class UniformColorFilter(Filter):
 
         return frac_same
 
+    def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        accepted = score < self.frac_pixels
+        return (accepted, score)
+
     def short_description(self):
         return 'ucolor'
 
 class BlurryFilter(Filter):
     '''Filters on an image that is too blurry.'''
 
-    def __init__(self, blur_threshold = 60, percentile=0.999, max_height=480):
+    def __init__(self, blur_threshold = 60, percentile=0.99, max_height=480):
         super(BlurryFilter, self).__init__(max_height)
         self.thresh = blur_threshold
         self.percentile = percentile
@@ -164,8 +400,8 @@ class BlurryFilter(Filter):
         return self.score(image) > self.thresh
 
     def score(self, image):
-        scale_factor = 256.0 / image.shape[1]
-        new_size = (256, int(round(image.shape[0] * scale_factor)))
+        scale_factor = 512.0 / image.shape[1]
+        new_size = (512, int(round(image.shape[0] * scale_factor)))
         thumb = cv2.resize(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
                            new_size)
 
@@ -180,7 +416,11 @@ class BlurryFilter(Filter):
         # Do a robust max
         sort_im = np.sort(laplace_im, axis=None)
         return sort_im[int(self.percentile * len(sort_im))-1]
-        
+
+    def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        accepted = score > self.thresh
+        return (accepted, score)
 
     def short_description(self):
         return 'blur'
@@ -221,32 +461,13 @@ class InterlaceFilter(Filter):
         return (float(np.count_nonzero(is_comb)) /
                 (image.shape[0] * image.shape[1]))
 
+    def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        accepted = score < self.count_thresh
+        return (accepted, score)
+
     def short_description(self):
         return 'interlace'
-
-class TextFilter(Filter):
-    '''Filters on large amounts of text in the image.'''
-
-    def __init__(self, frac_thresh=0.03, max_height=480):
-        super(TextFilter, self).__init__(max_height)
-        self.frac_thresh = frac_thresh
-
-    def _accept_impl(self, image, frameno, video):
-        return self.score(image) < self.frac_thresh
-
-    def score(self, image):
-
-        # Cut out the bottom 20% of the image because it often has tickers
-        cut_image = image[0:int(image.shape[0]*.82), :, :]
-    
-        text_image = TextDetectionPy.TextDetection(cut_image)
-        
-
-        return (float(np.count_nonzero(text_image)) /
-                (text_image.shape[0] * text_image.shape[1]))
-
-    def short_description(self):
-        return 'text'
 
 class DeltaStdDevFilter(VideoFilter):
     def __init__(self, upper_thresh = 0.76, lower_thresh=-0.74):
@@ -265,7 +486,7 @@ class DeltaStdDevFilter(VideoFilter):
         last_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
  
         # get one after frameno
-        sucess, cur_frame = utils.pycvutils.seek_video(video, frameno+1)
+        sucess, cur_frame = pycvutils.seek_video(video, frameno+1)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
             return True
@@ -273,7 +494,7 @@ class DeltaStdDevFilter(VideoFilter):
         std_devs[2] = np.std(frame) if moreData else 0.
         
         # get one before frameno
-        sucess, cur_frame = utils.pycvutils.seek_video(video, frameno-1,
+        sucess, cur_frame = pycvutils.seek_video(video, frameno-1,
                                                        cur_frame=cur_frame)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
@@ -281,7 +502,7 @@ class DeltaStdDevFilter(VideoFilter):
         moreData,frame = video.read() 
         std_devs[0] = np.std(frame) if moreData else 0.
 
-        sucess, cur_frame = utils.pycvutils.seek_video(video, last_frame,
+        sucess, cur_frame = pycvutils.seek_video(video, last_frame,
                                                        cur_frame=cur_frame)
    
         # compute stats
@@ -291,6 +512,11 @@ class DeltaStdDevFilter(VideoFilter):
         should_accept = self.d2_std >= self.lower and self.d2_std <= self.upper
 
         return should_accept  
+
+    def accept_score(self, image, frameno, video):
+        accepted = self._accept_impl(image, frameno, video)
+        score = self.d2_std
+        return (accepted, score)
     
     def score(self):
         return self.d2_std
@@ -334,7 +560,7 @@ class CrossFadeFilter(VideoFilter):
         last_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
 
         # Get the frame in the future of this one
-        sucess, cur_frame = utils.pycvutils.seek_video(video,
+        sucess, cur_frame = pycvutils.seek_video(video,
                                                        frameno + self.dframe)
         if not sucess:
             return float('inf'), float('inf')
@@ -344,7 +570,7 @@ class CrossFadeFilter(VideoFilter):
         future_frame = self._resize_image(future_frame)
 
         # Get the frame in the past
-        sucess, cur_frame = utils.pycvutils.seek_video(video,
+        sucess, cur_frame = pycvutils.seek_video(video,
                                                        frameno - self.dframe)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
@@ -354,7 +580,7 @@ class CrossFadeFilter(VideoFilter):
             return float('inf'), float('inf')
         past_frame = self._resize_image(past_frame)
 
-        sucess, cur_frame = utils.pycvutils.seek_video(video, last_frame)
+        sucess, cur_frame = pycvutils.seek_video(video, last_frame)
 
         A = np.transpose(np.vstack((np.ravel(past_frame),
                                     np.ravel(future_frame))))
@@ -367,5 +593,54 @@ class CrossFadeFilter(VideoFilter):
         return (np.sqrt(residuals[0] / image.size),
                 np.abs(std_devs[1] - std_devs[0]))
 
+    def accept_score(self, image, frameno, video):
+        residual, delta_stddev = self.score(image, frameno, video)
+        accepted = ((delta_stddev < self.stddev_thresh) or 
+                    (residual > self.residual_thresh))
+        score = [residual, delta_stddev]
+        return (accepted, score)
+
     def short_description(self):
         return 'cross_fade'
+
+class ClosedEyeDetector(Filter):
+    def __init__(self, predictor_path, classifier_path, scaler_path, max_height=640):
+        super(ClosedEyeDetector, self).__init__(max_height=max_height)
+        self.detector = dlib.get_frontal_face_detector()
+        self.predictor = dlib.shape_predictor(predictor_path)
+        with open(classifier_path) as f:
+            self.classifier = cPickle.load(f)
+        with open(scaler_path) as f:
+            self.scaler = cPickle.load(f)
+        self.faceParse = FindAndParseFaces(self.predictor)
+        self.scoreEyes = ScoreEyes(self.classifier, self.scaler)
+        self.n_people_last = None
+
+    def score(self, image):
+        '''
+        Computes the scores for an image
+        '''
+        accepted, scores = self.accept_score(image)
+        return scores
+
+    def _accept_impl(self, image, frameno=None, video=None):
+        accepted, scores = self.accept_score(image, frameno, video)
+        return accepted
+
+    def accept_score(self, image, frameno=None, video=None):
+        self._resize_image(image)
+        self.faceParse.ingest(image)
+        self.n_people_last = self.faceParse.get_N_faces()
+        eyes = self.faceParse.get_all(['l eye', 'r eye'])
+        classif, scores = self.scoreEyes.classifyScore(eyes)
+        if any(np.array(classif) == 0):
+            accepted = False
+        else:
+            accepted = True
+        return accepted, scores
+
+    def restore_additional_data(self, filename):
+        pass
+
+    def short_description(self):
+        return 'closed_eyes'

@@ -135,11 +135,13 @@ class Cluster():
     # The possible instance and their specs. The format is (HDD GB,
     # Memory GB, on demand price)
     instance_info = {
-        'hi1.4xlarge' : (2048., 60.5, 3.1),
-        #'hs1.8xlarge' : (48000., 117., 4.6), # Doesn't have a spot market
-        'cc2.8xlarge' : (3360, 60.5, 2.0),
-        'd2.2xlarge' : (12000, 61.0, 1.38),
-        'd2.4xlarge' : (48000, 122.0, 2.76),
+        'd2.2xlarge'  : (2.0, 1.38),
+        'd2.4xlarge'  : (4.1, 2.76),
+        'd2.8xlarge'  : (8.3, 5.52),
+        'cc2.8xlarge' : (2.2, 2.0),
+        'hi1.4xlarge' : (1.6, 3.1),
+        'i2.4xlarge'  : (3.0, 3.41),
+        'i2.8xlarge'  : (6.1, 6.82)
         }
 
     # Possible cluster roles
@@ -278,6 +280,7 @@ class Cluster():
             'mapreduce.task.timeout' : 1800000,
             'mapreduce.map.speculative': 'false',
             'mapreduce.reduce.speculative': 'false',
+            'mapreduce.map.speculative': 'false',
             'io.file.buffer.size': 65536
         }
 
@@ -355,7 +358,7 @@ class Cluster():
         found_key = bucket.get_key(jar_key.name)
         wait_count = 0
         while found_key is None or jar_key.md5 != found_key.etag.strip('"'):
-            if wait_count > 60:
+            if wait_count > 120:
                 _log.error('Timeout when waiting for the jar to show up in S3')
                 raise IOError('Timeout when uploading jar to s3://%s/%s' %
                               (bucket.name, jar_key.name))
@@ -379,6 +382,7 @@ class Cluster():
                                      step_args)
         res = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = res.stepids[0].value
+            if wait_count > 80:
 
         timeout_step = 80
         self.monitor_job_progress_emr(step_id, emrconn, timeout_step);
@@ -616,7 +620,7 @@ class Cluster():
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
         conn = EmrConnection(self.cluster_region)
-        ec2conn = EC2Connection(self.cluster_region)
+        ec2conn = EC2Connection()
         
         self.master_ip = None
 
@@ -713,10 +717,11 @@ class Cluster():
             boto.emr.step.InstallHiveStep('0.11.0.2')]
 
             
+        subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
             InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
                           'Master Instance Group'),
-            self._get_core_instance_group()
+            instance_group
             ]
         
         conn = EmrConnection(self.cluster_region)
@@ -754,13 +759,15 @@ class Cluster():
         cur_state = conn.describe_cluster(self.cluster_id)
         while cur_state.status.state != 'WAITING':
             if cur_state.status.state in ['TERMINATING', 'TERMINATED',
-                             'TERMINATED_WITH_ERRORS', 'FAILED']:
+                                            'TERMINATED_WITH_ERRORS',
+                                            'FAILED']:
                 msg = ('Cluster could not start because: %s',
                            cur_state.status.statechangereason.message)
                 _log.error(msg)
                 raise ClusterCreationError(msg)
 
             _log.debug('Cluster is booting. State: %s' % cur_state.status.state)
+                      cur_cluster.status.state)
             time.sleep(30.0)
             cur_state = conn.describe_cluster(self.cluster_id)
 
@@ -789,12 +796,16 @@ class Cluster():
                     self.min_core_instances])
 
     def _get_core_instance_group(self):
-             
         # Calculate the expected costs for each of the instance type options
         data = [(itype, self._get_instances_needed(x[0], x[1]), 
                  x[2], cur_price, avg_price)
+        #}
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
+                                    'us-east-1d' : 'subnet-abf214f2'} 
+ 
+                 for availability_zone in avail_zone_to_subnet_id.keys()
                  for itype, x in Cluster.instance_info.items()
-                 for cur_price, avg_price in [self._get_spot_prices(itype)]]
+                 for cur_price, avg_price in [self._get_spot_prices(itype, 
         data = sorted(data, key=lambda x: (np.mean(x[3:5]) * x[1], -x[1]))
         chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
           data[0]
@@ -810,15 +821,18 @@ class Cluster():
         else:
             market_type = 'SPOT'
 
-        return InstanceGroup(int(count),
+        subnet_id = avail_zone_to_subnet_id[availability_zone] 
+
+        return subnet_id, InstanceGroup(int(count),
                              'CORE',
                              chosen_type,
                              market_type,
                              'Core instance group',
                              '%.3f' % (1.03 * on_demand_price))
-                             
 
-    def _get_spot_prices(self, instance_type, 
+    def _get_spot_prices(self, 
+                         instance_type, 
+                         availability_zone,
                          tdiff=datetime.timedelta(days=1)):
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
@@ -829,7 +843,7 @@ class Cluster():
                     end_time=datetime.datetime.utcnow().isoformat(),
                     instance_type=instance_type,
                     product_description='Linux/UNIX (Amazon VPC)',
-                    availability_zone='us-east-1c')]
+                    availability_zone=availability_zone)]
         timestamps, prices = zip(*(data[::-1]))
 
         timestamps = np.array(

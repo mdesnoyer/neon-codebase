@@ -3,8 +3,14 @@
  */
 
 
+#include <boost/scoped_ptr.hpp>
 #include <gtest/gtest.h>
 #include <stdio.h>
+#include <libgen.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <fstream> 
 #include <time.h>
 
 #include "neon_error_codes.h"
@@ -13,6 +19,7 @@
 #include "neon_utils.h"
 #include "directive.h"
 #include "fraction.h"
+#include "test_utils.hpp"
 
 using namespace std; 
 
@@ -125,6 +132,78 @@ TEST_F(FractionsTest, test_fractions_less_than_one){
 
 }
 
+// This test likely belongs in a url_utils test
+TEST_F(FractionsTest, test_generate_default_url_base) 
+{
+    string testString = TestUtils::readTestFile("noUrlsGoodDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+
+    Fraction f; 
+    f.Init(0,frac);
+    boost::scoped_ptr<std::string> default_url; 
+    default_url.reset(new std::string(url_utils::GenerateUrl(f.base_url(), *f.tid(),700,800))); 
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *default_url.get()); 
+}
+
+TEST_F(FractionsTest, test_frac_init_no_height) 
+{
+    string testString = TestUtils::readTestFile("lackingHeightDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+    Fraction f; 
+    int rv = f.Init(0, frac); 
+    ASSERT_EQ(rv, -1); 
+}
+
+TEST_F(FractionsTest, test_frac_init_no_width) 
+{
+    string testString = TestUtils::readTestFile("lackingWidthDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+    Fraction f; 
+    int rv = f.Init(0, frac); 
+    ASSERT_EQ(rv, -1); 
+}
+
+TEST_F(FractionsTest, test_frac_init_no_default_size) 
+{
+    string testString = TestUtils::readTestFile("lackingDefaultSizeDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+    Fraction f; 
+    int rv = f.Init(0, frac); 
+    ASSERT_EQ(rv, -1); 
+}
+
+TEST_F(FractionsTest, test_generate_default_url_full) 
+{ 
+    string testString = TestUtils::readTestFile("noUrlsGoodDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+
+    Fraction f; 
+    f.Init(0,frac);
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *f.default_url()); 
+}
+
+TEST_F(FractionsTest, test_generate_url_without_slashes_in_base_url) 
+{ 
+    string testString = TestUtils::readTestFile("lackingSlashesDirective.json"); 
+    rapidjson::Document doc; 
+    doc.Parse<0>(testString.c_str());  
+    rapidjson::Value& frac = doc["fractions"][0u];
+
+    Fraction f; 
+    f.Init(0,frac);
+    ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *f.default_url());
+}  
+
 // JIRA NEON-240
 TEST_F(FractionsTest, test_exact_size_image_returned){
     rapidjson::Document testDoc;
@@ -170,7 +249,7 @@ TEST_F(FractionsTest, test_exact_size_image_returned){
                 " ] ";
     testDoc.Parse<0>(json);
     testFraction.Init(0,testDoc[0u]);
-    ScaledImage *si = testFraction.GetScaledImage(140,70); 
+    const ScaledImage *si = testFraction.GetScaledImage(140,70); 
     ASSERT_EQ(si->GetHeight(), 140);  
     ASSERT_EQ(si->GetWidth(), 70);  
 }

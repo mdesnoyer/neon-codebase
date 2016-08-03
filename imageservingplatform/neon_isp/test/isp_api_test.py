@@ -130,7 +130,7 @@ class ISP:
 
         #get build path
         self.nginx_path = \
-                base_path + "/imageservingplatform/nginx-1.6.2/objs/nginx"
+                base_path + "/imageservingplatform/nginx-1.8.1/objs/nginx"
 
     def start(self):
         self.proc = subprocess.Popen([
@@ -449,35 +449,6 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
     #
     # Account-wide default thumbnail 
     #
-
-
-    def test_client_api_default_thumbnail_good_enough_size_match_height(self):
-        '''
-        A video directive doesnt exists, a scaled default thumbnail of 
-        size that is a perfect match is returned despite the existence of a good match 
-
-        verify:
-        response code
-        location header
-        presence of a valid Set-Cookie header
-        '''
-        prefix = "neonvid_"
-        response = self.client_api_request("defaultpub2", prefix + "novid", 800, 600, "12.2.2.4")
-        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
-        headers = redirect_response.headers
-        self.assertIsNotNone(redirect_response)
-
-        #Assert location header and cookie
-        im_url = None
-        cookie = None
-
-        for header in headers:
-            if "Location" in header:
-                im_url = header.split("Location: ")[-1].rstrip("\r\n")
-
-        self.assertIsNotNone(im_url)
-        self.assertEqual(im_url, "http://neon/thumb_600_800_default_url_defaccount2.jpg")
-
 
 
     def test_client_api_default_thumbnail_good_enough_size_match_height(self):
@@ -814,9 +785,34 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
                 im_url = header.split("Location: ")[-1].rstrip("\r\n")
 
         self.assertIsNotNone(im_url)
-        self.assertEqual(im_url, "http://neon/thumb2_706_806.jpg")
+        self.assertEqual(im_url, "http://neon/thumb2_718_818.jpg")
 
+    def test_client_api_no_perfect_match_aspect_ratio_match(self):
+        '''
+        No perfectly matched scaled image is available, a qualifying one with 
+        the same aspect ratio is returned. 
 
+        verify:
+        response code
+        location header
+        presence of a valid Set-Cookie header
+        '''
+        prefix = "neonvid_"
+        response = self.client_api_request("pub5", prefix + "vidar1", 960, 540, "12.2.2.4")
+        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
+        headers = redirect_response.headers
+        self.assertIsNotNone(redirect_response)
+
+        #Assert location header and cookie
+        im_url = None
+        cookie = None
+
+        for header in headers:
+            if "Location" in header:
+                im_url = header.split("Location: ")[-1].rstrip("\r\n")
+
+        self.assertIsNotNone(im_url)
+        self.assertEqual(im_url, "http://kevin_test/neontnthumb1_w640_h360.jpg")
 
     # ISP should understand and support request having a .jpg extension in
     # lower and upper case
@@ -1267,6 +1263,54 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         response, code = self.make_api_request(url, {})
         self.assertIsNotNone(response)
         self.assertRegexpMatches(response, "thumb[0-1]")
+
+    def test_get_video_with_content(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, self.pub_id, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 200)
+
+    def test_get_video_no_content(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s213" % \
+                (self.port, self.pub_id, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 204)
+
+    def test_get_video_bad_params(self):
+        url = "http://localhost:%s/v1/video?pub_id=%s&vid_id=%s213" % \
+                (self.port, self.pub_id, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 400)
+
+    def test_get_video_url_encoded(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, 'pub5', 'kevin%7Evid%7Ewith%7Etildes')
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 200)
+
+    def test_get_video_should_be_encoded(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, 'pub5', 'kevin~vid&$@with&$tildes')
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 204)
+
+    def test_get_video_encoded_other_characters(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, 'pub5', 'kevin%7Evid%24%40with%24others')
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 200)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

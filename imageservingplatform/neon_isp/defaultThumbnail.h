@@ -25,23 +25,27 @@ public:
     void Shutdown();
     
     const char * GetAccountId() const;
-    
+   
     const std::string & GetAccountIdRef() const;
+    const std::string & default_url() const;
 
-    const char * GetScaledImage(int height, int width, int & url_size) const;
+    const ScaledImage * GetScaledImage(int height, int width) const;
 
     bool operator == (const DefaultThumbnail &other) const;
 
 protected:
     
     int InitSafe(const rapidjson::Document & document);
+    int ProcessImages(const rapidjson::Value &);
     void Dealloc();
     
     std::string accountId;
     
-    std::string default_url;
-
     std::vector<ScaledImage*> images;
+
+private: 
+    std::string default_url_;
+    boost::ptr_vector<ScaledImage> images_; 
 };
 
 

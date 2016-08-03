@@ -183,7 +183,6 @@ Directive::Dealloc()
             continue;
         }
 
-        f->Shutdown();
         delete f;
         f = 0;
     }

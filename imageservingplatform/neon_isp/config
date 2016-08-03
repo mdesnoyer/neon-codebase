@@ -8,19 +8,18 @@ CORE_LIBS="$CORE_LIBS -lstdc++ -lpthread"
 HTTP_MODULES="$HTTP_MODULES ngx_http_neon_module"
 
 
-NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_neon_module.c
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_neon_module.cpp
                                 $ngx_addon_dir/neon_error_codes.c
                                 $ngx_addon_dir/neon_fetch.c
                                 $ngx_addon_dir/neon_log.c
                                 $ngx_addon_dir/neon_mastermind.cpp
-                                $ngx_addon_dir/neon_service.c
+                                $ngx_addon_dir/neon_service.cpp
                                 $ngx_addon_dir/neon_service_helper.c
                                 $ngx_addon_dir/neon_stats.c
-                                $ngx_addon_dir/neon_updater.c
+                                $ngx_addon_dir/neon_updater.cpp
                                 $ngx_addon_dir/neon_utils.c
                                 $ngx_addon_dir/neon_utc.c
                                 $ngx_addon_dir/mastermind.cpp
-                                $ngx_addon_dir/neonHash.cpp
                                 $ngx_addon_dir/publisher.cpp
                                 $ngx_addon_dir/publisherHashtable.cpp
                                 $ngx_addon_dir/directive.cpp
@@ -30,6 +29,7 @@ NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_neon_module.c
                                 $ngx_addon_dir/defaultThumbnailHashtable.cpp
                                 $ngx_addon_dir/neonException.cpp
                                 $ngx_addon_dir/scaledImage.cpp
+                                $ngx_addon_dir/url_utils.cpp
                                 "
                                 
                                 

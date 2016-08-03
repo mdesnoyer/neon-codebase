@@ -29,7 +29,7 @@ import tornado.ioloop
 import test_utils.redis
 import urlparse
 import unittest
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 
 _log = logging.getLogger(__name__)
@@ -47,7 +47,8 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
 
         self.http_call_patcher = \
           patch('api.brightcove_api.BrightcoveApi.read_connection.send_request')
-        self.http_mock = self.http_call_patcher.start()
+        self.outer_http_mock = self.http_call_patcher.start()
+        self.http_mock = self._future_wrap_mock(self.outer_http_mock)
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
 
@@ -57,22 +58,17 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         super(TestBrightcoveApi, self).tearDown()
 
     def _set_http_response(self, code=200, body='', error=None):
-        def do_response(request, callback=None, *args, **kwargs):
-            response = HTTPResponse(request, code,
-                                    buffer=StringIO(body),
-                                    error=error)
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                             response)
-            else:
-                return response
+        def do_response(request, *args, **kwargs):
+            return HTTPResponse(request, code,
+                                buffer=StringIO(body),
+                                error=error)
 
         self.http_mock.side_effect = do_response
 
     def _set_videos_to_return(self, videos):
         '''Define the videos to return. Should be video structures.'''
         self.videos_to_return = videos
-        def respond_with_videos(request, callback=None):
+        def respond_with_videos(request, **kwargs):
             videos = self.videos_to_return
             parsed = urlparse.urlparse(request.url)
             params = urlparse.parse_qs(parsed.query)
@@ -89,14 +85,8 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
                 'total_count' : -1
             }
             
-            
-            response = HTTPResponse(request, 200,
-                                    buffer=StringIO(json.dumps(retstruct)))
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                             response)
-            else:
-                return response
+            return HTTPResponse(request, 200,
+                                buffer=StringIO(json.dumps(retstruct)))
 
         self.http_mock.side_effect = respond_with_videos
 
@@ -197,57 +187,11 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             thumb_url, still_url = self.api.get_current_thumbnail_url('vid_1')
             self.assertIsNone(thumb_url)
             self.assertIsNone(still_url)
-      
-    @patch('api.brightcove_api.utils.http.send_request')
-    def test_check_feed(self, utils_http_patch):
-    
-        def _side_effect(request, callback=None, *args, **kwargs):
-            if "submitvideo" in request.url:
-                response = HTTPResponse(request, 200,
-                    buffer=StringIO('{"job_id":"j123"}'))
-            if "find_modified_videos" in request.url:
-                response = bcove_find_modified_videos_response 
-            if "find_all_videos" in request.url:
-                response = bcove_response
-            
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                    response)
-            else:
-                return response
-        
-        bcove_request = HTTPRequest(
-            'http://api.brightcove.com/services/library?'
-            'get_item_count=true&command=find_all_videos&page_size=5&sort_by='
-            'publish_date&token=rtoken&page_number=0&\
-             output=json&media_delivery=http')
-
-        bcove_response = HTTPResponse(bcove_request, 200,
-                buffer=StringIO(bcove_responses.find_all_videos_response))
-    
-        bcove_find_modified_videos_response = \
-                HTTPResponse(bcove_request, 200,
-                buffer=StringIO(bcove_responses.find_modified_videos_response))
-
-        self.http_mock.side_effect = _side_effect
-        utils_http_patch.side_effect = _side_effect
-        
-        a_id = 'test' 
-        i_id = 'i123'
-        nvideos = 6
-        na = neondata.NeonUserAccount('acct1')
-        na.save()
-        bp = neondata.BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
-                last_process_date=21492000000)
-        bp.account_created = 21492000
-        bp.save()
-        bp.check_feed_and_create_api_requests()
-        u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
-        self.assertEqual(len(u_bp.get_videos()), nvideos)
 
     @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
     @tornado.testing.gen_test 
     def test_add_image(self, write_conn_mock):
+        write_conn_mock = self._future_wrap_mock(write_conn_mock)
         def verify():
             '''
             Verify the image name when uploaded to Bcove
@@ -268,7 +212,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
                 buffer=StringIO('{"result":{"id":"newtid"}}'))
-        write_conn_mock.side_effect = lambda x, callback: callback(response)
+        write_conn_mock.side_effect = [response]
         image = PILImageUtils.create_random_image(360, 480) 
         tid = "TID"
         
@@ -290,11 +234,12 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         '''
         Verify the multipart request construction to brightcove
         '''
+        write_conn_mock = self._future_wrap_mock(write_conn_mock)
         r_url = "http://i1.neon-images.com/video_id1?height=10&width=20"
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
                 buffer=StringIO('{"result":{"id":"newtid", "remoteUrl":"%s"}}'
                                 % r_url))
-        write_conn_mock.side_effect = lambda x, callback: callback(response)
+        write_conn_mock.side_effect = [response]
         resp = yield self.api.add_image("video_id1", 'tid1', 
                                         remote_url=r_url)
         self.assertEqual(resp, {"id": "newtid",
@@ -308,71 +253,6 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         imdata = json.loads(j_imdata)
         self.assertTrue(imdata["params"]["image"]["remoteUrl"], r_url)
 
-    @patch('api.brightcove_api.utils.http')
-    def test_create_video_request(self, http_mock): 
-        send_request_mock = self._callback_wrap_mock(http_mock.send_request)
-        send_request_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
-                                          
-        bc = api.brightcove_api.BrightcoveApi(
-            "neon_api_key", "publisher_id",
-            "read_token", "write_token", callback_url="http://callback.invalid")
- 
-        response = bc.format_neon_api_request('vid1', 'http://fake_dl_url', callback=None)
-        cargs, kwargs = send_request_mock.call_args
-        call_json = json.loads(cargs[0].body)
-        self.assertEquals(call_json['callback_url'], "http://callback.invalid") 
-
-    def test_select_rendition(self):
-        '''
-        Test the selection of the right rendition
-        
-        Assert that url is returned irrespective of framewidth 
-        '''
-        vitems = json.loads(bcove_responses.find_all_videos_response)
-        bc = api.brightcove_api.BrightcoveApi(
-            "neon_api_key", "publisher_id",
-            "read_token", "write_token", False)
-       
-        frame_widths = [None, 640, 720, 420]
-        for item in vitems['items']:
-            for fwidth in frame_widths:
-                url = bc.get_video_url_to_download(item, fwidth)
-                self.assertIsNotNone(url)
-        
-        # Check max rendition returned of frame width 1280
-        item = vitems['items'][-1]
-        url = bc.get_video_url_to_download(item, None)
-        self.assertEqual(url,
-                        "http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2635148067001_PA220134.mp4")
-
-    @patch('api.brightcove_api.utils.http.send_request')
-    def test_create_request_from_playlist(self, utils_http):
-        p_response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO(bcove_responses.find_playlist_by_id_response))
-        n_response = HTTPResponse(HTTPRequest("http://neon"), 200,
-                    buffer=StringIO('{"job_id":"j123"}'))
-        def _side_effect(request, callback=None, *args, **kwargs):
-            if "submitvideo" in request.url:
-                return n_response
-            else:
-                return p_response
-
-        utils_http.side_effect = _side_effect
-        a_id = 'test' 
-        i_id = 'i123'
-        nvideos = 2 
-        na = neondata.NeonUserAccount('acct1')
-        na.save()
-        bp = neondata.BrightcovePlatform(a_id, i_id, na.neon_api_key, 'p1', 'rt', 'wt', 
-                last_process_date=21492000000)
-        bp.account_created = 21492000
-        bp.videos['v1'] = 'j1'
-        bp.playlist_feed_ids.append('1234')
-        bp.save()
-        bp.check_playlist_feed_and_create_requests()
-        u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
-        self.assertEqual(len(u_bp.get_videos()), nvideos)
-        self.assertListEqual(u_bp.get_videos(), ['v1', '4100953290001'])
 
     def test_find_videos_by_ids_basic(self):
         self._set_videos_to_return([
@@ -383,12 +263,10 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
              'name': 'myvid2',
              'accountId': 'acct1'}])
 
-        self.assertEquals(
+        self.assertItemsEqual(
             self.api.find_videos_by_ids(['vid2', 'vid1']),
-            {'vid2' : {'id' : 'vid2', 'name': 'myvid2',
-                       'accountId' : 'acct1'},
-             'vid1' : {'id' : 'vid1', 'name': 'myvid1',
-                       'accountId' : 'acct1'}})
+            [{'id' : 'vid2', 'name': 'myvid2', 'accountId' : 'acct1'},
+             {'id' : 'vid1', 'name': 'myvid1', 'accountId' : 'acct1'}])
 
         cargs, kwargs = self.http_mock.call_args
         urlparsed = urlparse.urlparse(cargs[0].url)
@@ -406,9 +284,9 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
              'name': 'myvid2',
              'accountId': 'acct1'}])
 
-        self.assertEquals(
+        self.assertItemsEqual(
             self.api.find_videos_by_ids(['vid2'], video_fields=['name']),
-            {'vid2' : {'id': 'vid2', 'name': 'myvid2'}})
+            [{'id': 'vid2', 'name': 'myvid2'}])
 
     def test_find_videos_by_ids_errors(self):
         self._set_http_response(

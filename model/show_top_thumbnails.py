@@ -27,8 +27,8 @@ def run_one_video(mod, video_file, n, output_file, batch):
     video = cv2.VideoCapture(video_file)
 
     _log.info('Video is %fs long' % (
-        video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT) /
-        video.get(cv2.cv.CV_CAP_PROP_FPS)))
+        video.get(cv2.CAP_PROP_FRAME_COUNT) /
+        video.get(cv2.CAP_PROP_FPS)))
     
     startTime = time.time()
     thumbs = mod.choose_thumbnails(video, n=n)
@@ -37,10 +37,11 @@ def run_one_video(mod, video_file, n, output_file, batch):
     # Plot the examples
     plt.figure(figsize=(16, 4), dpi=80)
     curThumb = 0
-    output_file = "basketball_%s.jpg"
+    #output_file = "basketball_%s.jpg"
     for image, score, frame_no, timecode, attribute in thumbs:
         # Output the image
         if output_file is not None:
+            print 'Saving %s'%(output_file%curThumb)
             cv2.imwrite(output_file % curThumb, image)
 
 
@@ -48,7 +49,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
         frame.axes.get_xaxis().set_ticks([])
         frame.axes.get_yaxis().set_visible(False)
         plt.imshow(image[:,:,::-1])
-        plt.xlabel('s: %3.2f' % score)
+        plt.xlabel('s: %3.2f. f: %i' % (score, frame_no))
         curThumb += 1
 
     if not batch:

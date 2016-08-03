@@ -7,7 +7,6 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
-from cmsdb.url2thumbnail import URL2ThumbnailIndex
 import controllers.brightcove_controller
 import json
 import logging
@@ -24,7 +23,7 @@ from tornado.gen import YieldPoint, Task
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 import unittest
-from utils import imageutils
+from cvutils import imageutils
 
 
 class TestScheduler(test_utils.neontest.TestCase):

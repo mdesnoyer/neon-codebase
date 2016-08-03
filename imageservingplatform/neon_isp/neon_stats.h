@@ -1,6 +1,10 @@
 #ifndef _NEON_STATS_
 #define _NEON_STATS_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "neon_error_codes.h"
 
 
@@ -41,6 +45,7 @@ typedef enum {
     NEON_UPDATER_MASTERMIND_EXPIRED,
     NEON_UPDATER_MASTERMIND_LOAD_FAIL,
     NEON_UPDATER_MASTERMIND_RENAME_FAIL,
+    NEON_VIDEO_API_REQUESTS, 
     NEON_SERVER_API_REQUESTS,
     NEON_CLIENT_API_REQUESTS,
     NEON_GETTHUMBNAIL_API_REQUESTS, //
@@ -88,6 +93,9 @@ extern unsigned long long int neon_stats[];
 void neon_stats_init();
 
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 

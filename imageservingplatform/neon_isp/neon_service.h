@@ -1,45 +1,33 @@
 #ifndef _NEON_SERVICE_
 #define _NEON_SERVICE_
 
-#include <ngx_config.h>
-#include <ngx_core.h>
-#include <ngx_http.h>
-#include "neon_error_codes.h"
-
+#include <boost/scoped_ptr.hpp>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum  {
-    
-    NEON_CLIENT_API_OK = 0,
-    NEON_CLIENT_API_FAIL
-    
-} NEON_CLIENT_API_ERROR;
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+#include "neon_error_codes.h"
 
 typedef enum  {
-    
-    NEON_SERVER_API_OK = 0,
-    NEON_SERVER_API_FAIL
-    
-} NEON_SERVER_API_ERROR;
+    API_OK = 0,
+    API_FAIL
+} API_ERROR;
 
-typedef enum  {
-    
-    NEON_GETTHUMB_API_OK = 0,
-    NEON_GETTHUMB_API_FAIL
-} NEON_GETTHUMB_API_ERROR;
+API_ERROR neon_service_client_api(ngx_http_request_t *req,
+                                  ngx_chain_t  * chain);
 
+API_ERROR neon_service_server_api(ngx_http_request_t *req,
+                                  ngx_chain_t  * chain);
 
-NEON_CLIENT_API_ERROR neon_service_client_api(ngx_http_request_t *req,
-                                                 ngx_chain_t  * chain);
+API_ERROR neon_service_getthumbnailid(ngx_http_request_t *req,
+                                      ngx_chain_t  ** chain);
 
-NEON_SERVER_API_ERROR neon_service_server_api(ngx_http_request_t *req,
-                                                 ngx_chain_t  * chain);
-
-NEON_GETTHUMB_API_ERROR neon_service_getthumbnailid(ngx_http_request_t *req,
-                                                 ngx_chain_t  ** chain);
+API_ERROR neon_service_video(ngx_http_request_t *req,
+                             ngx_chain_t  * chain);
 
 #ifdef __cplusplus
 } // extern "C"

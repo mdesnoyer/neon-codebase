@@ -125,6 +125,8 @@ class ImpalaTableBuilder(threading.Thread):
             hive.execute('SET parquet.compression=SNAPPY')
             hive.execute(
                 'SET hive.exec.dynamic.partition.mode=nonstrict')
+            hive.execute(
+                'SET hive.exec.max.created.files=500000')
 
 
             self.status = 'RUNNING'
@@ -163,12 +165,13 @@ class ImpalaTableBuilder(threading.Thread):
 
             # Building parquet tables takes a lot of
             # memory, so make sure we give the job enough.
-            hive.execute("SET mapreduce.reduce.memory.mb=12000")
+            hive.execute("SET mapreduce.reduce.memory.mb=16000")
             hive.execute(
-                "SET mapreduce.reduce.java.opts=-Xmx11000m")
-            hive.execute("SET mapreduce.map.memory.mb=12000")
-            hive.execute("SET mapreduce.map.java.opts=-Xmx11000m")
-            hive.execute("""
+                "SET mapreduce.reduce.java.opts=-Xmx14000m")
+            hive.execute("SET mapreduce.map.memory.mb=16000")
+            hive.execute("SET mapreduce.map.java.opts=-Xmx14000m")
+            hive.execute("SET hive.exec.max.dynamic.partitions.pernode=200")
+            cmd = ("""
             insert overwrite table %s
             partition(tai, yr, mnth)
             select %s, trackerAccountId,
@@ -177,6 +180,8 @@ class ImpalaTableBuilder(threading.Thread):
             (parq_table, ','.join(x.name for x in 
                                   self.avro_schema.fields),
              external_table))
+            _log.info("Running command: %s" % cmd)
+            hive.execute(cmd)
 
             _log.info("Refreshing table %s in Impala" % parq_table)
             impala_cursor = impala_conn.cursor()
@@ -285,9 +290,12 @@ def build_impala_tables(input_path, cluster, timeout=None):
           datetime.timedelta(seconds=timeout)
 
     threads = [] 
-    for event in ['ImageLoad', 'ImageVisible',
-                  'ImageClick', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
-                  'EventSequence']:
+    # TODO(mdesnoyer): Add ImageVisible and ImageClick back in. Disabling for
+    # now because the job gets killed by a mysterious force.
+
+    #for event in ['ImageLoad', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
+    #              'EventSequence']:
+    for event in ['EventSequence', 'VideoPlay']:
         thread = ImpalaTableBuilder(input_path, cluster, event)
         thread.start()
         threads.append(thread)

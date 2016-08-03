@@ -15,17 +15,21 @@ add_subdirectory(clickTracker)
 add_subdirectory(controllers)
 add_subdirectory(cmsdb)
 add_subdirectory(cmsapi)
+add_subdirectory(cmsapiv2)
 add_subdirectory(api)
 add_subdirectory(imageservingplatform/neon_isp)
 
 include(ExternalProject)
 externalproject_add(Nginx
     PREFIX ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/Nginx
-    SOURCE_DIR ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.6.2/
+    SOURCE_DIR ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.8.1/
     UPDATE_COMMAND ""  # Stop it from updating because we want a static repo
     CONFIGURE_COMMAND
-    ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.6.2/configure
-    --add-module=../neon_isp/ --with-http_realip_module
+    ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.8.1/configure
+    --add-module=../neon_isp/ 
+    --add-module=../ngx_devel_kit-0.2.19/ 
+    --add-module=../set-misc-nginx-module-0.29/
+    --with-http_realip_module
     --prefix=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     BUILD_COMMAND make
     BUILD_IN_SOURCE 1

@@ -5,10 +5,6 @@ Video Processing client, no longer a multiprocessing client
 VideoClient class has a run loop which uses httpdownload object to
 download the video file after dequeueing job from video-server
 
-Sync and Async options are available to download the video file in httpdownload
-
-If Async, on the streaming_callback video processing is done partially.
-
 ProcessVideo class has all the methods to deal with video processing and
 post processing
 
@@ -28,6 +24,7 @@ import boto.exception
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
 import cv2
+import dateutil.parser
 import ffvideo
 import hashlib
 import json
@@ -40,6 +37,7 @@ import psutil
 import Queue
 import random
 import re
+import shutil 
 import signal
 import socket
 import tempfile
@@ -52,12 +50,13 @@ import tornado.ioloop
 import time
 import urllib
 import urllib2
-from utils.imageutils import PILImageUtils
+import urlparse
+from cvutils.imageutils import PILImageUtils
 import utils.neon
-import utils.pycvutils
+from utils import pycvutils
 import utils.http
-import utils.sqsmanager
 from utils import statemon
+import youtube_dl
 
 import logging
 _log = logging.getLogger(__name__)
@@ -69,7 +68,6 @@ statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('modify_request_error', int)
-statemon.define('customer_callback_schedule_error', int)
 statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
@@ -81,11 +79,15 @@ statemon.define('video_duration_60m', int)
 statemon.define('video_read_error', int)
 statemon.define('extract_frame_error', int)
 statemon.define('running_workers', int)
+statemon.define('workers_processing', int)
+statemon.define('workers_downloading', int)
 statemon.define('workers_cv_processing', int)
 statemon.define('other_worker_completed', int)
 statemon.define('s3url_download_error', int)
 statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
+statemon.define('youtube_video_download_error', int) 
+statemon.define('youtube_video_not_found', int) 
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -106,46 +108,17 @@ define('extra_workers', default=0,
        help='Number of extra workers to allow downloads to happen in the background')
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
+define('max_bandwidth_per_core', default=15500000.0,
+       help='Max bandwidth in bytes/s')
+define('min_load_to_throttle', default=0.50,
+       help=('Fraction of cores currently working to cause the download to '
+             'be throttled'))
 
-class VideoError(Exception):
-    '''
-    Exception class which ensures that the callback is
-    send to the client in case of video download or processing errors
-    '''
-    def __init__(self, msg, job_params):
-        self.msg = msg
-        self.vid = job_params['video_id'] 
-        self.job_id = job_params['job_id']
-        self.callback_url = job_params['callback_url']
-
-        #TODO(Sunil): Don't do this here. make a new function that is called
-        # when an error happens during video processing
-        self.send_callback()
-        
-    def send_callback(self):
-        cresp = neondata.VideoCallbackResponse(self.job_id, self.vid,
-                err=self.msg)
-        response_body = cresp.to_dict()
-
-        #CREATE POST REQUEST
-        body = tornado.escape.json_encode(response_body)
-        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
-        
-        if self.callback_url is not None:
-            cb_response_request = tornado.httpclient.HTTPRequest(
-                                    url=self.callback_url,
-                                    method="POST",
-                                    headers=h, 
-                                    body=body, 
-                                    request_timeout=60.0, 
-                                    connect_timeout=10.0)
-            utils.http.send_request(cb_response_request) 
-
+class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
 class DefaultThumbError(VideoError): pass  
 class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
-class CallbackError(IOError): pass
 
 # For when another worker completed the video
 class OtherWorkerCompleted(Exception): pass 
@@ -176,10 +149,11 @@ class VideoProcessor(object):
         self.job_params = params
         self.reprocess = reprocess
         self.video_url = self.job_params['video_url']
-        vsuffix = self.video_url.split('/')[-1]  #get the video file extension
-        vsuffix = vsuffix.strip("!@#$%^&*[]^()+~")
+        #get the video file extension
+        parsed = urlparse.urlparse(self.video_url)
+        vsuffix = os.path.splitext(parsed.path)[1]
         self.tempfile = tempfile.NamedTemporaryFile(
-            suffix='_%s' % vsuffix, delete=True, dir=options.video_temp_dir)
+            suffix=vsuffix, delete=True, dir=options.video_temp_dir)
         self.headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
@@ -209,12 +183,28 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
+    @staticmethod
+    def percent_encode_url_path(url):
+        '''
+        Takes a url and re-encodes (i.e., decodes encodes) its path with
+        percent-sign encoding. TODO consider cases: unicode, double-decode
+        '''
+
+        parse = urlparse.urlparse(url)
+        parse = list(parse)
+        parse[2] = urllib.quote(urllib.unquote(parse[2]))
+        return urlparse.urlunparse(parse)
+
     def start(self):
         '''
         Actual work done here
         '''
         try:
-            self.download_video_file()
+            statemon.state.increment('workers_downloading')
+            try:
+                self.download_video_file()
+            finally:
+                statemon.state.decrement('workers_downloading')
 
             #Process the video
             n_thumbs = max(self.n_thumbs, 5)
@@ -236,30 +226,32 @@ class VideoProcessor(object):
                       (self.job_params['job_id'], self.job_params['api_key']))
             return
 
-        except VideoError as e:
-            # Flag that the job failed getting the data
-            statemon.state.increment('processing_error')
-
-            def _write_failure(request):
-                request.state = neondata.RequestState.FAILED
-                request.fail_count += 1
-            api_request = neondata.NeonApiRequest.modify(
-                self.job_params['job_id'],
-                self.job_params['api_key'],
-                _write_failure)
-
         except Exception as e:
-            _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
-            # Flag that the job failed for some internal reason
+            new_state = neondata.RequestState.CUSTOMER_ERROR
+            if not isinstance(e, VideoError):
+                new_state = neondata.RequestState.INT_ERROR
+                _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
+                
+            # Flag that the job failed
             statemon.state.increment('processing_error')
+
+            cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
+                                                self.job_params['video_id'],
+                                                err=e.message)
             
             def _write_failure(request):
-                request.state = neondata.RequestState.INT_ERROR
+                request.state = new_state
+                request.response = cb.to_dict()
                 request.fail_count += 1
             api_request = neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
                 self.job_params['api_key'],
                 _write_failure)
+            
+            # Send the callback to let the client know there was an
+            # error that they might be able to fix
+            if isinstance(e, VideoError):
+                api_request.send_callback()
        
         finally:
             #Delete the temp video file which was downloaded
@@ -269,9 +261,17 @@ class VideoProcessor(object):
         '''
         Download the video file 
         '''
-        CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
-        _log.info('Starting download of video %s' % self.video_url)
+
+        # Find out if we should throttle
+        do_throttle = False
+        frac_processing = (float(statemon.state.workers_processing) / 
+                           max(statemon.state.running_workers, 1))
+        if frac_processing > options.min_load_to_throttle:
+            do_throttle=True
+
+        _log.info('Starting download of video %s. Throttled: %s' % 
+                  (self.video_url, do_throttle))
 
         try:
             s3match = s3re.search(self.video_url)
@@ -282,6 +282,7 @@ class VideoProcessor(object):
                     key_name = s3match.group(5)
                     s3conn = S3Connection()
                     bucket = s3conn.get_bucket(bucket_name)
+                    _log.info(key_name)
                     key = bucket.get_key(key_name)
                     key.get_contents_to_file(self.tempfile)
                     self.tempfile.flush()
@@ -290,47 +291,106 @@ class VideoProcessor(object):
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.video_url, e))
                     statemon.state.increment('s3url_download_error')
+
+            # Now try using youtube-dl to download the video. This can
+            # potentially handle a ton of different video sources.
+            def _handle_progress(x):
+                if x['status'] == 'finished':
+                    shutil.move(x['filename'], self.tempfile.name)
+                    
+            dl_params = {}
+            dl_params['ratelimit'] = (options.max_bandwidth_per_core 
+                                      if do_throttle else None)
+            dl_params['restrictfilenames'] = True
+            dl_params['progress_hooks'] = [_handle_progress]
+            dl_params['outtmpl'] = unicode(str(
+                os.path.join(options.video_temp_dir or '/tmp',
+                             '%s_%%(id)s.%%(ext)s' %
+                             self.job_params['api_key'])))
+
+            # Specify for formats that we want in order of preference
+            dl_params['format'] = (
+                'best[ext=mp4][height<=720][protocol^=?http]/'
+                'best[ext=mp4][protocol^=?http]/'
+                'best[height<=720][protocol^=?http]/'
+                'best[protocol^=?http]/'
+                'best/'
+                'bestvideo')
+            dl_params['logger'] = _log
             
-            # Use urllib2
-            req = urllib2.Request(self.video_url, headers=self.headers)
-            response = urllib2.urlopen(req, timeout=self.timeout)
-            data = response.read(CHUNK_SIZE)
-            while data != '':
-                self.tempfile.write(data)
-                self.tempfile.flush()
-                data = response.read(CHUNK_SIZE)
+            with youtube_dl.YoutubeDL(dl_params) as ydl:
+                # Dig down to the real url
+                cur_url = self.video_url
+                found_video = False
+                while not found_video:
+                    video_info = ydl.extract_info(cur_url, download=False)
+                    result_type = video_info.get('_type', 'video')
+                    if result_type == 'url':
+                        # Need to step to the next url
+                        cur_url = video_info['url']
+                        continue
+                    elif result_type == 'video':
+                        found_video = True
+                    else:
+                        # They gave us a playlist or other type of url
+                        msg = ('Unhandled video type %s' %
+                               (result_type))
+                        raise youtube_dl.utils.DownloadError(msg)
+
+                # Update information about the video before we download it
+                def _update_title(x):
+                    if x.video_title is None:
+                        x.video_title = video_info.get('title', None)
+                    if x.default_thumbnail is None:
+                        x.default_thumbnail = video_info.get('thumbnail', None)
+                neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'], self.job_params['api_key'] ,
+                    _update_title)
+                    
+                # Do the real download
+                video_info = ydl.extract_info(cur_url, download=True)
+
+                # Update some of our metadata if there's better info
+                # from the video
+                self.video_metadata.duration = video_info.get(
+                    'duration', self.video_metadata.duration)
+                if video_info.get('upload_date', None) is not None:
+                    self.video_metadata.publish_date = \
+                      dateutil.parser.parse(video_info['upload_date']).isoformat()
+                                                              
 
             self.tempfile.flush()
 
             _log.info('Finished downloading video %s' % self.video_url)
-        except urllib2.URLError as e:
-            _log.error("Error downloading video from %s: %s" % 
-                       (self.video_url, e))
+
+        except (youtube_dl.utils.DownloadError,
+                youtube_dl.utils.ExtractorError, 
+                youtube_dl.utils.UnavailableVideoError,
+                socket.error) as e:
+            msg = "Error downloading video from %s: %s" % (self.video_url, e)
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
         except boto.exception.BotoClientError as e:
-            _log.error("Client error downloading video %s from S3: %s" %
-                       (self.video_url, e))
+            msg = ("Client error downloading video %s from S3: %s" % 
+                   (self.video_url, e))
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
         except boto.exception.BotoServerError as e:
-            _log.error("Server error downloading video %s from S3: %s" %
-                       (self.video_url, e))
+            msg = ("Server error downloading video %s from S3: %s" %
+                   (self.video_url, e))
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
-
-        except socket.error as e:
-            _log.error("Error downloading video from %s: %s" % 
-                       (self.video_url, e))
-            statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
         except IOError as e:
-            _log.error("Error saving video to disk: %s" % e)
+            msg = "Error saving video to disk: %s" % e
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
@@ -359,7 +419,7 @@ class VideoProcessor(object):
             _log.error("Error reading ffvideo metadata of %s: %s" %
                        (self.video_url, e))
             statemon.state.increment('ffvideo_metadata_error')
-            raise model.errors.VideoReadError(str(e))
+            raise BadVideoError(str(e))
 
         #Try to open the video file using openCV
         try:
@@ -368,20 +428,31 @@ class VideoProcessor(object):
             _log.error("Error opening video file %s: %s"  % 
                        (self.video_url, e))
             statemon.state.increment('video_read_error')
-            raise model.errors.VideoReadError(str(e))
+            raise BadVideoError(str(e))
 
         duration = self.video_metadata.duration or 0.0
 
         if duration <= 1e-3:
             _log.error("Video %s has no length" % (self.video_url))
             statemon.state.increment('video_read_error')
-            raise BadVideoError("Video has no length", self.job_params)
+            raise BadVideoError("Video has no length")
 
         #Log long videos
         if duration > 1800:
             statemon.state.increment('video_duration_30m')
         if duration > 3600:
             statemon.state.increment('video_duration_60m')
+
+        # Fetch the ProcessingStrategy
+        account_id = self.job_params['api_key']
+        
+        try:
+            processing_strategy = neondata.ProcessingStrategy.get(account_id)
+        except Exception, e:
+            _log.error(("Could not fetch processing strategy for account_id "
+                        "%s: %s")%(str(account_id), e))
+            raise DBError("Could not fetch processing strategy")
+        self.model.update_processing_strategy(processing_strategy)
 
         try:
             results = \
@@ -390,9 +461,10 @@ class VideoProcessor(object):
                   n=n_thumbs,
                   video_name=self.video_url)
         except model.errors.VideoReadError:
-            _log.error("Error using OpenCV to read video. %s" % self.video_url)
+            msg = "Error using OpenCV to read video. %s" % self.video_url
+            _log.error(msg)
             statemon.state.increment('video_read_error')
-            raise
+            raise BadVideoError(msg)
 
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in results])
@@ -429,7 +501,7 @@ class VideoProcessor(object):
         try:
             mov = cv2.VideoCapture(video_file)
             if nframes is None:
-                nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
 
             cv_image = self._get_specific_frame(mov, int(nframes / 2))
             meta = neondata.ThumbnailMetadata(
@@ -452,7 +524,7 @@ class VideoProcessor(object):
         try:
             mov = cv2.VideoCapture(video_file)
             if nframes is None:
-                nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
 
             frameno = random.randint(0, nframes-1)
 
@@ -480,7 +552,7 @@ class VideoProcessor(object):
         _log.debug('Extracting frame %i from video %s' %
                    (frameno, self.video_url))
         try:            
-            seek_sucess, image = utils.pycvutils.seek_video(mov, frameno)
+            seek_sucess, image = pycvutils.seek_video(mov, frameno)
             if seek_sucess:
                 #Now grab the frame
                 read_sucess, image = mov.read()
@@ -495,8 +567,7 @@ class VideoProcessor(object):
         _log.error('Error reading frame %i of video %s'
                     % (frameno, self.video_url))
         statemon.state.increment('extract_frame_error')
-        raise model.errors.VideoReadError('Error reading frame %i of video'
-                                          % frameno)
+        raise BadVideoError('Error reading frame %i of video' % frameno)
 
     def finalize_response(self):
         '''
@@ -518,11 +589,10 @@ class VideoProcessor(object):
                              neondata.RequestState.REQUEUED,
                              neondata.RequestState.REPROCESS,
                              neondata.RequestState.FAILED,
-                             neondata.RequestState.INT_ERROR]:
+                             neondata.RequestState.INT_ERROR,
+                             neondata.RequestState.CUSTOMER_ERROR,
+                             neondata.RequestState.FINALIZING]:
                 req.state = neondata.RequestState.FINALIZING
-            elif req.state == neondata.RequestState.CUSTOMER_ERROR:
-                # Don't change the state
-                return
             else:
                 somebody_else_finished[0] = True
         try:
@@ -593,17 +663,13 @@ class VideoProcessor(object):
             raise DBError("Error writing thumbnail data to database")
         
         def _merge_video_data(video_obj):
-            # If we are reprocessing, then we don't keep the random,
-            # centerframe or neon thumbnails
-            if self.reprocess:
-                thumbs = neondata.ThumbnailMetadata.get_many(
-                    video_obj.thumbnail_ids)
-                keep_thumbs = [x.key for x in thumbs if x.type not in [
-                    neondata.ThumbnailType.NEON,
-                    neondata.ThumbnailType.CENTERFRAME,
-                    neondata.ThumbnailType.RANDOM]]
-            else:
-                keep_thumbs = video_obj.thumbnail_ids
+            # Don't keep the random centerframe or neon thumbnails
+            thumbs = neondata.ThumbnailMetadata.get_many(
+                video_obj.thumbnail_ids)
+            keep_thumbs = [x.key for x in thumbs if x.type not in [
+                neondata.ThumbnailType.NEON,
+                neondata.ThumbnailType.CENTERFRAME,
+                neondata.ThumbnailType.RANDOM]]
             tidset = set(keep_thumbs +
                          self.video_metadata.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
@@ -615,6 +681,8 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.publish_date = (video_obj.publish_date or 
+                                      self.video_metadata.publish_date)
         try:
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,
@@ -637,119 +705,64 @@ class VideoProcessor(object):
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,
                 _set_serving_enabled)
-        
 
             # Everything is fine at this point, so lets mark it finished
             api_request.state = neondata.RequestState.FINISHED
 
         except neondata.ThumbDownloadError, e:
-            _log.warn("Default thumbnail download failed for vid %s" % video_id)
+            _log.warn("Default thumbnail download failed for vid %s" %
+                      video_id)
             statemon.state.increment('default_thumb_error')
-            err_msg = "Failed to download default thumbnail error=%s" % e
-            api_request.state = neondata.RequestState.CUSTOMER_ERROR
-            api_request.set_message(err_msg)
-            
-            # build the callback response with error message here
-            # Its probably ok that its sent through SQS. Evaluate if this needs
-            # to be immediate to the customer
-            #cb_request = self.build_callback_request(error=err_msg)
-            
-            # TODO: write test to validate the states
+            err_msg = "Failed to download default thumbnail: %s" % e
+            raise DefaultThumbError(err_msg)
 
-        finally:
+        # Build the callback response
+        cb_response = self.build_callback_response()
 
-            # Build the callback request
-            err_msg = None
-            if api_request.state == neondata.RequestState.CUSTOMER_ERROR:
-                err_msg = api_request.msg
-            cb_request = self.build_callback_request(err_msg)
+        # Update the database that the request is done with the processing 
+        def _flag_request_done_in_db(request):
+            request.state = api_request.state
+            request.publish_date = time.time() * 1000.0
+            request.response = cb_response
+            request.callback_state = neondata.CallbackState.NOT_SENT
+        try:
+            sucess = neondata.NeonApiRequest.modify(api_request.job_id,
+                                                    api_request.api_key,
+                                                    _flag_request_done_in_db)
+            if not sucess:
+                raise DBError('Api Request finished failed. It was not there')
+        except Exception, e:
+            _log.error("Error writing request state to database: %s" % e)
+            statemon.state.increment('modify_request_error')
+            raise DBError("Error finishing api request")
 
-            # Update the database that the request is done with the processing 
-            # Cleanly or with some acceptable errors (CUSTOMER_ERROR)
-            def _flag_request_done_in_db(request):
-                request.state = api_request.state
-                request.publish_date = time.time() *1000.0
-                request.response = tornado.escape.json_decode(cb_request.body)
-            try:
-                sucess = neondata.NeonApiRequest.modify(api_request.job_id,
-                                                        api_request.api_key,
-                                                        _flag_request_done_in_db)
-                if not sucess:
-                    raise DBError('Api Request finished failed. It was not there')
-            except Exception, e:
-                _log.error("Error writing request state to database: %s" % e)
-                statemon.state.increment('modify_request_error')
-                raise DBError("Error finishing api request")
+        # Send the notifications
+        self.send_notifiction_response(api_request)
 
-            # Send callbacks and notifications
-            
-            self.send_client_callback_response(new_video_metadata.key, cb_request)
-            self.send_notifiction_response(api_request)
-
-            _log.info('Sucessfully finalized video %s. Is has video id %s' % 
-                      (self.video_url, self.video_metadata.key))
+        _log.info('Sucessfully finalized video %s. Is has video id %s' % 
+                  (self.video_url, self.video_metadata.key))
         
 
-    def build_callback_request(self, err_msg=None):
+    def build_callback_response(self):
         '''
-        build callback request that will be sent to the callback url
-        which was specified when the request was created
+        build the dict that defines the callback response
 
         '''
 
-        frames = [x[0].frameno for x in self.thumbnails 
+        frames = [x[0].frameno for x in self.thumbnails
             if x[0].type == neondata.ThumbnailType.NEON]
         fnos = frames[:self.n_thumbs]
-        thumbs = [x[0].urls[0] for x in self.thumbnails 
+        thumbs = [x[0].key for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
         thumbs = thumbs[:self.n_thumbs]
 
-        cresp = neondata.VideoCallbackResponse(self.video_metadata.job_id,
-                neondata.InternalVideoID.to_external(self.video_metadata.key),
-                fnos,
-                thumbs,
-                self.video_metadata.get_serving_url(save=False),
-                err=err_msg)
-        response_body = cresp.to_dict()
-        
-        #CREATE POST REQUEST
-        body = tornado.escape.json_encode(response_body)
-        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
-        cb_response_request = tornado.httpclient.HTTPRequest(
-                                url=self.job_params['callback_url'], 
-                                method="POST",
-                                headers=h, 
-                                body=body, 
-                                request_timeout=60.0, 
-                                connect_timeout=10.0)
-        return cb_response_request 
- 
-    def send_client_callback_response(self, video_id, request):
-        '''
-        Schedule client response to be sent to the client
-        '''
-        # Check if url in request object is empty, if so just return True
-
-        if request.url is None or request.url == "null":
-            return True
-
-        # Schedule the callback in SQS
-        try:
-            sqsmgr = utils.sqsmanager.CustomerCallbackManager()
-            r = sqsmgr.add_callback_response(video_id, request.url,
-                                             request.body)
-        except boto.exception.SQSError, e:
-            _log.error('SQS Error %s' % e)
-            statemon.state.increment('customer_callback_schedule_error')
-            _log.info('Tried to send response: %s' % request.body)
-            return False 
-
-        if not r:
-            statemon.state.increment('customer_callback_schedule_error')
-            _log.error("Callback schedule failed for video %s" % video_id)
-            return False
-
-        return True
+        cresp = neondata.VideoCallbackResponse(
+            self.video_metadata.job_id,
+            neondata.InternalVideoID.to_external(self.video_metadata.key),
+            fnos,
+            thumbs,
+            self.video_metadata.get_serving_url(save=False))
+        return cresp.to_dict()
 
     def send_notifiction_response(self, api_request):
         '''
@@ -915,7 +928,11 @@ class VideoClient(multiprocessing.Process):
                                         self.model_version,
                                         self.cv_semaphore,
                                         job['reprocess'])
-            vprocessor.start()
+            statemon.state.increment('workers_processing')
+            try:
+                vprocessor.start()
+            finally:
+                statemon.state.decrement('workers_processing')
             self.videos_processed += 1
 
         except Queue.Empty:

@@ -5,28 +5,38 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 import os.path
 import sys
-sys.path.insert(0,os.path.abspath(
+sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..')))
 
+import concurrent.futures
 import logging
-import Queue
+import multiprocessing
 import random
 import socket
 import threading
 import time
 import tornado.escape
+import tornado.gen
 import tornado.httpclient
 import tornado.ioloop
+import tornado.locks
+import urlparse
 import utils.logs
+from utils import statemon
+import utils.sync
 
 _log = logging.getLogger(__name__)
+
+statemon.state.define('waiting_in_pools', int)
+_waiting_in_pools_ref = statemon.state.get_ref('waiting_in_pools')
 
 # TODO(mdesnoyer): Handle the stack on async requests so that the
 # callback will have a stack that looks like the original request
 # being called.
-
-def send_request(request, ntries=5, callback=None, cur_try=0,
-                 do_logging=True, base_delay=0.2):
+@utils.sync.optional_sync
+@tornado.gen.coroutine
+def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
+                 no_retry_codes=None):
     '''Sends an HTTP request with retries
 
     If there was an error, either in the connection, or if the
@@ -37,87 +47,31 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
 
     request - A tornado.httpclient.HTTPRequest object
     ntries - Number of times to try sending the request
-    callback - If it is a function, it will be called when the request
-               returns with its response as the parameter. If it is None,
-               this call blocks and returns the HTTPResponse.
     do_logging - True if logging should be turned on
     base_delay - Time in seconds for the first delay on the retry
+    no_retry_codes - A list of http codes that will cause the request to not
+                     retry
 
     '''
+    # Verify the request url
+    parsed = urlparse.urlsplit(unicode(request.url))
+    if parsed.scheme not in ("http", "https"):
+        msg = ('Invalid url to request because the scheme is %s: %s' %
+               (parsed.scheme, request.url))
+        if do_logging:
+            _log.error(msg)
+        raise tornado.gen.Return(tornado.httpclient.HTTPResponse(
+            request, 400, error=tornado.httpclient.HTTPError(400, msg)))
 
-    # Convert to HTTPRequest object if a URL is given
-    # This is enabled to ensure compatibility with http fetch method
-    # which can take a URL or a HTTPRequest object
-    if isinstance(request, basestring):
-        request = tornado.httpclient.HTTPRequest(request)
-
-    def finish_request(response):
-        if callback is not None:
-            callback(response)
-        return response
-
-    def handle_response(response, cur_try):
-
-        # Logic to identify errors
-        if not response.error:
-            try:
-                data = tornado.escape.json_decode(response.body)
-                if isinstance(data, dict) and data['error']:
-                    if do_logging:
-                        _log.warning(('key=http_response_error '
-                                      'msg=Response err from %s: %s') %
-                                      (request.url, data['error']))
-                    response.error = tornado.httpclient.HTTPError(
-                        500, str(data['error']))
-                else:
-                    return finish_request(response)
-
-                                
-            except ValueError:
-                # It's not JSON data so just call the callback
-                return finish_request(response)
-
-            except KeyError:
-                # The JSON doens't have an error field, so
-                # call the callback
-                return finish_request(response)
-            
-        else:
-            if do_logging:
-                _log.warn_n(('key=http_connection_error '
-                             'msg=Error connecting to %s: %s') %
-                             (request.url, response.error),
-                             5)
-
-        # Handling the retries
+    no_retry_codes = no_retry_codes or []
+    
+    cur_try = 0
+    response = None
+    while cur_try < ntries:
         cur_try += 1
-        if cur_try >= ntries:
-            if do_logging:
-                _log.warn_n('Too many errors connecting to %s' % request.url,
-                            3)
-            return finish_request(response)
-
-
-        delay = (1 << cur_try) * base_delay * random.random() # in seconds
-        if callback is None:
-            time.sleep(delay)
-            return send_request(request, ntries, cur_try=cur_try,
-                                do_logging=do_logging,
-                                base_delay=base_delay)
-        else:
-            ioloop = tornado.ioloop.IOLoop.current()
-            ioloop.add_callback(ioloop.add_timeout, time.time()+delay,
-                                lambda: send_request(request, ntries, callback,
-                                                     cur_try, do_logging,
-                                                     base_delay))
-
-        # TODO(mdesnoyer): Return a future
-        return None
-
-    if callback is None:
-        http_client = tornado.httpclient.HTTPClient()
         try:
-            response = http_client.fetch(request)
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            response = yield http_client.fetch(request)
         except tornado.httpclient.HTTPError as e:
             if e.response:
                 response = e.response
@@ -128,99 +82,53 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
         except socket.error as e:
             # Socket resolution error
             if do_logging:
-                _log.error('msg=socket resolution error for %r' % request.url)
+                _log.error('Socket resolution error for %r' % request.url)
             error = tornado.httpclient.HTTPError(
                 502, 'socket error')
             response = tornado.httpclient.HTTPResponse(request,
-                                                        502,
-                                                        error=error)
-            
-        finally:
-            http_client.close()
-            
-        return handle_response(response, cur_try)
-    else:
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        return http_client.fetch(request,
-                                 callback=lambda x: handle_response(x, cur_try))
-
-class RequestThread(threading.Thread):
-    '''A thread that serially sends http requests.'''
-    def __init__(self, q, max_tries, rc=None):
-        '''Constructor
-
-        q - A Queue.Queue that this thread will consume from.
-            Entries in teh queue are expected to be tuples of
-            (request, callback, ntries) 
-        max_retries - The maximum number of retries per request.
-        '''
-        super(RequestThread, self).__init__()
-        self.q = q
-        self.max_tries = max_tries
-        self.daemon = True
-        self._stopped = threading.Event()
-        self.retry_codes = rc or [400, 401, 402, 403, 405, 408, 501, 502, 503]
-
-    def stop(self):
-        self._stopped.set()
-        self.q.put((None, None, None, None))
-
-    def run(self):
-        while not self._stopped.is_set():
+                                                       502,
+                                                       error=error)
+        if not response.error:
             try:
-                request, callback, ntries, do_logging = self.q.get()
-
-                if request is None:
-                    self.q.task_done()
-                    if not self._stopped.is_set():
-                        # This stop was for somebody else who is
-                        # listening on the queue, so requeue it.
-                        self.q.put((None, None, None, None))
-                    continue
-
-                response = send_request(request, ntries=1,
-                                        do_logging=do_logging)
-                if response.error is not None and response.code not in\
-                    self.retry_codes:
-                   
-                    # Do retry logic
-                    if (ntries + 1) >= self.max_tries:
-                        if do_logging:
-                            _log.error(('key=http_too_many_errors '
-                                        'msg=Abort. Too many errors for %s '
-                                        'request to %s with body starting: %s')
-                                        % (request.method, request.url,
-                                           ('' if request.body is None else 
-                                            request.body[0:100])))
-                        callback(response)
-                        self.q.task_done()
-                    else:
-                        # in seconds
-                        delay = (1 << ntries) * 0.2 * random.random()
-                        ntries += 1
-                        self._delayed_requeue(request, callback, ntries, 
-                                              do_logging, delay)
+                data = tornado.escape.json_decode(response.body)
+                if isinstance(data, dict) and data['error']:
+                    if do_logging:
+                        _log.warning_n(('Response error from %s: %s') %
+                                       (request.url, data['error']), 5)
+                    response.error = tornado.httpclient.HTTPError(
+                        500, str(data['error']))
                 else:
-                    callback(response)
-                    self.q.task_done()
-                        
+                    raise tornado.gen.Return(response)
 
-            except Exception as e:
-                _log.exception(
-                    'key=http_connection msg=Unhandled exception: %s'
-                    % e)
-                # Some error happened and we don't want to deadlock,
-                # so flag it being done.
-                self.q.task_done()
+                                
+            except ValueError:
+                # It's not JSON data so we're done
+                raise tornado.gen.Return(response)
 
-    def _delayed_requeue(self, request, callback, ntries, do_logging, delay):
-        '''Adds a request to the queue after delay seconds.'''
-        def do_requeue():
-            self.q.put((request, callback, ntries, do_logging))
-            self.q.task_done()
+            except KeyError:
+                # The JSON doens't have an error field, so
+                # we're done
+                raise tornado.gen.Return(response)
 
-        timer = threading.Timer(delay, do_requeue)
-        timer.start()
+        elif response.error.code in no_retry_codes:
+            # We received a response that says we shouldn't retry, so
+            # just return the response.
+            raise tornado.gen.Return(response)
+            
+        else:
+            if do_logging:
+                _log.warn_n(('Error sending request to %s: %s') %
+                             (request.url, response.error),
+                             5)
+
+
+        delay = (1 << cur_try) * base_delay * random.random() # in seconds
+        yield tornado.gen.sleep(delay)
+
+    if do_logging:
+        _log.warn_n('Too many errors connecting to %s' % request.url,
+                    3)
+    raise tornado.gen.Return(response)
 
 class RequestPool(object):
     '''Handles a number of concurrent requests to an http service.
@@ -228,51 +136,48 @@ class RequestPool(object):
     Ensures that target isn't hit too hard too quickly.
     Includes exponential retries.
     '''
-    def __init__(self, max_connections=1, max_tries=5):
-        self.request_q = Queue.Queue()
+    def __init__(self, max_connections=1, limit_for_subprocs=False,
+                 thread_safe=False):
+        '''Creates the request pool.
 
-        self.threads = []
-        for i in range(max_connections):
-            thread = RequestThread(self.request_q, max_tries)
-            thread.start()
-            self.threads.append(thread)
+        Inputs:
+        max_connections - Maximum connections allowed
+        limit_for_subprocs - If True then we limit the connections for 
+                             all subprocesses to. The default is to have 
+                             max_connections per process, which makes 
+                             the synchronization much more efficient if you 
+                             don't need strict limits. 
+        thread_safe - If False, send_request can only be submitted from a
+                      single thread. It will be more efficient though.
+        '''
+        if limit_for_subprocs:
+            self._lock = utils.sync.FutureLock(
+                multiprocessing.BoundedSemaphore(max_connections))
+        elif thread_safe:
+            self._lock = utils.sync.FutureLock(
+                threading.BoundedSemaphore(max_connections))
+        else:
+            self._lock = tornado.locks.BoundedSemaphore(max_connections)
 
-    def send_request(self, request, callback=None, do_logging=True):
-        '''Queues up a request to send to the connection.
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def send_request(self, request, **kwargs):
+        '''Sends a request to the pool.
+
+        Acts exactly like the module level send_request
 
         Inputs:
         request - A tornado.httpclient.HTTPRequest object
-        callback - If it is a function, it will be called when the request
-                   returns with its response as the parameter. If it is None,
-                   this call blocks and returns the HTTPResponse.
-        do_logging - True if logging should be done
+        kwargs - Passed to the module level send_request
         '''
-        if request is None:
-            raise TypeError('Request must be non Null')
-        
-        if callback is not None:
-            self.request_q.put((request, callback, 0, do_logging))
-            return
-
-        # Setup a callback that pushes the response into the queue and
-        # then wait on that queue.
-        response_q = Queue.Queue()
-        self.request_q.put((request,
-                            lambda response: response_q.put(response),
-                            0,
-                            do_logging))
-        return response_q.get()
-
-    def stop(self):
-        '''Stops the connection pool.'''
-        for thread in self.threads:
-            thread.stop()
-
-        for thread in self.threads:
-            thread.join()
-
-    def join(self):
-        '''Blocks until all the requests have been processed.'''
-        self.request_q.join()
+        statemon.state.increment(ref=_waiting_in_pools_ref)
+        yield self._lock.acquire()
+        try:
+            kwargs['async'] = True
+            response = yield send_request(request, **kwargs)
+            raise tornado.gen.Return(response)
+        finally:
+            self._lock.release()
+            statemon.state.increment(ref=_waiting_in_pools_ref, diff=-1)
 
                 

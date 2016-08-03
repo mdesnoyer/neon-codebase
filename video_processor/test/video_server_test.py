@@ -6,7 +6,7 @@ import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> __base_path__:
+if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
@@ -20,7 +20,7 @@ import random
 import subprocess
 from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
-import test_utils.redis
+import test_utils.postgresql 
 import test_utils.neontest
 import time
 import threading
@@ -30,9 +30,10 @@ import tornado.httpclient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
 import urllib
-from utils.imageutils import PILImageUtils
+from cvutils import imageutils
 import utils.neon
 from utils.options import define, options
+from utils import statemon
 import video_processor.server
 
 _log = logging.getLogger(__name__)
@@ -125,8 +126,6 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
         super(TestFairWeightedQ, self).setUp()
         self.fwq = video_processor.server.FairWeightedRequestQueue(nqueues=2)
         self.fwq._schedule_metadata_thread = MagicMock()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
         
         #set up 2 test accounts with diff priorities
         self.nuser1 = neondata.NeonUserAccount("acc1")
@@ -137,19 +136,31 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
 
         # Patch the video length lookup
         self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
-        self.mock_send_request = self.send_request_patcher.start()
+        self.mock_send_request = self._future_wrap_mock(
+            self.send_request_patcher.start())
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
         self.mock_send_request.side_effect = \
-                lambda x, callback: callback(
-                    tornado.httpclient.HTTPResponse(
-                        x, 200, buffer=StringIO(''),
-                        headers={'Content-Length': self.video_size()}))
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, buffer=StringIO(''),
+        headers={'Content-Length': self.video_size()})
 
     def tearDown(self):
         self.send_request_patcher.stop()
+        self.postgresql.clear_all_tables()
         super(TestFairWeightedQ, self).tearDown()
-        self.redis.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
 
     def test_basic_queue_operations(self):
         # pop from an empty Q 
@@ -215,23 +226,40 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
         # kinda hacky, but we need to get the raw RequestData object
         item = self.fwq.get()
         self.assertEqual(item.get_video_size(), vsize)
-    
+
+    @tornado.testing.gen_test
+    def test_with_duration(self):
+        req = neondata.NeonApiRequest('job0', self.nuser1.neon_api_key,
+                                      url='http://someurl', vid='v1')
+
+        yield self.fwq.put(req, duration=50.3, async=True)
+        self.assertFalse(self.mock_send_request.called)
+
+        item = self.fwq.get()
+        self.assertEqual(item.duration, 50.3)
+
 class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     ''' Video Server test'''
-
     @classmethod
     def setUpClass(cls):
-        super(TestVideoServer, cls).setUpClass()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
    
     def setUp(self):
         self.server = video_processor.server.Server()
         super(TestVideoServer, self).setUp()
+        
+        statemon.state._reset_values()
 
         self.base_uri = '/api/v1/submitvideo/topn'
         self.neon_api_url = self.get_url(self.base_uri)
   
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
         random.seed(1324)
 
         #create test account
@@ -239,24 +267,26 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
-        self.na.save()
+        self.na = neondata.NeonPlatform.modify(self.api_key, '0',
+                                               lambda x: x,
+                                               create_missing=True)
 
         # Patch the video length lookup
         self.http_patcher = patch('video_processor.server.utils.http')
-        self.mock_http = self.http_patcher.start()
+        self.mock_http = self._future_wrap_mock(
+            self.http_patcher.start().send_request)
         vsize = 1024
         request = tornado.httpclient.HTTPRequest("http://xyz")
         response = tornado.httpclient.HTTPResponse(request, 200,
                 buffer=StringIO(''), headers={'Content-Length': vsize})
-        self.mock_http.send_request.side_effect = \
-                lambda x, callback, **kw: callback(response)
+        self.mock_http.side_effect = \
+                lambda x, **kw: response
 
         # Mock out the image download
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'cvutils.imageutils.PILImageUtils.download_image')
         self.im_download_mock = self.im_download_mocker.start()
-        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
         image_future = concurrent.futures.Future()
         image_future.set_result(self.random_image)
         self.im_download_mock.return_value = image_future
@@ -276,16 +306,37 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
 
-    def get_app(self):
-        return self.server.application
-    
     def tearDown(self):
         self.http_patcher.stop()
         self.im_download_mocker.stop()
         self.cloudinary_patcher.stop()
         self.s3_patcher.stop()
-        self.redis.stop()
+        self.postgresql.clear_all_tables()
         super(TestVideoServer, self).tearDown()
+    
+    def test_healthcheck(self):
+        ''' Health check handler of server '''
+
+        nuser = neondata.NeonUserAccount("acc1")
+        nuser.save()
+        with options._set_bounded('video_processor.server.test_key', nuser.neon_api_key):
+            self.http_client.fetch(self.get_url('/healthcheck'),
+                    callback=self.stop, method="GET", headers={})
+            resp = self.wait()
+            self.assertEqual(resp.code, 200)
+
+        # change postgres db_name and ensure you get a 503 from healthcheck fail
+        # avoiding a full stop, because it's slow 
+        old_db_name = options.get('cmsdb.neondata.db_name')
+        options._set('cmsdb.neondata.db_name', 'does_not_exist')
+        self.http_client.fetch(self.get_url('/healthcheck'),
+                callback=self.stop, method="GET", headers={})
+        resp = self.wait()
+        self.assertEqual(resp.code, 503)
+        options._set('cmsdb.neondata.db_name', old_db_name)
+
+    def get_app(self):
+        return self.server.application
 
     def make_api_request(self, vals, url=None):
         if not url:
@@ -322,10 +373,11 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
         self.assertEqual(api_request.video_id, "neonapivid123")
         
-        # verify that the video has been added to the account
-        np = neondata.NeonPlatform.get(self.api_key, '0')
-        vids = np.get_videos()
-        self.assertIn("neonapivid123", vids)
+        # verify that the video has been added to the accounti
+        # there isn't a video for this, so it won't be on the user
+        #na = neondata.NeonUserAccount(self.api_key) 
+        #vids = na.get_internal_video_ids() 
+        #self.assertIn("neonapivid123", vids)
 
         # Verify that the default thumb is in the database
         video = neondata.VideoMetadata.get('%s_neonapivid123' % self.api_key)
@@ -388,15 +440,16 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
             # Check request state and message
             resp = json.loads(response.body)
-            api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
+            api_request = neondata.NeonApiRequest.get(resp['job_id'],
+                                                      self.api_key)
             self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
-            self.assertIsNotNone(api_request.msg)
             
-            state_vars = video_processor.server.statemon.state.get_all_variables()
+
             self.assertEqual(
-                    state_vars.get('video_processor.server.default_thumb_error').value,
-                    1)
-            video_processor.server.statemon.state._reset_values()
+                statemon.state.get('video_processor.server.default_thumb_error'),
+                1)
+            
+            statemon.state._reset_values()
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
@@ -412,12 +465,81 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         resp = self.make_api_request(vals)
         self.assertEqual(resp.code, 409)
 
+    def test_video_object_exists(self):
+        internal_video_id = \
+          neondata.InternalVideoID.generate(self.api_key, 'vid1')
+        neondata.VideoMetadata(
+            internal_video_id,
+            video_url="http://testurl/video.mp4",
+            i_id='iid2',
+            serving_enabled=False,
+            duration=12345.6,
+            custom_data={'some_key': 'some_fun_data'},
+            publish_date='2015-07-02T13:09:00Z').save()
+        
+        vals = {
+            "api_key": self.api_key, 
+            "video_url": "http://testurl/video.mp4", 
+            "video_id": 'vid1',
+            "topn":2, 
+            "callback_url": "http://callback_push_url", 
+            "video_title": "test_title",
+            "integration_id" : 'iid2',
+            "publish_date": '2015-07-02T13:10:00Z'
+            }
+        resp = self.make_api_request(vals)
+        self.assertEqual(resp.code, 201)
+        job_id = json.loads(resp.body)['job_id']
+        self.assertIsNotNone(job_id)
+
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertEqual(video.integration_id, 'iid2')
+        self.assertEqual(video.url, "http://testurl/video.mp4")
+        self.assertEqual(video.custom_data, {'some_key': 'some_fun_data'})
+        self.assertEqual(video.duration, 12345.6)
+        self.assertEqual(video.publish_date, '2015-07-02T13:10:00Z')
+        self.assertFalse(video.serving_enabled)
+        self.assertEqual(video.job_id, job_id)
+        self.assertEqual(video.thumbnail_ids, [])
+
+        job = neondata.NeonApiRequest.get(video.job_id, self.api_key)
+        self.assertEqual(job.integration_id, 'iid2')
+        self.assertEqual(job.callback_url, 'http://callback_push_url')
+        self.assertEqual(job.video_title, 'test_title')
+        self.assertEqual(job.publish_date, '2015-07-02T13:10:00Z')
+
+    def test_default_thubmnail(self):
+        internal_video_id = \
+          neondata.InternalVideoID.generate(self.api_key, 'vid1')
+        vals = {
+            "api_key": self.api_key, 
+            "video_url": "http://testurl/video.mp4", 
+            "video_id": 'vid1',
+            "topn":2, 
+            "callback_url": "http://callback_push_url", 
+            "video_title": "test_title",
+            "integration_id" : 'iid2',
+            "default_thumbnail" : 'default_thumb.jpg',
+            "external_thumbnail_id" : 'ext_thumb_id'
+            }
+        resp = self.make_api_request(vals)
+        self.assertEqual(resp.code, 201)
+        job_id = json.loads(resp.body)['job_id']
+        self.assertIsNotNone(job_id)
+
+        video = neondata.VideoMetadata.get(internal_video_id)
+        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
+        self.assertEquals(thumb.type, neondata.ThumbnailType.DEFAULT)
+        self.assertEquals(thumb.external_id, 'ext_thumb_id')
+        self.assertIn('default_thumb.jpg', thumb.urls)
+        
+
     def test_brightcove_request(self):
 
-        i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
-               self.api_key)
-        bp.save()
+        bp = neondata.BrightcoveIntegration.modify(
+            self.api_key,
+            lambda x: x, create_missing=True)
+        i_id = bp.integration_id
 
         vals = {"api_key": self.api_key, 
                 "video_url": "http://testurl/video.mp4", 
@@ -449,55 +571,18 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(thumb.type, neondata.ThumbnailType.BRIGHTCOVE)
         self.assertEquals(thumb.rank, 0)
         self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
-
-    def test_ooyala_request(self):
-
-        i_id = "i125"
-        bp = neondata.OoyalaPlatform("testaccountneonapi", i_id,
-               self.api_key)
-        bp.save()
-
-        vals = {"api_key": self.api_key, 
-                "video_url": "http://testurl/video.mp4", 
-                "video_id": "testid123", "topn":2, 
-                "callback_url": "http://callback_push_url", 
-                "video_title": "test_title",
-                "autosync" : False,
-                "topn" : 4,
-                "integration_id" : i_id,
-                "oo_api_key" : "ooyala_key",
-                "oo_secret_key" : "ooyala_secret",
-                "default_thumbnail": "http://prev_thumb"
-                }
-        url = self.get_url('/api/v1/submitvideo/ooyala')
-        resp = self.make_api_request(vals, url)
-        self.assertEqual(resp.code, 201)
-        
-        job_id = json.loads(resp.body)['job_id']
-        api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
-        self.assertEqual(api_request.video_id, "testid123")
-
-        # Check that the default thumbnail is set
-        video = neondata.VideoMetadata.get('%s_testid123' % self.api_key)
-        self.assertIsNotNone(video)
-        self.assertEquals(len(video.thumbnail_ids), 1)
-        self.assertTrue(video.serving_enabled)
-        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
-        self.assertEquals(thumb.type, neondata.ThumbnailType.OOYALA)
-        self.assertEquals(thumb.rank, 0)
-        self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
         
     
     def test_brightcove_request_invalid(self):
 
-        i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
-                self.api_key)
-        bp.save()
+        bp = neondata.BrightcoveIntegration.modify(
+            self.api_key,
+            lambda x: x, create_missing=True)
+        i_id = bp.integration_id
         vals = {"api_key": self.api_key, 
-                    "video_url": "http://testurl/video.mp4", 
-                    "video_id": "testid123", "topn":2, 
-                    "callback_url": "http://callback_push_url"}
+                "video_url": "http://testurl/video.mp4", 
+                "video_id": "testid123", "topn":2, 
+                "callback_url": "http://callback_push_url"}
         url = self.get_url('/api/v1/submitvideo/brightcove')
         resp = self.make_api_request(vals, url)
         self.assertEqual(resp.code, 400)
@@ -522,6 +607,16 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
             self.assertEqual(resp.code, 200)
         
         self.assertEqual(resp.body,'{}')
+
+    @tornado.testing.gen_test
+    def test_jobs_handler(self):
+        req = neondata.NeonApiRequest('job21', self.api_key,
+                    'vid1', 't', 't', 'r', 'h')
+        req.save()
+        jdata = req.to_json()
+        resp = yield self.http_client.fetch(self.get_url('/job'),
+                                            method="POST", body=jdata)
+        self.assertEquals(resp.code, 200)
 
     @tornado.testing.gen_test
     def test_requeue_handler(self):
@@ -624,13 +719,6 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
                     callback=self.stop, method="GET", headers={})
             resp = self.wait()
             self.assertEqual(resp.code, 200)
-
-        # shut down redis and ensure you get a 503 from healthcheck fail
-        self.redis.stop()
-        self.http_client.fetch(self.get_url('/healthcheck'),
-                callback=self.stop, method="GET", headers={})
-        resp = self.wait()
-        self.assertEqual(resp.code, 503)
        
     def test_statshandler(self):
         self.http_client.fetch(self.get_url('/stats'),
@@ -642,8 +730,6 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 class QueueSmokeTest(test_utils.neontest.TestCase):
     def setUp(self):
         super(QueueSmokeTest, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
         random.seed(234895)
         
         self.fwq = video_processor.server.FairWeightedRequestQueue(nqueues=2)
@@ -655,19 +741,30 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
 
         # Patch the video length lookup
         self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
-        self.mock_send_request = self.send_request_patcher.start()
+        self.mock_send_request = self._future_wrap_mock(
+            self.send_request_patcher.start())
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
         self.mock_send_request.side_effect = \
-                lambda x, callback: callback(
-                    tornado.httpclient.HTTPResponse(
-                        x, 200, buffer=StringIO(''),
-                        headers={'Content-Length': self.video_size()}))
+            lambda x, **kw: tornado.httpclient.HTTPResponse(
+                x, 200, buffer=StringIO(''),
+                headers={'Content-Length': self.video_size()})
 
     def tearDown(self):
         self.send_request_patcher.stop()
-        self.redis.stop()
+        self.postgresql.clear_all_tables()
         super(QueueSmokeTest, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
     def test_many_puts_gets(self):
 
@@ -731,50 +828,64 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestJobManager, self).setUp()
 
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
         random.seed(1324)
 
         # Patch the video length lookup
         self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
-        self.mock_send_request = self.send_request_patcher.start()
+        self.mock_send_request = self._future_wrap_mock(
+            self.send_request_patcher.start())
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
         self.mock_send_request.side_effect = \
-                lambda x, callback: callback(
-                    tornado.httpclient.HTTPResponse(
-                        x, 200, buffer=StringIO(''),
-                        headers={'Content-Length': self.video_size()}))
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, buffer=StringIO(''),
+              headers={'Content-Length': self.video_size()})
 
         #create test account
         a_id = "testaccountneonapi"
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
-        self.na.save()
+        self.na = neondata.NeonPlatform.modify(
+            self.api_key, '0',
+            lambda x: x, create_missing=True)
 
         # Make some default jobs
         self.jobs = [
-            neondata.NeonApiRequest('job0', self.api_key,
+            neondata.NeonApiRequest('job0', self.api_key, vid='vid1',
                                     url='http://somewhere.mp4')]
         neondata.NeonApiRequest.save_all(self.jobs)
 
-        self.base_time = 0.05
+        self.base_time = 0.1
         self.job_manager = video_processor.server.JobManager(
             job_check_interval=self.base_time / 10,
             base_time=self.base_time)
 
     def tearDown(self):
         self.send_request_patcher.stop()
-        self.redis.stop()
+        self.postgresql.clear_all_tables()
         super(TestJobManager, self).tearDown()
 
-    def run_loop(self, timeout):
-        '''Yield to run the ioloop for a specified amount of time'''
-        future = concurrent.futures.Future()
-        self.io_loop.call_later(timeout, future.set_result, None)
-        return future
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_job_with_duration(self):
+        neondata.VideoMetadata('%s_vid1' % self.api_key,
+                               duration=50.3).save()
+
+        #TODO(mdesnoyer): Test the time calculation
+        yield self.job_manager.add_job(self.jobs[0])
+        job = self.job_manager.get_job()
+        self.assertIsNotNone(job)
 
     @tornado.testing.gen_test
     def test_job_times_out(self):
@@ -783,7 +894,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(job)
 
         with self.assertLogExists(logging.ERROR, 'timed out'):
-            yield self.run_loop(self.base_time / 2.0)
+            yield tornado.gen.sleep(self.base_time / 2.0)
 
         # At this point, the job shouldn't be requeued, but it
         # should be flagged in the database
@@ -796,7 +907,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
 
         # Now wait and it should be requeued
         with self.assertLogExists(logging.INFO, 'Add job'):
-            yield self.run_loop(self.base_time * 3.0)
+            yield tornado.gen.sleep(self.base_time * 3.0)
 
         self.assertEquals(self.job_manager.q.qsize(), 1)
         self.assertEquals(
@@ -815,7 +926,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
 
         # Now wait and it should be requeued
         with self.assertLogExists(logging.INFO, 'Add job'):
-            yield self.run_loop(self.base_time * 10.0)
+            yield tornado.gen.sleep(self.base_time * 10.0)
 
         self.assertEquals(
             neondata.NeonApiRequest.get(
@@ -832,7 +943,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         for i in range(options.get('video_processor.server.max_retries')-1):
             job = self.job_manager.get_job()
             self.assertIsNotNone(job)
-            yield self.run_loop(self.base_time * ((1<<i) + 1))
+            yield tornado.gen.sleep(self.base_time * ((1<<i) + 1))
             request = neondata.NeonApiRequest.get(job.api_request.job_id,
                                                   job.api_request.api_key)
             self.assertEquals(request.state,
@@ -842,7 +953,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Failed processing .* too many'):
             job = self.job_manager.get_job()
-            yield self.run_loop(self.base_time * 5.0)
+            yield tornado.gen.sleep(self.base_time * 5.0)
 
         request = neondata.NeonApiRequest.get(job.api_request.job_id,
                                               job.api_request.api_key)
@@ -909,7 +1020,6 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         self.assertItemsEqual([x.api_request.job_id for x in jobs_found],
                               ['job%i' % i for i in range(7)])
          
-        
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

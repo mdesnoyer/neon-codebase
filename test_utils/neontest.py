@@ -12,11 +12,18 @@ import logging
 from mock import MagicMock
 import re
 import time
+import tornado.gen
+import tornado.ioloop
 import tornado.testing
 import unittest
+import utils.statemon
+import utils.sync
 
 class TestCase(unittest.TestCase):
     '''Use this instead of the unittest one to get the extra functionality.'''
+
+    def tearDown(self):
+        utils.statemon.state._reset_values()
 
     @contextmanager
     def assertLogExists(self, level, regexp):
@@ -91,6 +98,8 @@ class TestCase(unittest.TestCase):
                 '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
                             for x in handler.logs])))
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def assertWaitForEquals(self, func, expected, timeout=5.0):
         '''Waits for the result of a function to equal val.'''
         start_time = time.time()
@@ -102,9 +111,57 @@ class TestCase(unittest.TestCase):
                     return
             except Exception as e:
                 found = '%s: %s' % (e.__class__.__name__, e)
-            time.sleep(0.05)
+            yield tornado.gen.sleep(0.05)
         self.fail('Timed out waiting for %s to equal %s. '
                   'Its value was %s' % (func, expected, found))
+    
+
+    def _future_wrap_mock(self, outer_mock, require_async_kw=False):
+        '''Sets up a mock that mocks out a call that returns a future.
+
+        For example, if a function that returns a future is patched with
+        func_patch, then do:
+        
+        self.func_mock = self._future_wrap_mock(func_patcher.start())
+
+        and the following will do what you expect
+        self.func_mock.side_effect = [67, Exception('oops')]
+
+        Input:
+        outer_mock - Mock of the function that needs a future
+        require_async_kw - If true, the async=True must be set on call to 
+                           return a future. Otherwise just returns the value.
+        Returns: 
+        mock that can be used to set the actual function return value/exception
+        '''
+        inner_mock = MagicMock()
+        def _build_future(*args, **kwargs):
+            async = kwargs.pop('async', False)
+            if require_async_kw and not async:
+                return inner_mock(*args, **kwargs)
+                
+            future = concurrent.futures.Future()
+            io_loop = tornado.ioloop.IOLoop.current()
+            def _set_result(future):
+                try:
+                    result = inner_mock(*args, **kwargs)
+                    if (isinstance(result, concurrent.futures.Future) or
+                        isinstance(result, tornado.concurrent.Future)):
+                        def _set_result_from_future(fut):
+                            try:
+                                future.set_result(fut.result())
+                            except Exception as e:
+                                future.set_exception(e)
+                        io_loop.add_future(result,
+                                           _set_result_from_future)
+                    else:
+                        future.set_result(result)
+                except Exception as e:
+                    future.set_exception(e)
+            io_loop.add_callback(_set_result, future)
+            return future
+        outer_mock.side_effect = _build_future
+        return inner_mock
 
     def _callback_wrap_mock(self, outer_mock):
         '''Sets up a mock that mocks out a call that acts on a callback.
@@ -161,24 +218,6 @@ class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
     def tearDown(self):
         tornado.testing.AsyncTestCase.tearDown(self)
 
-    def _future_wrap_mock(self, outer_mock):
-        '''Sets up a mock that mocks out a call that returns a future.
-
-        Input: outer_mock - Mock of the function that needs a future
-        Returns: 
-        mock that can be used to set the actual function return value/exception
-        '''
-        inner_mock = MagicMock()
-        def _build_future(*args, **kwargs):
-            future = concurrent.futures.Future()
-            try:
-                future.set_result(inner_mock(*args, **kwargs))
-            except Exception as e:
-                future.set_exception(e)
-            return future
-        outer_mock.side_effect = _build_future
-        return inner_mock
-
 class AsyncHTTPTestCase(tornado.testing.AsyncHTTPTestCase, TestCase):
     '''A test case that has access to Neon functions and can 
     test a tornado async http server calls.
@@ -186,6 +225,7 @@ class AsyncHTTPTestCase(tornado.testing.AsyncHTTPTestCase, TestCase):
     '''
     def setUp(self):
         tornado.testing.AsyncHTTPTestCase.setUp(self)
+        utils.statemon.state._reset_values()
 
     def tearDown(self):
         tornado.testing.AsyncHTTPTestCase.tearDown(self)

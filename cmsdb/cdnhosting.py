@@ -11,13 +11,13 @@ if sys.path[0] != __base_path__:
 import api.akamai_api
 import base64
 import boto.exception
+import cmsdb.neondata
 import json
 import hashlib
 import random
 import re
 import socket
 import string
-import cmsdb.neondata
 import time
 import tornado.gen
 import urllib
@@ -30,10 +30,11 @@ from boto.s3.connection import S3Connection
 from poster.encode import multipart_encode
 from StringIO import StringIO
 import utils.botoutils
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils import pycvutils
 from utils import statemon 
 import utils.sync
+from cvutils import smartcrop
 
 import logging
 _log = logging.getLogger(__name__)
@@ -110,7 +111,6 @@ def create_s3_redirect(dest_key, src_key, dest_bucket=None,
 
 class CDNHosting(object):
     '''Abstract class for hosting images on a CDN.'''
-
     def __init__(self, cdn_metadata):
         '''Abstract CDN hosting class.
 
@@ -122,11 +122,16 @@ class CDNHosting(object):
         self.update_serving_urls = cdn_metadata.update_serving_urls
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
+        self.source_crop = cdn_metadata.source_crop
+        self.crop_with_saliency = cdn_metadata.crop_with_saliency
+        self.crop_with_face_detection = cdn_metadata.crop_with_face_detection
+        self.crop_with_text_detection = cdn_metadata.crop_with_text_detection
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def upload(self, image, tid, url=None, overwrite=True,
-               servingurl_overwrite=False):
+               servingurl_overwrite=False, do_source_crop=False,
+               do_smart_crop=False):
         '''
         Host images on the CDN
 
@@ -142,44 +147,60 @@ class CDNHosting(object):
               CDNHosting objects might use this instead of the image.
         overwrite - Should existing files be overwritten?
         servingurl_overwrite - Should the serving urls be overwritten?
+        do_source_crop - Will source crop, so long as self.source_crop is 
+                         defined. See notes on source cropping below.
+        do_smart_crop - Will smart crop images.
+
+        Source Crop:
+            source cropping excludes regions of the images that are known to
+            be bad, i.e., the newscrawl with CNN images.
 
         Returns: list [(cdn_url, width, height)]
         '''
+        # we need to avoid source cropping (and smart cropping) thumbnails
+        # that come directly from the client.
         new_serving_thumbs = [] # (url, width, height)
-        upload_futures = []
-        
+        if self.source_crop is not None and do_source_crop:
+            if not self.resize:
+                _log.error(('Crop source specified but no desired final ',
+                            'size is defined'))
+                raise ValueError(('Crop source can only operate along with ',
+                                  'resize'))
+            _prep = pycvutils.ImagePrep(crop_frac=self.source_crop,
+                                        return_same=True)
+            image = _prep(image)
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
         try:
             if self.resize:
+                cv_im = pycvutils.from_pil(image)
+                if do_smart_crop:
+                    sc = smartcrop.SmartCrop(cv_im,
+                        with_saliency=self.crop_with_saliency,
+                        with_face_detection=self.crop_with_face_detection,
+                        with_text_detection=self.crop_with_text_detection)
                 for sz in self.rendition_sizes:
                     cv_im = pycvutils.from_pil(image)
-                    cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
+                    if do_smart_crop:
+                        cv_im_r = sc.crop_and_resize(sz[1], sz[0])
+                    else:
+                        # avoid smart cropping, since it's too aggressive
+                        # about finding text.
+                        cv_im_r = pycvutils.resize_and_crop(
+                            cv_im, sz[1], sz[0])
                     im = pycvutils.to_pil(cv_im_r)
-                    upload_futures.append(self._upload_and_check_image(
-                        im, tid, url, overwrite))
+                    cdn_val = yield self._upload_and_check_image(
+                        im, tid, url, overwrite)
+                    new_serving_thumbs.append(cdn_val)
             else:
-                upload_futures.append(self._upload_and_check_image(
-                        image, tid, url, overwrite))
+                cdn_val = yield self._upload_and_check_image(
+                    image, tid, url, overwrite)
+                new_serving_thumbs.append(cdn_val)
 
-            # TODO: Once we use Tornado 4.2+, just use
-            # tornado.gen.multi_future with quiet exceptions. The
-            # problem here is that if there are multiple errors, our
-            # logging system gets overloaded.
-            exception_found = None
-            for future in upload_futures:
-                try:
-                    cdn_val = yield future
-                    if cdn_val:
-                        new_serving_thumbs.append(cdn_val)
-                except IOError as e:
-                    exception_found = e
-
-            if exception_found is not None:
-                raise exception_found
         except IOError:
             statemon.state.increment('upload_error')
             raise
+
 
         if self.update_serving_urls and len(new_serving_thumbs) > 0:
             def add_serving_urls(obj):
@@ -221,10 +242,10 @@ class CDNHosting(object):
         request = tornado.httpclient.HTTPRequest(
             url, 'GET',
             headers={'Accept': 'image/*'})
-        response = yield tornado.gen.Task(
-            utils.http.send_request,
+        response = yield utils.http.send_request(
             request,
-            base_delay=4.0)
+            base_delay=10.0,
+            async=True)
         if response.error:
             raise tornado.gen.Return(False)
         raise tornado.gen.Return(True)
@@ -287,16 +308,18 @@ class CDNHosting(object):
                              " implement" % cdn_metadata.__class__.__name__)
 
 class AWSHosting(CDNHosting):
-
-    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
     
     def __init__(self, cdn_metadata):
         super(AWSHosting, self).__init__(cdn_metadata)
-        self.neon_bucket = (isinstance(
-            cdn_metadata, cmsdb.neondata.NeonCDNHostingMetadata)
-            or isinstance(
-                cdn_metadata,
-                cmsdb.neondata.PrimaryNeonHostingMetadata))
+        self.policy = cdn_metadata.policy
+        if self.policy is None:
+            neon_bucket = (isinstance(
+                cdn_metadata, cmsdb.neondata.NeonCDNHostingMetadata)
+                or isinstance(
+                    cdn_metadata,
+                    cmsdb.neondata.PrimaryNeonHostingMetadata))
+            if neon_bucket:
+                self.policy = 'public-read'
         self.s3conn = S3Connection(cdn_metadata.access_key,
                                    cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name
@@ -313,9 +336,18 @@ class AWSHosting(CDNHosting):
     def _get_bucket(self):
         '''Connects to the bucket if it's not already done'''
         if self.s3bucket is None:
-            self.s3bucket = yield utils.botoutils.run_async(
-                self.s3conn.get_bucket,
-                self.s3bucket_name)
+            try:
+                self.s3bucket = yield utils.botoutils.run_async(
+                    self.s3conn.get_bucket,
+                    self.s3bucket_name)
+            except S3ResponseError as e:
+                if e.status == 403:
+                    # It's a permissions error so just get the bucket
+                    # and don't validate it
+                    self.s3bucket = self.s3conn.get_bucket(
+                        self.s3bucket_name, validate=False)
+                else:
+                    raise
         raise tornado.gen.Return(self.s3bucket)
 
     @utils.sync.optional_sync
@@ -342,8 +374,9 @@ class AWSHosting(CDNHosting):
         if self.make_tid_folders:
             name_pieces.append("%s.jpg" % re.sub('_', '/', tid))
         else:
-            name_pieces.append(AWSHosting.neon_fname_fmt % 
-                               (tid, image.size[0], image.size[1]))
+            name_pieces.append(
+                cmsdb.neondata.ThumbnailServingURLs.create_filename(
+                tid, image.size[0], image.size[1]))
         key_name = '/'.join(name_pieces)
 
         cdn_url = "%s/%s" % (cdn_prefix, key_name)
@@ -353,14 +386,14 @@ class AWSHosting(CDNHosting):
         filestream.seek(0)
         imgdata = filestream.read()
 
-        # You may not have permission to do this for
-        # customer bucket, so check if neon bucket 
-        policy = None
-        if self.neon_bucket:
-            policy = 'public-read'
-
         try:
-            key = s3bucket.get_key(key_name)
+            try:
+                key = s3bucket.get_key(key_name)
+            except S3ResponseError as e:
+                if e.status == 403:
+                    key = None
+                else:
+                    raise
             if key is None:
                 key = s3bucket.new_key(key_name)
             elif not overwrite:
@@ -379,7 +412,7 @@ class AWSHosting(CDNHosting):
                 key.set_contents_from_string,
                 imgdata,
                 {'Content-Type':'image/jpeg'},
-                policy=policy,
+                policy=self.policy,
                 replace=overwrite)
         except BotoServerError as e:
             _log.error_n(
@@ -479,7 +512,7 @@ class CloudinaryHosting(CDNHosting):
                                                  body=encoded_params)
         
         try:
-            response = yield tornado.gen.Task(utils.http.send_request, request) 
+            response = yield utils.http.send_request(request, async=True) 
             raise tornado.gen.Return(response)
         except socket.error, e:
             _log.error("Socket error uploading image to cloudinary %s" %\
@@ -510,8 +543,6 @@ class CloudinaryHosting(CDNHosting):
    
 
 class AkamaiHosting(CDNHosting):
-
-    neon_fname_fmt = "neontn%s_w%s_h%s.jpg" 
 
     def __init__(self, cdn_metadata):
         super(AkamaiHosting, self).__init__(cdn_metadata)
@@ -557,8 +588,9 @@ class AkamaiHosting(CDNHosting):
             name_pieces.append(rng.choice(string.ascii_letters))
 
         # Add the filename
-        name_pieces.append(AkamaiHosting.neon_fname_fmt % 
-                           (tid, image.size[0], image.size[1]))
+        name_pieces.append(
+            cmsdb.neondata.ThumbnailServingURLs.create_filename(
+                tid, image.size[0], image.size[1]))
 
         image_url = '/'.join(name_pieces)
         

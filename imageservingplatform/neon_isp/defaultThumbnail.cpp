@@ -37,7 +37,6 @@ DefaultThumbnail::Init(const rapidjson::Document & document) {
     catch (...) {
     }
 
-    Dealloc();
     return -1;
 }
 
@@ -74,20 +73,46 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
         return -1;
     }
 
-    default_url = document["default_url"].GetString();
+    default_url_ = document["default_url"].GetString();
 
 
     /*
      *  Scaled Images
      */
     // the array must exist
-    if(document.HasMember("imgs") == false) {
+    if(document.HasMember("imgs")) {
+        const rapidjson::Value& imgs = document["imgs"];
+        return ProcessImages(imgs); 
+    }
+    else if(document.HasMember("img_sizes"))  {
+        const rapidjson::Value& img_sizes = document["img_sizes"];  
+        return ProcessImages(img_sizes); 
+    }
+    else { 
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
         return -1;
-    }
-    
-    const rapidjson::Value& imgs = document["imgs"];
+    }     
 
+    return 0;
+}
+
+
+/**************************************************************
+Function   : ProcessImages
+Purpose    : handles both the imgs and img_sizes Values from 
+             mastermind json file 
+Parameters : imgs - an array of images from the mastermind file 
+             on a directive. should have h/w/and possible 
+             url  
+             needsUrlGenerated - if we have an img that does not 
+             have a url, send this in as true and one will be 
+             generated 
+RV         : 0 if successful -1 if not 
+***************************************************************/ 
+
+int 
+DefaultThumbnail::ProcessImages(const rapidjson::Value & imgs) 
+{ 
     if(imgs.IsArray() == false) {
         neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
         return -1;
@@ -100,14 +125,11 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
         return 0;
     }
 
-    images.reserve(numOfImages);
-
     for(rapidjson::SizeType i=0; i < numOfImages; i++) {
 
         ScaledImage * img = new ScaledImage();
-
         // store in vector first, if any error it is deletable from Shutdown()
-        images.push_back(img);
+        images_.push_back(img);
 
         // obtain the specific json fraction
         const rapidjson::Value& imageDocument  = imgs[i];
@@ -120,39 +142,17 @@ DefaultThumbnail::InitSafe(const rapidjson::Document & document)
             return -1;
         }
     }
-
-    return 0;
+    return 0; 
 }
+
 
 
 void
 DefaultThumbnail::Shutdown()
 {
     accountId = "";
-    default_url = "";
-    Dealloc();
+    default_url_ = "";
 }
-
-
-void 
-DefaultThumbnail::Dealloc()
-{
-    for(std::vector<ScaledImage*>::iterator it = images.begin(); 
-            it != images.end(); it ++)
-    {
-        ScaledImage * img = (*it);
-
-        if(img == NULL) {
-            neon_stats[NEON_DEFAULT_THUMBNAIL_SHUTDOWN_NULL_POINTER]++;
-            continue;
-        }
-
-        img->Shutdown();
-        delete img;
-        img = 0;
-    }
-}
-
 
 const char *
 DefaultThumbnail::GetAccountId() const
@@ -160,53 +160,28 @@ DefaultThumbnail::GetAccountId() const
     return accountId.c_str();
 }
 
-
 const std::string &
 DefaultThumbnail::GetAccountIdRef() const
 {
     return accountId;
 }
 
-
-const char *
-DefaultThumbnail::GetScaledImage(int height, int width, int & url_size) const{
-    
-    static const int pixelRange = 6;
-
-    // iterate through our scaled images to find a size match
-    unsigned numOfImgs = images.size();
-
-    // try to find a perfect size match
-    for(unsigned i=0; i < numOfImgs; i++){
-
-        if( images[i]->GetHeight() ==  height &&
-            images[i]->GetWidth() == width ) {
-
-            // a match, url_size is set here
-            const char * url = images[i]->GetUrl(url_size);
-            neon_stats[NEON_DEFAULT_IMAGE_PERFECT_FIT]++;
-            return url;
-        }
-    }
-
-    // try to find an approximate size
-    for(unsigned i=0; i < numOfImgs; i++){
-        
-        if( ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
-            ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange)) {
-
-            // a match, url_size is set here
-            const char * url = images[i]->GetUrl(url_size);
-            neon_stats[NEON_DEFAULT_IMAGE_APPROX_FIT]++;
-            return url;
-        }
-    }
-    
-    // otherwise return default url
-    url_size = default_url.size();
-    return default_url.c_str();
+const std::string &
+DefaultThumbnail::default_url() const
+{
+    return default_url_;
 }
 
+const ScaledImage*
+DefaultThumbnail::GetScaledImage(int height, int width) const
+{
+    int image_index = ScaledImage::FindBestSizeMatchImage(width, height, images_);
+    if (image_index > -1)
+        return &images_[image_index];
+
+    // otherwise return NULL, and leave it up to the caller to do what they want with it
+    return NULL; 
+}
 
 bool
 DefaultThumbnail::operator==(const DefaultThumbnail &other) const {

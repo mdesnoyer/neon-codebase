@@ -14,12 +14,15 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import dateutil.parser
 import math
 import numpy as np
 import pandas
 import scipy.stats
 
-def calc_lift_at_first_significant_hour(impressions, conversions):
+def calc_lift_at_first_significant_hour(impressions, conversions,
+                                        video_status, thumb_statuses,
+                                        use_cmsdb_ctrs=False):
     '''Calculates the lift for each thumbnail relative to the others 
     when statistical significant is reached.
     Inputs:
@@ -27,6 +30,8 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                   and columns are thumbnails
     Conversions - A pandas DataFrame of conversion counts where rows are hours
                   and columns are thumbnails
+    video_status - The video status object for this video
+    thumb_status - List of thumbnail status objects for the thumbnails
     
     If there is no statistically significant point, then the aggregate
     is used for calculating the stats.
@@ -37,6 +42,12 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
     cols and rows represent the thumbnail and the entries are row
     vs. col (baseline)
     '''
+
+    # See when the experiment ended
+    exp_end = None
+    if video_status.experiment_state == 'complete' and len(video_status.state_history) > 0:
+        exp_end = dateutil.parser.parse(video_status.state_history[-1][0])
+    thumb_ctrs = dict([(x.get_id(), x.ctr or 0.0) for x in thumb_statuses])
 
     # Calculate the cumulative, per thumbnail stats we need.
     cum_imp = impressions.cumsum().fillna(method='ffill')
@@ -64,47 +75,76 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                 index=zscore.index)
             p_value = p_value.where(p_value > 0.5, 1 - p_value)
 
-            # Find where the first hour of statististical significance is
-            sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
-                          (cum_imp[top] > 500) & (cum_conv[base] > 5) &
-                          (cum_conv[top] > 5)]
-            #sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
-            #              (cum_imp[top] > 500)]
-            if len(sig) == 0:
-                # There isn't statistical significance anywhere so use
-                # the aggregate stats.
-                idx = p_value.index[-1]
-
-                # TODO(mdesnoyer): Playing. only keep data that's significant
-                #continue
+            if exp_end and max(cum_imp.index) > exp_end:
+                # Use the time in the cmsdb to flag when the
+                # experiment finished.
+                exp_end = exp_end.replace(minute=0, second=0, microsecond=0)
+                idx = cum_imp.iloc[cum_imp.index >= exp_end].index[0]
             else:
-                idx = sig.index[0]
-                
-            stats['p_value'][base][top] = p_value[idx]
-            stats['lift'][base][top] = ((
-                cum_ctr[top][idx] - cum_ctr[base][idx]) /
-                cum_ctr[base][idx])
+                # Find where the first hour of statististical significance is
+                sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+                              (cum_imp[top] > 500) & (cum_conv[base] > 5) &
+                              (cum_conv[top] > 5)]
+                #sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+                #              (cum_imp[top] > 500)]
+                if len(sig) == 0:
+                    # There isn't statistical significance anywhere so use
+                    # the aggregate stats.
+                    idx = p_value.index[-1]
 
-            stats['revlift'][base][top] = (
-                cum_ctr[top][idx] - cum_ctr[base][idx])
+                    # TODO(mdesnoyer): Playing. only keep data that's
+                    #significant continue
+                else:
+                    idx = sig.index[0]
 
-            stats['xtra_conv_at_sig'][base][top] = (
-                cum_conv[top][idx] - cum_imp[top][idx] * cum_ctr[base][idx])
+            if use_cmsdb_ctrs and exp_end and max(cum_imp.index) > exp_end:
+                # The experiment has ended, so use the ctrs in the
+                # database (as mastermind saw them)
+                stats['p_value'][base][top] = np.max(p_value)
+                if thumb_ctrs[base] > 0.0:
+                    stats['lift'][base][top] = (
+                        (thumb_ctrs[top] - thumb_ctrs[base]) /
+                        thumb_ctrs[base])
+                if (thumb_ctrs[top] < 1e-8 or
+                    not np.isfinite(cum_ctr[top][idx])):
+                    stats['revlift'][base][top] = 0.0
+                else:
+                    stats['revlift'][base][top] = (
+                        1 - (thumb_ctrs[base] / thumb_ctrs[top]))
+                stats['xtra_conv_at_sig'][base][top] = (
+                    cum_conv[top][idx] - cum_imp[top][idx] *
+                    cum_ctr[base][idx])
+            else:
+                stats['p_value'][base][top] = p_value[idx]
+                stats['lift'][base][top] = ((
+                    cum_ctr[top][idx] - cum_ctr[base][idx]) /
+                    cum_ctr[base][idx])
+
+                if (cum_ctr[top][idx] < 1e-8 or 
+                    not np.isfinite(cum_ctr[top][idx])):
+                    stats['revlift'][base][top] = 0.0
+                else:
+                    stats['revlift'][base][top] = (
+                        1 - (cum_ctr[base][idx] / cum_ctr[top][idx]))
+
+                stats['xtra_conv_at_sig'][base][top] = (
+                    cum_conv[top][idx] - cum_imp[top][idx] * 
+                    cum_ctr[base][idx])
 
     return stats
 
-def calc_extra_conversions(impressions, revlift):
+def calc_extra_conversions(conversions, revlift):
     '''Calculate the extra conversions for each thumb relative to the others.
     Inputs:
-    impressions - A pandas DataFrame of impression counts where rows are hours
+    conversions - A pandas DataFrame of conversion counts where rows are hours
                   and columns are thumbnails
     revlift - A DataFrame of lift where row and cols are thumbs. cols are baseline
     Returns:
     A DataFrame of extra conversions in the same shape as revlift
     '''
-    impr_totals = impressions.sum()
+    conv_totals = conversions.sum()
             
-    retval = revlift.multiply(impr_totals, axis='index')
+    retval = revlift.multiply(conv_totals, axis='index')
     retval = retval.replace(np.inf, 0).replace(-np.inf, 0)
     return retval
 
@@ -125,14 +165,7 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     # significant lift
     sig_data = all_data.copy()
     sig_data = sig_data.groupby(level=1).filter(
-        lambda x: np.any(x['p_value']>0.95)
-        and np.any(x['is_base']) 
-        and np.any(x['is_base'] ==False))
-
-    # Only grab videos that have a baseline and one non-baseline
-    all_data = all_data.groupby(level=1).filter(
-        lambda x: np.any(x['is_base']) 
-        and np.any(x['is_base'] == False))
+        lambda x: np.any(x['p_value']>0.95))
 
     neon_winners = sig_data[(sig_data['extra_conversions'] > 0) & 
                             (sig_data['p_value'] > 0.95)]
@@ -163,12 +196,18 @@ def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
         return float('nan')
     base_sums = data.groupby(['is_base']).sum()
     neon_sums = data.groupby(level=['type']).sum()
+    all_sums = data.sum()
 
     #lift = base_sums['impr'][True] * base_sums[xtra_conv_col][False] / \
     #  (base_sums['conv'][True] * base_sums['impr'][False])
 
-    lift = base_sums['impr'][True] * neon_sums[xtra_conv_col]['neon'] / \
-      (base_sums['conv'][True] * neon_sums['impr']['neon'])
+    # Lift based on the aggregate CTR differences
+    #lift = base_sums['impr'][True] * neon_sums[xtra_conv_col]['neon'] / \
+    #  (base_sums['conv'][True] * neon_sums['impr']['neon'])
+   
+    # Lift based on the extra clicks compared to the total clicks
+    lift = neon_sums[xtra_conv_col]['neon'] / (all_sums['conv'] - 
+           neon_sums[xtra_conv_col]['neon'])
 
     return lift
 

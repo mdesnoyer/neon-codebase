@@ -5,9 +5,9 @@ OOYALA API Interface
 import os
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0, base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import base64
 import json
@@ -60,7 +60,7 @@ class OoyalaAPI(object):
         self._cache_base_url = cache_base_url
         self._expiration_window = expiration
         self._response_headers = [()]
-        self.http_request_pool = RequestPool(5, 1)
+        self.http_request_pool = RequestPool(5)
         self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"  
         if neon_video_server is not None:
             self.neon_uri = "http://%s:8081/api/v1/submitvideo/" % neon_video_server
@@ -508,8 +508,12 @@ class OoyalaAPI(object):
                     #TODO: get ooyala account, rather using local copy  
                     response = tornado.escape.json_decode(resp.body)
                     j_id = response['job_id']
-                    oo_account.videos[vid] = j_id
-                    oo_account.save()
+                    oo_account.modify(
+                        oo_account.neon_api_key,
+
+                        oo_account.integration_id,
+
+                        lambda x: x.add_video(vid, j_id))
 
         return items_processed 
 

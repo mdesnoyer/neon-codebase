@@ -79,3 +79,8 @@ CTestResults.xml
 #### AirFlow ####
 airflow.cfg
 airflow/logs/*
+
+#### swap files ### 
+*.swo
+*.swn
+*.swp

@@ -8,32 +8,36 @@
 #define _NEON_SCALE_IMAGE__
 
 #include <string>
+#include <boost/scoped_ptr.hpp>
+#include <boost/ptr_container/ptr_vector.hpp>
 #include "rapidjson/document.h"
+#include "limits.h"
 
 
 class ScaledImage  {
     
-    
 public:
-    
     ScaledImage();
     ~ScaledImage();
-    
     
     int Init(const rapidjson::Value& img);
     void Shutdown();
  
     int GetHeight() const;
     int GetWidth () const;
-    const char * GetUrl(int & size) const;
-    const std::string & GetUrlString() const;
     static bool ApproxEqual(int a, int b, int window);
+    static bool ApproxEqualAspectRatio(int widthone, int heightone, int widthtwo, int heighttwo);
+    int FindApproxAspectRatio(int width, int height) const; 
+    static int FindBestSizeMatchImage(int width, int height, const boost::ptr_vector<ScaledImage>& imgs); 
+    std::string * scoped_url() const;
 
 protected:
     bool initialized;
     int height;
     int width;
-    std::string url;
+
+private: 
+    boost::scoped_ptr<std::string> scoped_url_; 
 };
 
 

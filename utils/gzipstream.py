@@ -28,7 +28,7 @@ class GzipStream(StringIO):
 
     def read(self, source, size = -1):
         while ((len(self.gz_buffer) < size) or (size == -1)) and not self.source_eof:
-            if source == None: 
+            if source is None: 
                 break
             chunk = source.read(GzipStream.CHUNK_SIZE)
             self.zipfile.write(chunk)
