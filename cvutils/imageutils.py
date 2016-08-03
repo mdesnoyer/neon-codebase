@@ -60,6 +60,8 @@ class PILImageUtils(object):
     @classmethod
     def to_cv(cls, im):
         '''Convert a PIL image to an OpenCV one in BGR format.'''
+        if im.mode == 'P':
+            im = im.convert('RGBA')
         if im.mode == 'RGBA':
             # Render the image onto a white background
             im_render = Image.new("RGB", im.size, (255, 255, 255))
