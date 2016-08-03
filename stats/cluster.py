@@ -1,6 +1,5 @@
 ''''
 Utilities to deal with the cluster
-
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright Neon Labs 2014
 '''
@@ -74,6 +73,8 @@ from utils import statemon
 statemon.define("master_connection_error", int)
 statemon.define("cluster_creation_error", int)
 
+s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
+
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
 class MasterMissingError(ClusterInfoError): pass
@@ -82,19 +83,15 @@ class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
 class MapReduceError(ExecutionError): pass
 
-s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
-
 def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
     '''Function that iterates through the responses to list_* functions
        including handing the paginatioin
-
     Inputs:
     conn - Connection object
     obj_type - String of the end of the list_<obj_type> function
                (e.g. 'clusters')
     cluster_id - The cluster id for any list function that's not list_clusters
     kwargs - Any specific keyworkd args for the list_* function
-
     Returns:
     The iterator through the objects
     '''
@@ -135,13 +132,11 @@ class Cluster():
     # The possible instance and their specs. The format is (HDD GB,
     # Memory GB, on demand price)
     instance_info = {
-        'd2.2xlarge'  : (2.0, 1.38),
-        'd2.4xlarge'  : (4.1, 2.76),
-        'd2.8xlarge'  : (8.3, 5.52),
-        'cc2.8xlarge' : (2.2, 2.0),
-        'hi1.4xlarge' : (1.6, 3.1),
-        'i2.4xlarge'  : (3.0, 3.41),
-        'i2.8xlarge'  : (6.1, 6.82)
+        'hi1.4xlarge' : (2048., 60.5, 3.1),
+        #'hs1.8xlarge' : (48000., 117., 4.6), # Doesn't have a spot market
+        'cc2.8xlarge' : (3360, 60.5, 2.0),
+        'd2.2xlarge' : (12000, 61.0, 1.38),
+        'd2.4xlarge' : (48000, 122.0, 2.76),
         }
 
     # Possible cluster roles
@@ -230,7 +225,6 @@ class Cluster():
 
     def connect(self, cluster_manager_create_cluster=False):
         '''Connects to the cluster.
-
         If it's up, connect to it, otherwise create it
         '''
         with self._lock:
@@ -250,9 +244,9 @@ class Cluster():
                            self.cluster_id))
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path, extra_ops, timeout=None, name='Raw Tracker Data Cleaning'):
+                           output_path, map_memory_mb=None,
+                           timeout=None, name='Raw Tracker Data Cleaning'):
         '''Runs a mapreduce job.
-
         Inputs:
         jar - Path to the jar to run. It should be a jar that packs in all the
               dependencies.
@@ -263,7 +257,6 @@ class Cluster():
                         simple and doesn't have a lookup, this can be low,
                         which increases the number of maps each machine can
                         run.
-
         Returns:
         Returns once the job is done. If the job fails, an exception will be thrown.
         '''
@@ -271,14 +264,53 @@ class Cluster():
             budget_time = datetime.datetime.now() + \
                           datetime.timedelta(seconds=timeout)
 
+        # Define extra options for the job
+        extra_ops = {
+            'mapreduce.output.fileoutputformat.compress' : 'true',
+            'avro.output.codec' : 'snappy',
+            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
+            'mapreduce.task.timeout' : 1800000,
             'mapreduce.map.speculative': 'false',
+            'mapreduce.reduce.speculative': 'false',
+            'io.file.buffer.size': 65536
+        }
+
+        # If the requested map memory is different, set it
+        if map_memory_mb is not None:
+            extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
+            extra_ops['mapreduce.map.java.opts'] = (
+                '-Xmx%im' % int(map_memory_mb * 0.8))
 
 
+        # Figure out the number of reducers to use by aiming for files
+        # that are 1GB on average.
+        input_data_size = 0
+        s3AddrMatch = s3AddressRe.match(input_path)
+        if s3AddrMatch:
 
+            # First figure out the size of the data
+            bucket_name, key_name = s3AddrMatch.groups()
+            s3conn = S3Connection()
+            prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
+            for key in s3conn.get_bucket(bucket_name).list(prefix):
+                input_data_size += key.size
+
+            n_reducers = math.ceil(input_data_size / (1073741824. / 2))
+            extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
+
+        # If the cluster's core has larger instances, the memory
+        # allocated in the reduce can get very large. However, we max
+        # out the reduce to 1GB, so limit the reducer to use at most
+        # 5GB of memory.
+        core_group = self._get_instance_group_info('CORE')
+        if core_group is None:
+            raise ClusterInfoError('Could not find the CORE instance group')
         if (output_path.startswith("s3") and
                     core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
                                                 'r3.8xlarge', 'i2.8xlarge',
                                                 'i2.4xlarge', 'cr1.8xlarge']):
+            extra_ops['mapreduce.reduce.memory.mb'] = 5000
+            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
 
         self.connect()
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
@@ -293,14 +325,12 @@ class Cluster():
     def send_job_to_cluster(self, jar, main_class, extra_ops, input_path,
                             output_path):
         '''Sends a job to the cluster and returns a string of the stdout.
-
         Inputs:
         jar - Local path to the jar to run
         main_class - Main java class to execute
         extra_ops - Dictionary of extra parameters for the job
         input_path - Input path for the job to use. Probably hdfs or s3 path
         output_path - Output path for the job to use
-
         returns - String of the stdout for starting the job
         '''
         # First upload the jar to s3
@@ -317,7 +347,7 @@ class Cluster():
         found_key = bucket.get_key(jar_key.name)
         wait_count = 0
         while found_key is None or jar_key.md5 != found_key.etag.strip('"'):
-            if wait_count > 120:
+            if wait_count > 60:
                 _log.error('Timeout when waiting for the jar to show up in S3')
                 raise IOError('Timeout when uploading jar to s3://%s/%s' %
                               (bucket.name, jar_key.name))
@@ -398,15 +428,12 @@ class Cluster():
     def change_instance_group_size(self, group_type, incr_amount=None,
                                    new_size=None):
         '''Change a instance group size.
-
         Only one of incr_amount or new_size can be set
-
         Inputs:
         group_type - Type of group: 'MASTER', 'CORE' or 'TASK'
         incr_amount - Size to increate the group by. 
                       Can be negative for TASK group
         new_size - New size of the group.
-
         Outputs:
         InstanceGroup - Instance group status
         '''
@@ -460,10 +487,8 @@ class Cluster():
 
     def query_resource_manager(self, query, tries=5):
         '''Query the resource manager for information from Hadoop.
-
         Inputs:
         query - The query to send. This will be a relative REST API endpoint
-
         Returns:
         A dictionary of the parsed json response
         '''
@@ -476,10 +501,8 @@ class Cluster():
 
     def query_history_manager(self, query, tries=5):
         '''Query the history manager for information from Hadoop.
-
         Inputs:
         query - The query to send. This will be a relative REST API endpoint
-
         Returns:
         A dictionary of the parsed json response
         '''
@@ -507,7 +530,6 @@ class Cluster():
 
     def _check_cluster_state(self):
         '''Returns the state of the cluster.
-
         The state could be strings of 
         STARTING | BOOTSTRAPPING | RUNNING | WAITING | 
         TERMINATING | TERMINATED | TERMINATED_WITH_ERRORS
@@ -522,7 +544,6 @@ class Cluster():
     def find_cluster(self):
         '''Finds the cluster if it exists and fills the
         self.cluster_id, self.master_id and self.master_ip
-
         Returns the ClusterInfo object if the cluster was found.
         '''
         conn = EmrConnection(self.cluster_region)
@@ -578,7 +599,7 @@ class Cluster():
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
         conn = EmrConnection(self.cluster_region)
-        ec2conn = EC2Connection()
+        ec2conn = EC2Connection(self.cluster_region)
         
         self.master_ip = None
 
@@ -618,7 +639,6 @@ class Cluster():
 
     def _create(self):
         '''Creates a new cluster.
-
         Blocks until the cluster is ready.
         '''
         #TODO(mdesnoyer): Parameterize this. For now, we just put the
@@ -675,11 +695,10 @@ class Cluster():
             boto.emr.step.InstallHiveStep('0.11.0.2')]
 
             
-        subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
             InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
                           'Master Instance Group'),
-            instance_group
+            self._get_core_instance_group()
             ]
         
         conn = EmrConnection(self.cluster_region)
@@ -717,15 +736,13 @@ class Cluster():
         cur_state = conn.describe_cluster(self.cluster_id)
         while cur_state.status.state != 'WAITING':
             if cur_state.status.state in ['TERMINATING', 'TERMINATED',
-                                            'TERMINATED_WITH_ERRORS',
-                                            'FAILED']:
+                             'TERMINATED_WITH_ERRORS', 'FAILED']:
                 msg = ('Cluster could not start because: %s',
                            cur_state.status.statechangereason.message)
                 _log.error(msg)
                 raise ClusterCreationError(msg)
 
             _log.debug('Cluster is booting. State: %s' % cur_state.status.state)
-                      cur_cluster.status.state)
             time.sleep(30.0)
             cur_state = conn.describe_cluster(self.cluster_id)
 
@@ -754,16 +771,12 @@ class Cluster():
                     self.min_core_instances])
 
     def _get_core_instance_group(self):
+             
         # Calculate the expected costs for each of the instance type options
         data = [(itype, self._get_instances_needed(x[0], x[1]), 
                  x[2], cur_price, avg_price)
-        #}
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'}
- 
-                 for availability_zone in avail_zone_to_subnet_id.keys()
                  for itype, x in Cluster.instance_info.items()
-                 for cur_price, avg_price in [self._get_spot_prices(itype, 
+                 for cur_price, avg_price in [self._get_spot_prices(itype)]]
         data = sorted(data, key=lambda x: (np.mean(x[3:5]) * x[1], -x[1]))
         chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
           data[0]
@@ -779,18 +792,15 @@ class Cluster():
         else:
             market_type = 'SPOT'
 
-        subnet_id = avail_zone_to_subnet_id[availability_zone] 
-
-        return subnet_id, InstanceGroup(int(count),
+        return InstanceGroup(int(count),
                              'CORE',
                              chosen_type,
                              market_type,
                              'Core instance group',
                              '%.3f' % (1.03 * on_demand_price))
+                             
 
-    def _get_spot_prices(self, 
-                         instance_type, 
-                         availability_zone,
+    def _get_spot_prices(self, instance_type, 
                          tdiff=datetime.timedelta(days=1)):
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
@@ -801,7 +811,7 @@ class Cluster():
                     end_time=datetime.datetime.utcnow().isoformat(),
                     instance_type=instance_type,
                     product_description='Linux/UNIX (Amazon VPC)',
-                    availability_zone=availability_zone)]
+                    availability_zone='us-east-1c')]
         timestamps, prices = zip(*(data[::-1]))
 
         timestamps = np.array(
@@ -1018,8 +1028,6 @@ class Cluster():
                        self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
             raise MapReduceError('Error loading job into Hadoop. '
                                  'See earlier logs for job logs')
-                                 'See earlier logs for job logs')
-
 
 class ClusterSSHConnection:
     '''Class that allows an ssh connection to the master cluster node.'''
@@ -1053,7 +1061,6 @@ class ClusterSSHConnection:
 
     def put_file(self, local_path, remote_path):
         '''Copies a file from the local path to the cluster.
-
         '''
         
         _log.info("Copying %s to %s" % (local_path,
@@ -1077,7 +1084,6 @@ class ClusterSSHConnection:
 
     def execute_remote_command(self, cmd):
         '''Executes a command on the master node.
-
         Returns stdout of the process, or raises an Exception if the
         process failed.
         '''
