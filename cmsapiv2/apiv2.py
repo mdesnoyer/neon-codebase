@@ -167,28 +167,29 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     pass
 
     def parse_args(self, keep_token=False):
-        self.args = {}
+        args = {}
         if len(self.request.query_arguments) > 0:
             for key, value in self.request.query_arguments.iteritems():
                 if key not in ['share_token', 'token'] or keep_token:
-                    self.args[key] = value[0]
+                    args[key] = value[0]
         if len(self.request.body) > 0:
             content_type = self.request.headers.get('Content-Type', None)
             # Allow either multipart/form-data or application/json.
             if content_type:
                 if 'multipart/form-data' in content_type:
                     # Update on tornado's body arguments previously parsed.
-                    self.args.update({k: v[0] for k, v
+                    args.update({k: v[0] for k, v
                                  in self.request.body_arguments.items()})
                 elif 'application/json' in content_type:
                     bjson = json.loads(self.request.body)
                     for key, value in bjson.items():
                         if key != 'token' or keep_token:
-                            self.args[key] = value
+                            args[key] = value
             else:
                 raise BadRequestError(
                     'Content-Type must be JSON or multipart/form-data')
 
+        self.args = args
         return self.args
 
     def set_account_id(request):
@@ -1097,6 +1098,8 @@ class CustomVoluptuousTypes():
     def TagType():
         '''Check value is valid TagType'''
         def f(tag_type):
+            if tag_type is None:
+                return neondata.TagType.COLLECTION
             if tag_type in [neondata.TagType.VIDEO, neondata.TagType.COLLECTION]:
                 return tag_type
             raise Invalid('Invalid TagType %s' % tag_type)

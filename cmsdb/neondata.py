@@ -1701,18 +1701,44 @@ class StoredObject(object):
 
 
 class Searchable(object):
+    '''A search interface used with classes dervied from StoredObject
+
+    Searchable's keys method returns a list of keys of matching StoredObjects.
+    Its objects method return a list of instances. The arguments of each method
+    are the natural map from attributes of the class, e.g., to find videos
+    owned by an account "a1b1", use VideoMetadata.objects(account_id="a1b1").
+    There are also methods that give the min and max updated times since
+    searching often is paginated by time called keys_and_times and
+    objects_and_times.
+
+    Subclasses must implement:
+
+        _get_search_arguments: Returns list of string, where each is a valid
+            search key. Typically a subset of the storedobject's attributes.
+            Attempting a search with a key not in the list raises KeyError.
+            Example:
+                return ['account_id', 'limit', 'name', 'offset', 'query']
+
+        _get_where_part: If searching on a "query" argument, this function shall
+            return the "this LIKE %that%"-like wildcard expression for the where
+            clause, e.g., if query searches within the object's name:
+
+            Example:
+                if key == 'query':
+                    return "_data->>'name' ~* %s"
+
+    Subclasses can implement:
+
+        _get_join_part: Handle objects backed by two tables. Shall return a
+            string in the form 'JOIN table AS alias ON alias.key = t.key' (note,
+            the primary table is generally aliased to 't').
+
+        Example:
+            "JOIN request AS r ON t._data->>'job_id' = r._data->>'job_id'"'''
 
     @staticmethod
     def _get_search_arguments():
         raise NotImplementedError('Add list of valid args in subclass')
-
-    @staticmethod
-    def _get_join_part():
-        '''Add join clause if needed
-
-        Example: "JOIN request AS r ON t._data->>'job_id' = r._data->>'job_id'"'''
-        return ''
-
 
     @staticmethod
     def _get_where_part(key, args):
@@ -1727,10 +1753,17 @@ class Searchable(object):
         '''
         raise NotImplementedError('If using query search, define a query handler')
 
+    @staticmethod
+    def _get_join_part():
+        '''Add join clause if needed
+
+        Example: "JOIN request AS r ON t._data->>'job_id' = r._data->>'job_id'"'''
+        return ''
+
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def keys(cls, **kwargs):
+    def search_for_keys(cls, **kwargs):
         '''Get list of keys that match search parameters in the database.
 
         Examples:
@@ -1747,7 +1780,7 @@ class Searchable(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def keys_and_times(cls, **kwargs):
+    def search_for_keys_and_times(cls, **kwargs):
         '''Like keys but returns min and max time of set, in 3-tuple.'''
         rows = yield cls._search(**kwargs)
         keys = [row['_data']['key'] for row in rows]
@@ -1761,7 +1794,7 @@ class Searchable(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def objects(cls, **kwargs):
+    def search_for_objects(cls, **kwargs):
         '''Get list of objects that match search parameters in the database.
 
         Examples:
@@ -1780,7 +1813,7 @@ class Searchable(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def objects_and_times(cls, **kwargs):
+    def search_for_objects_and_times(cls, **kwargs):
         '''Like objects but returns the min / max times of the set, as 3-tuple.'''
 
         rows = yield cls._search(**kwargs)
@@ -2366,10 +2399,10 @@ class MappingObject(object):
         values0 = kwargs[keys[0]]
         values1 = kwargs[keys[1]]
         if (
-            (type(values0) in [int, str, unicode]) or
+            (type(values0) in [str, unicode]) or
             (type(values0) is list and len(values0) is 1)
         ) and (
-            (type(values1) in [int, str, unicode]) or
+            (type(values1) in [str, unicode]) or
             (type(values1) is list and len(values1) is 1)
         ):
             return
@@ -2516,10 +2549,6 @@ class Tag(Searchable, StoredObject):
             'show_hidden',
             'until',
             'tag_type']
-    @staticmethod
-    def _get_where_part(key, args={}):
-        if key == 'query':
-            return "_data->>'name' ~* %s"
 
     def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
         tag_id = tag_id or uuid.uuid4().hex
@@ -2533,6 +2562,11 @@ class Tag(Searchable, StoredObject):
             TagType.VIDEO, TagType.COLLECTION] else None
 
         super(Tag, self).__init__(tag_id)
+
+    @staticmethod
+    def _get_where_part(key, args={}):
+        if key == 'query':
+            return "_data->>'name' ~* %s"
 
     @staticmethod
     def _baseclass_name():

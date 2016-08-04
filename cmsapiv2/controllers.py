@@ -1048,6 +1048,7 @@ class TagHandler(ShareableContentHandler):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList
+            'fields': CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
         tag_ids = self.args['tag_id'].split(',')
         # Filter on account.
