@@ -749,7 +749,7 @@ def _checkpoint_hdfs_to_s3(**kwargs):
         raise
 
 
-def _compute_cluster_capacity_zero():
+def _compute_cluster_capacity_zero(op_kwargs):
     """
     Bring down the number of task instances to zero
     """
