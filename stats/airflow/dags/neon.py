@@ -59,6 +59,7 @@ from airflow.operators.dummy_operator import DummyOperator
 from datetime import datetime, timedelta
 from boto.s3.connection import S3Connection
 import dateutils
+import dateutil.parser
 import logging
 import optparse
 import random
@@ -116,10 +117,15 @@ options.define('clicklog_period', default=3, type=int,
                help='How often to run the clicklog job in hours')
 options.define('max_task_instances', default=30, type=int,
                help='Maximum number of task instances to request')
-options.define('full_run_input_path', default='s3://neon-tracker-logs-v2/v2.2/*/*/*/*',
-                type=str, help='input path for first run')
-options.define('airflow_start_date', default='2016, 7, 22',
-                type=str, help='airflow start date')
+options.define('full_run_input_path', 
+               default='s3://neon-tracker-logs-v2/v2.2/*/*/*/*', type=str, 
+               help='input path for first run')
+options.define('airflow_start_date', default='2016, 7, 22', type=str, 
+               help=('The date when first run of airflow will take '
+                    'place. Always give the current UTC date as the '
+                    'start date so that there is no large backfill'))
+options.define('notify_email', default='ops@neon-lab.com', type=str,
+               help='email address for airflow notifications')
 
 
 # Use Neon's options module for configuration parsing
@@ -147,7 +153,7 @@ EPOCH = dateutils.timezone(datetime(1970, 1, 1), timezone='utc')
 PROTECTED_PREFIXES = [r'^/$', r'v[0-9].[0-9]']
 
 # Use the current UTC date whenever rebuilding Airflow from scratch
-airflow_start_date = datetime.strptime(options.airflow_start_date, '%Y, %m, %d')
+airflow_start_date = dateutil.parser.parse(options.airflow_start_date)
 
 class ClusterDown(Exception): pass
 
@@ -223,8 +229,8 @@ def _get_s3_cleaned_prefix(execution_date, prefix=''):
     :return: S3 key prefix string
     :return type: str
     """
-    return _do_s3_prefix_fixup(
-        os.path.join(prefix, execution_date.strftime("%Y/%m/%d/%H"), ''))
+    return _do_s3_prefix_fixup(os.path.join(prefix, 
+                               execution_date.strftime("%Y/%m/%d/%H"), ''))
 
 
 def _get_s3_input_files(dag, execution_date, task, input_path):
@@ -309,7 +315,7 @@ def _get_s3_tuple(url):
     return u.netloc, _do_s3_prefix_fixup(u.path)
 
 
-def _delete_s3_prefix(bucket, prefix):
+def _delete_s3_prefix(bucket, prefix, delete_special=None):
     """
 
     :param prefix: S3 Key prefix
@@ -324,8 +330,14 @@ def _delete_s3_prefix(bucket, prefix):
 
     s3 = S3Connection()
 
-    for key in s3.get_bucket(bucket).list(prefix):
-        key.delete()
+    if delete_special:
+        for key in s3.get_bucket(bucket).list(prefix):
+            if re.search('folder', key.name):
+                _log.info("Found $folder$ file in %s, deleting it" % key.name)
+                key.delete()
+    else:
+        for key in s3.get_bucket(bucket).list(prefix):
+            key.delete()
 
     return True
 
@@ -355,23 +367,17 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
 
     _log.info('deleting previously cleaned files from prefix {prefix}'.format(
         prefix=cleaned_prefix))
-    for key in s3.get_bucket(output_bucket).list(prefix=cleaned_prefix):
-        _log.info('key {key} found'.format(key=key.name))
-        if not re.search('cleaned', key.name):
-            _log.error(('key prefix, {key}, does not contain the string '
-                       '\'cleaned\'').format(key=key.name))
-            return False
-        _log.info('deleting {key}'.format(key=key.name))
-        key.delete()
+
+    delete_keys = _delete_s3_prefix(output_bucket, 
+                                    cleaned_prefix)
 
     # Wait for the $folder$ to show up, then delete it
     time.sleep(120)
 
     # delete the _$folder$ key if it exists
-    for key in s3.get_bucket(output_bucket).list(prefix=output_prefix):
-        if re.search('folder', key.name):
-            _log.info("Found $folder$ file in %s, deleting it" % key.name)
-            key.delete()
+    delete_keys = _delete_s3_prefix(output_bucket, 
+                                    output_prefix, 
+                                    delete_special=True)
 
 
 def check_for_prefix(tai_prefix, bucket_name):
@@ -382,7 +388,7 @@ def check_for_prefix(tai_prefix, bucket_name):
 
     bucket = s3.get_bucket(bucket_name)
     list_prefix = bucket.list(prefix=tai_prefix, delimiter='/')
-    prefix_exists = [prefixes.name for prefixes in list_prefix if prefixes.name]
+    prefix_exists = any([prefixes.name for prefixes in list_prefix if prefixes.name])
 
     return True if prefix_exists else False
 
@@ -401,18 +407,19 @@ def get_keys(tai_prefix, bucket_name):
 
 def check_first_run(execution_date):
     """
-    Check if this is the first run and return true if it is. Also return true if it is the first instance
-    of the run
+    Check if this is the first run and return true if it is. Also return 
+    true if it is the initial data load cycle.
     """
     first_run=False
-    first_instance_run=False
+    initial_data_load=False
 
-    if execution_date.strftime("%Y/%m/%d") == clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+    if execution_date.strftime("%Y/%m/%d") == \
+       clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
         first_run=True
         if execution_date.strftime("%H") == '00':
-            first_instance_run=True
+            initial_data_load=True
 
-    return first_run, first_instance_run
+    return first_run, initial_data_load
 
 
 # ----------------------------------
@@ -448,12 +455,13 @@ def _stage_files(**kwargs):
     task = kwargs['task_instance_key_str']
 
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run(execution_date)
-    if is_first_run and is_first_instance_run:
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
+    if is_first_run and is_initial_data_load:
         _log.info("This is first run, skipping of stage files as none would exist")
         return
 
-    # Check if this is the first run of the day, if so pull the previous day files for processing
+    # Check if this is the first run of the day, if so pull the 
+    # previous day files for processing
     if execution_date.strftime("%H") == '00':
         staging_date = execution_date - timedelta(days=1)
     else:
@@ -476,17 +484,18 @@ def _stage_files(**kwargs):
 
     # Copy files to staging location
     if input_files:
-        for keys_to_copy in input_files:
-            keys_to_copy_split = keys_to_copy.split('/')
+        for key_to_copy in input_files:
+            key_to_copy_split = key_to_copy.split('/')
 
             bucket = s3.get_bucket(input_bucket)
 
-            _log.info(("Copying from bucket {src_bucket} to {dest_bucket}").format(src_bucket=keys_to_copy, 
-                        dest_bucket=os.path.join(output_prefix, keys_to_copy_split[-1])))
+            _log.info(("Copying from bucket {src_bucket} to {dest_bucket}").
+                    format(src_bucket=key_to_copy, 
+                    dest_bucket=os.path.join(output_prefix, key_to_copy_split[-1])))
 
-            bucket.copy_key(os.path.join(output_prefix, keys_to_copy_split[-1]), 
+            bucket.copy_key(os.path.join(output_prefix, key_to_copy_split[-1]), 
                             str(bucket.name), 
-                            keys_to_copy,
+                            key_to_copy,
                             storage_class='REDUCED_REDUNDANCY')
     else:
         _log.warning("{task}: there were no files to stage".format(task=task))
@@ -523,9 +532,9 @@ def _run_mr_cleaning_job(**kwargs):
                             'target', options.mr_jar)
 
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run(execution_date)
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
 
-    if is_first_run and is_first_instance_run:
+    if is_first_run and is_initial_data_load:
         hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
         hdfs_dir = 'mnt/cleaned'
         cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
@@ -568,11 +577,11 @@ def _load_impala_table(**kwargs):
     cluster.connect()
 
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run(execution_date)
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
 
     # The first run is going to be big. So provision sufficient number of task instances to enable
     # faster completion. Bring down the number of task instances to zero later on when complete
-    if is_first_run and is_first_instance_run:
+    if is_first_run and is_initial_data_load:
         _log.info("This is first & big run, bumping up the num of task instances to %s" %
             options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
@@ -612,9 +621,9 @@ def _delete_staging_files(**kwargs):
     task = kwargs['task_instance_key_str']
     
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run(execution_date)
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
 
-    if is_first_run and is_first_instance_run:
+    if is_first_run and is_initial_data_load:
         _log.info("This is first run, skipping delete of stage files as none would exist")
         return
 
@@ -632,7 +641,7 @@ def _execution_date_has_input_files(**kwargs):
     branch. If not, send to the no input files end.
     
     :param kwargs:
-    :return:
+    :return: the branch path for airflow to follow
     """
     dag = kwargs['dag']
     execution_date = kwargs['execution_date']
@@ -643,10 +652,10 @@ def _execution_date_has_input_files(**kwargs):
     # Check if this is the first run and allow only first hour run ('00') to run
     # Skip all other runs for the current date. This will get get processed at 
     # hour ('00') run of next day. This is to ensure to minimize the backfill
-    is_first_run, is_first_instance_run = check_first_run(execution_date)
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
 
     if is_first_run:
-        if is_first_instance_run:
+        if is_initial_data_load:
             _log.info("This is first instance of run, skipping the check for existence of files")
             return 'stage_files'
         else:
@@ -664,19 +673,16 @@ def _execution_date_has_input_files(**kwargs):
     else:
         return 'no_input_files'
 
-def _update_table_build_times(**kwargs):
 
+def _update_table_build_times(**kwargs):
+    """
+    Update the table_build_times impala table. This is used by mastermind
+    to read the new stats.
+    """
     execution_date = kwargs['execution_date']
 
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
-    
-    # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run(execution_date)
-
-    if is_first_run and is_first_instance_run:
-        _log.info("First & big run is complete, bring down the num of task instances to zero")
-        cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
     stats.impala_table.update_table_build_times(cluster)
 
@@ -710,9 +716,9 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     execution_date = kwargs['execution_date']
 
     # Check if this is the first run and take appropriate action
-    is_first_run, is_first_instance_run = check_first_run(execution_date)
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
 
-    if is_first_run and is_first_instance_run:
+    if is_first_run and is_initial_data_load:
         pass
     else:
         _log.info("S3 copy not applicable for this run")
@@ -743,13 +749,30 @@ def _checkpoint_hdfs_to_s3(**kwargs):
         raise
 
 
+def _compute_cluster_capacity_zero(**kwargs):
+    """
+    Bring down the number of instances to zero
+    """
+    execution_date = kwargs['execution_date']
+
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
+
+    if is_first_run and is_initial_data_load:
+        _log.info("First & big run is complete, bring down the num of task instances to zero")
+        cluster.change_instance_group_size(group_type='TASK', new_size=0)
+
+
 # ----------------------------------
 # AIRFLOW
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
     'start_date': airflow_start_date,
-    'email': ['nazeer@neon-lab.com'],
+    'email': [options.notify_email],
     'email_on_failure': True,
     'email_on_retry': True,
     'retries': 3,
@@ -830,6 +853,9 @@ mr_cleaning_job = PythonOperator(
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
     priority_weight=8,
     execution_timeout=timedelta(minutes=600),
+    on_success_callback=_compute_cluster_capacity_zero,
+    on_failure_callback=_compute_cluster_capacity_zero,
+    on_retry_callback=_compute_cluster_capacity_zero,
     depends_on_past=True)
 mr_cleaning_job.set_upstream(stage_files)
 
@@ -884,7 +910,10 @@ update_table_build_times = PythonOperator(
     dag=clicklogs,
     provide_context=True,
     priority_weight=10,
-    python_callable=_update_table_build_times)
+    python_callable=_update_table_build_times,
+    on_success_callback=_compute_cluster_capacity_zero,
+    on_failure_callback=_compute_cluster_capacity_zero,
+    on_retry_callback=_compute_cluster_capacity_zero)
 update_table_build_times.set_upstream(load_impala_tables)
 
 
