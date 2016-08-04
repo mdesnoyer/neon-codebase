@@ -749,21 +749,15 @@ def _checkpoint_hdfs_to_s3(**kwargs):
         raise
 
 
-def _compute_cluster_capacity_zero(**kwargs):
+def _compute_cluster_capacity_zero():
     """
-    Bring down the number of instances to zero
+    Bring down the number of task instances to zero
     """
-    execution_date = kwargs['execution_date']
-
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
-    # Check if this is the first run and take appropriate action
-    is_first_run, is_initial_data_load = check_first_run(execution_date)
-
-    if is_first_run and is_initial_data_load:
-        _log.info("First & big run is complete, bring down the num of task instances to zero")
-        cluster.change_instance_group_size(group_type='TASK', new_size=0)
+    _log.info("Bringing down the num of task instances to zero")
+    cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
 
 # ----------------------------------
