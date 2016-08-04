@@ -1703,13 +1703,15 @@ class StoredObject(object):
 class Searchable(object):
     '''A search interface used with classes dervied from StoredObject
 
-    Searchable's keys method returns a list of keys of matching StoredObjects.
-    Its objects method return a list of instances. The arguments of each method
-    are the natural map from attributes of the class, e.g., to find videos
-    owned by an account "a1b1", use VideoMetadata.objects(account_id="a1b1").
+    Searchable's search_keys method returns a list of keys of matching
+    StoredObjects. Its search_objects method return a list of instances. The
+    arguments of each method are the natural map from attributes of the class,
+    e.g., to find videos owned by an account "a1b1", use
+    VideoMetadata.objects(account_id="a1b1").
+
     There are also methods that give the min and max updated times since
-    searching often is paginated by time called keys_and_times and
-    objects_and_times.
+    searching often is paginated by time called search_keys_and_times and
+    search_objects_and_times.
 
     Subclasses must implement:
 
@@ -1774,7 +1776,7 @@ class Searchable(object):
               {'_data': {"key": 3, "account_id": 'a', ...}]
             yields [1, 3]'''
         kwargs['async'] = True
-        keys_and_times = yield cls.keys_and_times(**kwargs)
+        keys_and_times = yield cls.search_for_keys_and_times(**kwargs)
         raise tornado.gen.Return(keys_and_times[0])
 
     @classmethod
@@ -1807,7 +1809,7 @@ class Searchable(object):
                 <Searchable instance with key 1>,
                 <Searchable instance with key 3>]'''
         kwargs['async'] = True
-        objects_and_times = yield cls.objects_and_times(**kwargs)
+        objects_and_times = yield cls.search_for_objects_and_times(**kwargs)
         raise tornado.gen.Return(objects_and_times[0])
 
     @classmethod
@@ -5992,7 +5994,7 @@ class VideoMetadata(Searchable, StoredObject):
                  serving_enabled=True, custom_data=None,
                  publish_date=None, hidden=None, share_token=None,
                  job_results=None, non_job_thumb_ids=None,
-                 bad_tids=None, tag_ids=None):
+                 bad_tids=None, tag_id=None):
         super(VideoMetadata, self).__init__(video_id)
         super(VideoMetadata, self).__init__(video_id)
         # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
@@ -6042,7 +6044,7 @@ class VideoMetadata(Searchable, StoredObject):
         self.hidden = hidden
 
         # Tag ids associate lists of thumbnails to the video.
-        self.tag_ids = tag_ids or []
+        self.tag_id = tag_id
 
     @staticmethod
     def _get_search_arguments():
