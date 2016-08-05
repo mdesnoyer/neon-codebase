@@ -2728,7 +2728,7 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         keys = yield Tag.search_for_keys(async=True)
         self.assertEqual([tag.get_id()], keys)
         tags = yield Tag.search_for_objects(async=True)
-        self.assertIn(tag.get_id(), [t.get_id() for t in tags])
+        self.assertEqual([tag.get_id()], [t.get_id() for t in tags])
 
     @tornado.testing.gen_test
     def test_search_acct(self):
@@ -2739,7 +2739,7 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         acct_tag = Tag(account_id=self.account_id)
         yield acct_tag.save(async=True)
         keys = yield Tag.search_for_keys(account_id=self.account_id, async=True)
-        self.assertIn(acct_tag.get_id(), keys)
+        self.assertEqual([acct_tag.get_id()], keys)
 
     @tornado.testing.gen_test
     def test_search_acct_and_name(self):
