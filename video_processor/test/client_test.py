@@ -23,6 +23,7 @@ import cmsdb.cdnhosting
 from cmsdb import neondata
 from cvutils.imageutils import PILImageUtils
 import integrations
+from itertools import chain
 import json
 import logging
 from mock import MagicMock, patch, ANY
@@ -1778,7 +1779,6 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(len(video_meta.job_results), 1)
         self.assertEquals(len(video_meta.job_results[0].thumbnail_ids), 0)
-        
 
     @tornado.testing.gen_test
     def test_no_thumbnails_found_no_default_thumb(self):
@@ -2023,10 +2023,9 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         with self.assertRaises(Exception): 
             tas = yield self.vprocessor._get_email_template_args(video_data)
 
+
 class SmokeTest(test_utils.neontest.AsyncTestCase):
-    ''' 
-    Smoke test for the video processing client
-    '''
+    '''Smoke test for the video processing client'''
     def setUp(self):
         super(SmokeTest, self).setUp()
         statemon.state._reset_values()
@@ -2045,7 +2044,6 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
         cdn.save()
 
-        self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.OoyalaApiRequest(
             'job1', self.api_key,
             'int1', 'vid1',
@@ -2054,6 +2052,19 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'http://callback.com',
             'http://default_thumb.jpg')
         self.api_request.save()
+
+        self.tag = neondata.Tag(
+            None,
+            account_id=na.get_id(),
+            name='Good Images')
+        self.tag.save()
+
+        self.video_id = '%s_vid1' % self.api_key
+        self.video = neondata.VideoMetadata(
+            self.video_id,
+            request_id=self.api_request.job_id,
+            tag_id=self.tag.get_id())
+        self.video.save()
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
@@ -2074,21 +2085,22 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.job_delete_mock = self._future_wrap_mock(
             self.job_queue_mock.delete_message)
         self.job_delete_mock.return_value = True
-        
+
         self.job_read_mock = self._future_wrap_mock(
             self.job_queue_mock.read_message)
         self.job_message = Message()
         self.job_read_mock.side_effect = [self.job_message, None]
-        
+
         self.job_hide_mock = self._future_wrap_mock(
             self.job_queue_mock.hide_message)
-        
+
         # Mock out the video download
         self.client_s3_patcher = patch('video_processor.client.S3Connection')
         self.mock_conn2 = self.client_s3_patcher.start()
         self.mock_conn2.return_value = self.s3conn
-        self.test_video_file = os.path.join(os.path.dirname(__file__), 
-        "test.mp4") 
+        self.test_video_file = os.path.join(
+            os.path.dirname(__file__),
+            "test.mp4")
         self.vid_bucket = self.s3conn.create_bucket('my-videos')
         vid_key = self.vid_bucket.new_key('test.mp4')
         vid_key.set_contents_from_file(open(self.test_video_file, 'rb'))
@@ -2115,7 +2127,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                 return self.callback_mock(request)
             else:
                 return HTTPResponse(request, 200)
-                    
+
         self.http_mock.side_effect = _http_response
 
         # Mock out cloudinary
@@ -2129,7 +2141,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.model_patcher = patch(
             'video_processor.client.model.generate_model')
         self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
-        self.model_version = "test" 
+        self.model_version = "test"
         self.model = MagicMock()
         load_model_mock = self.model_patcher.start()
         load_model_mock.return_value = self.model
@@ -2160,7 +2172,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.video_client = VideoClient(
             'some/dir/my_model',
             multiprocessing.BoundedSemaphore(1))
-        
+
     def tearDown(self):
         self.aquila_conn_patcher.stop()
         self.s3_patcher.stop()
@@ -2261,6 +2273,14 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             len([x for x in thumbs if
                  x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
+
+        # Validate each thumb is tagged.
+        all_thumb_ids = set(
+            chain(*[j.thumbnail_ids + j.bad_thumbnail_ids
+                for j in video_meta.job_results]))
+        tagged_thumb_ids = set(
+            neondata.TagThumbnail.get(tag_id=video_meta.tag_id))
+        self.assertEqual(all_thumb_ids, tagged_thumb_ids)
 
     @tornado.testing.gen_test
     def test_reprocessing_smoke(self):

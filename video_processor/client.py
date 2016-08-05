@@ -208,7 +208,7 @@ class VideoProcessor(object):
             request_id=self.job_params['job_id'],
             video_url=self.job_params['video_url'],
             i_id=integration_id)
-    
+
         #Video vars
         self.model = model
         self.model_version = model_version
@@ -1013,9 +1013,11 @@ class VideoProcessor(object):
 
         # Set the association of the video tag and each thumbnail.
         if(new_video_metadata.tag_id):
-            yield neondata.TagThumbnail.save_many(
+            _tag_thumb_ids = (video_result.thumbnail_ids +
+                video_result.bad_thumbnail_ids)
+            ct = yield neondata.TagThumbnail.save_many(
                 tag_id=new_video_metadata.tag_id,
-                thumbnail_id=known_tids,
+                thumbnail_id=_tag_thumb_ids,
                 async=True)
 
         # Enable the video to be served if we have any thumbnails available
