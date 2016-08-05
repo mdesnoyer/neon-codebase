@@ -2545,6 +2545,24 @@ class TagThumbnail(MappingObject):
 class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(cls, key):
+        '''Overrides parent to also delete associations of tag.'''
+
+        # Delete associations.
+        thumbnail_ids = yield TagThumbnail.get(
+            tag_id=key,
+            async=True)
+        if thumbnail_ids:
+            yield TagThumbnail.delete_many(
+                tag_id=key,
+                thumbnail_id=thumbnail_ids,
+                async=True)
+        # Delete tag itself.
+        yield super(Tag, cls).delete(key, async=True)
+
     @staticmethod
     def _get_search_arguments():
         return [
@@ -5560,6 +5578,10 @@ class ThumbnailMetadata(StoredObject):
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
         return self.key.split('_')[0]
+
+    @staticmethod
+    def get_account_id_from_tid(tid):
+        return tid.split('_')[0]
     
     def get_metadata(self):
         ''' get a dictionary of the thumbnail metadata
@@ -5602,7 +5624,7 @@ class ThumbnailMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def add_image_data(self, image, video_info=None, cdn_metadata=None):
+    def add_image_data(self, image, video_info=None, cdn_metadata=None, save_objects=False):
         '''Incorporates image data to the ThumbnailMetadata object.
 
         Also uploads the image to the CDNs and S3.
@@ -5612,7 +5634,8 @@ class ThumbnailMetadata(StoredObject):
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
                        images. If this is None, it is looked up, which is
                        slow. If a source_crop is requested, the image is also
-                       cropped here.'''
+                       cropped here.
+        save_objects - Bool- If true, also save thumbnail at end of call'''
         image = PILImageUtils.convert_to_rgb(image)
         # Update the image metadata
         self.width = image.size[0]
@@ -5664,6 +5687,8 @@ class ThumbnailMetadata(StoredObject):
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
+        yield self.save(async=True)
+
     @tornado.gen.coroutine
     def score_image(self, predictor, image=None, save_object=False):
         '''Adds the model score to the image.
@@ -5690,8 +5715,10 @@ class ThumbnailMetadata(StoredObject):
                 x.model_score = self.model_score
                 x.model_version = self.model_version
                 x.features = self.features
-            new_thumb = yield ThumbnailMetadata.modify(self.key, _set_score,
-                                                       async=True)
+            new_thumb = yield ThumbnailMetadata.modify(
+                self.key,
+                _set_score,
+                async=True)
             if new_thumb:
                 self.__dict__ = new_thumb.__dict__
 

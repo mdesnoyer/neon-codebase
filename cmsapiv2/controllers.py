@@ -1038,23 +1038,67 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                }
 
 
+class ThumbnailAuthorize(object):
+    """Mixin for checking if thumbnails keys are authorized"""
+
+    def _authorize_thumb_ids_or_raise(self, tids):
+        """Check format of thumbnail id against request ids"""
+
+        if type(tids) is not list:
+            tids = [tids]
+
+        content_id = None
+        if self.share_payload:
+            content_id = self.share_payload['content_id']
+
+        for tid in tids:
+            try:
+                tid_int_vid = neondata.InternalVideoID.from_thumbnail_id(tid)
+                tid_acct_id = neondata.ThumbnailMetadata.get_account_id_from_tid(tid)
+            except ValueError:
+                raise ForbiddenError()
+            if tid_acct_id != self.account_id:
+                raise ForbiddenError()
+            if content_id and tid_int_vid != content_id:
+                raise ForbiddenError()
+
+    def _authorize_thumbs_or_raise(self, thumbs):
+        """Check ids in thumbnail object against request ids"""
+
+        if type(thumbs) is not list:
+            thumbs = [thumbs]
+
+        share_video_id = None
+        if self.share_payload:
+            share_video_id = self.share_payload['content_id']
+
+        for thumb in thumbs:
+            if thumb.get_account_id() != self.account_id:
+                raise ForbiddenError()
+            if self.share_payload and thumb.video_id != share_video_id:
+                raise ForbiddenError()
+
+
 '''*********************************************************************
 TagHandler
 *********************************************************************'''
-class TagHandler(ShareableContentHandler):
+class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList
-            'fields': CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
+
+        # Ensure tags are valid and permitted.
         tag_ids = self.args['tag_id'].split(',')
-        # Filter on account.
         account_id = self.args['account_id']
-        tags = yield neondata.Tag.get_many(tag_ids, async=True)
-        tags = [tag for tag in tags if tag and tag.account_id == account_id]
+        _tags = yield neondata.Tag.get_many(tag_ids, async=True)
+        tags = [t for t in _tags if t]
+        self._authorize_tags_or_raise(tags)
+
+        # Get dict of tag id to list of thumb id.
         thumbs = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
         result = {tag.get_id(): self.db2api(tag, thumbs[tag.get_id()]) for tag in tags if tag}
         self.success(result)
@@ -1068,8 +1112,7 @@ class TagHandler(ShareableContentHandler):
             'type': CustomVoluptuousTypes.TagType()
         })(self.args)
 
-        tag_type = self.args['type'] if self.args.get('type') \
-            else TagType.COLLECTION
+        tag_type = self.args.get('type', TagType.COLLECTION)
         tag = neondata.Tag(
             None,
             account_id=self.args['account_id'],
@@ -1077,9 +1120,12 @@ class TagHandler(ShareableContentHandler):
             tag_type=tag_type)
         yield tag.save(async=True)
 
-        thumb_ids = yield self._set_thumb_ids(
-            tag,
-            self.args.get('thumbnail_ids', '').split(','))
+        # Validate and save thumbnail associations.
+        _thumb_ids = self.args.get('thumbnail_ids')
+        _thumb_ids = _thumb_ids.split(',') if _thumb_ids else []
+        self._authorize_thumb_ids_or_raise(_thumb_ids)
+        thumb_ids = yield self._set_thumb_ids(tag, _thumb_ids)
+
         result = self.db2api(tag, thumb_ids)
         self.success(result)
 
@@ -1093,14 +1139,18 @@ class TagHandler(ShareableContentHandler):
             'type': CustomVoluptuousTypes.TagType()
         })(self.args)
 
+        # Validate.
+        thumb_ids = self.args.get('thumbnail_ids', '').split(',')
+        self._authorize_thumb_ids_or_raise(thumb_ids)
+
         # Update the tag itself.
         def _update(tag):
             if self.args['account_id'] != tag.account_id:
-                raise NotAuthorizedError('Account does not own tag')
+                raise ForbiddenError()
             if self.args.get('name'):
                 tag.name = self.args['name']
-            if self.args.get('type'):
-                tag.type = self.args['type']
+            tag.tag_type = self.args.get('type', TagType.COLLECTION)
+
         tag = yield neondata.Tag.modify(
             self.args['tag_id'],
             _update,
@@ -1108,7 +1158,7 @@ class TagHandler(ShareableContentHandler):
 
         thumb_ids = yield self._set_thumb_ids(
             tag,
-            self.args.get('thumbnail_ids', '').split(','))
+            thumb_ids)
         result = self.db2api(tag, thumb_ids)
         self.success(result)
 
@@ -1118,40 +1168,35 @@ class TagHandler(ShareableContentHandler):
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
         })(self.args)
+
         tag = yield neondata.Tag.get(self.args['tag_id'], async=True)
+        self._authorize_tags_or_raise(tag)
+
         if not tag:
             raise NotFoundError('That tag is not found')
-        if tag.account_id != self.args['account_id']:
-            raise NotAuthorizedError('Tag not owned by this account')
-        thumbnail_ids = yield neondata.TagThumbnail.get(
-            tag_id=self.args['tag_id'],
-            async=True)
-        # Delete associations.
-        if thumbnail_ids:
-            yield neondata.TagThumbnail.delete_many(
-                tag_id=self.args['tag_id'],
-                thumbnail_id=thumbnail_ids,
-                async=True)
+
         # Delete the tag.
         yield neondata.Tag.delete(tag.get_id(), async=True)
         self.success({'tag_id': tag.get_id()})
 
     def db2api(self, tag, thumb_ids):
+        '''Converts Tag'''
         return {
             'tag_id': tag.get_id(),
             'account_id':  tag.account_id,
             'name': tag.name,
-            'thumbnails': thumb_ids,
+            'thumbnail_ids': thumb_ids,
             'tag_type': tag.tag_type}
 
     @tornado.gen.coroutine
     def _set_thumb_ids(self, tag, thumb_ids):
 
-        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
+        _thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
+        thumbs = [t for t in _thumbs if t]
         if thumbs:
-            valid_thumb_ids = [
-                thumb.get_id() for thumb in thumbs
-                if thumb and thumb.get_account_id() == tag.account_id]
+            if(any([th.get_account_id() != tag.account_id for th in thumbs])):
+                raise ForbiddenError
+            valid_thumb_ids = [thumb.get_id() for thumb in thumbs]
             if valid_thumb_ids:
                 result = yield neondata.TagThumbnail.save_many(
                     tag_id=tag.get_id(),
@@ -1180,39 +1225,14 @@ class TagHandler(ShareableContentHandler):
                                  HTTPVerbs.PUT,
                                  HTTPVerbs.POST]}
 
-
-class ThumbnailAuthorize(object):
-    """Mixin for checking if thumbnails or their keys are authorized"""
-
-    def _authorize_tids_or_raise(self, tids):
-        """Check format of thumbnail id against request ids"""
-
-        share_video_id = None
-        if self.share_payload:
-            _, share_video_id = self.share_payload['content_id'].split('_', 2)
-
-        for tid in tids:
-            try:
-                a_id, v_id, t_id = tid.split('_', 3)
-            except ValueError:
-                raise ForbiddenError()
-            if a_id != self.account_id:
-                raise ForbiddenError()
-            if share_video_id and v_id != share_video_id:
-                raise ForbiddenError()
-
-    def _authorize_thumbs_or_raise(self, thumbs):
+    def _authorize_tags_or_raise(self, tags):
         """Check ids in thumbnail object against request ids"""
 
-        share_video_id = None
-        if self.share_payload:
-            share_video_id = self.share_payload['content_id']
+        if type(tags) is not list:
+            tags = [tags]
 
-        for thumb in thumbs:
-            if thumb.get_account_id() != self.account_id:
-                raise ForbiddenError()
-            if self.share_payload and thumb.video_id != share_video_id:
-                raise ForbiddenError()
+        if any([t for t in tags if t and t.account_id != self.account_id]):
+            raise ForbiddenError()
 
 
 '''*********************************************************************
@@ -1227,7 +1247,7 @@ class TagSearchExternalHandler(APIV2Handler):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             'limit': All(Coerce(int), Range(min=1, max=100)),
-            'name': str,
+            'query': str,
             'since': Coerce(float),
             'until': Coerce(float),
             'show_hidden': Coerce(bool),
@@ -1323,7 +1343,7 @@ class TagSearchInternalHandler(APIV2Handler):
         Schema({
             'account_id': All(Coerce(str), Length(min=1, max=256)),
             'limit': All(Coerce(int), Range(min=1, max=100)),
-            'name': str,
+            'query': str,
             'since': All(Coerce(float)),
             'until': All(Coerce(float)),
             'show_hidden': Coerce(bool),
@@ -1358,16 +1378,9 @@ ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
 
-    def _initialize_predictor(self):
-        '''Instantiate and connect an Aquila predictor.'''
-        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
-            options.model_autoscale_groups.split(','))
-        self.predictor = model.predictor.DeepnetPredictor(
-            port=options.model_server_port,
-            concurrency=options.request_concurrency,
-            aquila_connection=aquila_conn)
-        self.predictor.connect()
-        self.model_version = 'aqv1.1.250'
+    def initialize(self):
+        super(ThumbnailHandler, self).initialize()
+        self.predictor = None
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1471,14 +1484,16 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
                 image=self.image,
                 image_url=self.args.get('url'),
                 cdn_metadata=cdn,
-                async=True,
-                save_objects=True)
+                save_objects=True,
+                async=True)
         else:
-            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
-            # Score non-video image here.
-            yield self._score_image()
+            yield self.thumb.add_image_data(
+                self.image,
+                cdn_metadata=cdn,
+                save_objects=True,
+                async=True)
 
-        yield self.thumb.save(async=True)
+            yield self._score_image()
 
         # Set tags if requested.
         if self.args.get('tag_id'):
@@ -1510,8 +1525,8 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
                 return
         except IOError as e:
             # If an Image() can't be made, the client sent the wrong thing.
-            e.errno = 400
-            raise e
+            raise BadRequestError('Image invalid',
+                                  ResponseCode.HTTP_BAD_REQUEST)
         except KeyError:
             pass
 
@@ -1529,19 +1544,15 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
 
     @tornado.gen.coroutine
     def _score_image(self):
-        if not hasattr(self, 'predictor'):
-            self._initialize_predictor()
+        self._initialize_predictor()
         # Convert from PIL ImageFile to cv2 for predict.
         cv_image = PILImageUtils.to_cv(self.image)
-        yield self.thumb.score_image(self.predictor, cv_image, False)
+        yield self.thumb.score_image(self.predictor, cv_image, True)
 
     @tornado.gen.coroutine
     def _respond_with_thumb(self):
         """Success. Reload the thumbnail and return it."""
-        thumb = yield neondata.ThumbnailMetadata.get(
-            self.thumb.key,
-            async=True)
-        rv = yield self.db2api(thumb)
+        rv = yield self.db2api(self.thumb)
         self.success(rv, code=ResponseCode.HTTP_ACCEPTED)
 
     @tornado.gen.coroutine
@@ -1586,7 +1597,7 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
 
         query_tids = args['thumbnail_id'].split(',')
 
-        self._authorize_tids_or_raise(query_tids)
+        self._authorize_thumb_ids_or_raise(query_tids)
 
         fields = args.get('fields', None)
         if fields:
@@ -1620,6 +1631,21 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
         statemon.state.increment('get_thumbnail_oks')
         self.success(rv)
 
+    def _initialize_predictor(self):
+        '''Instantiate and connect an Aquila predictor.'''
+
+        # Check if model is already set.
+        if self.predictor:
+            return
+
+        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
+            options.model_autoscale_groups.split(','))
+        self.predictor = model.predictor.DeepnetPredictor(
+            port=options.model_server_port,
+            concurrency=options.request_concurrency,
+            aquila_connection=aquila_conn)
+        self.predictor.connect()
+
     @classmethod
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno', 'tag_ids',
@@ -1640,7 +1666,9 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
         elif field == 'thumbnail_id':
             retval = obj.key
         elif field == 'tag_ids':
-            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key, async=True)
+            tag_ids = yield neondata.TagThumbnail.get(
+                thumbnail_id=obj.key,
+                 async=True)
             retval = list(tag_ids)
         elif field == 'neon_score':
             retval = obj.get_neon_score(age=age, gender=gender)
@@ -1652,7 +1680,10 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
             urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
             retval = ThumbnailHelper.renditions_of(urls)
         elif field == 'feature_ids':
-            retval = ThumbnailHelper.get_feature_ids(obj, age=age, gender=gender)
+            retval = ThumbnailHelper.get_feature_ids(
+                obj,
+                age=age,
+                gender=gender)
         else:
             raise BadRequestError('invalid field %s' % field)
 
@@ -1870,7 +1901,7 @@ class VideoHelper(object):
                 tag_type='video',
                 name=api_request.video_title)
             yield tag.save(async=True)
-            video.tag_ids = [tag.get_id()]
+            video.tag_id = tag.get_id()
 
             # add the job id save the video
             video.job_id = api_request.job_id
@@ -2050,7 +2081,7 @@ class VideoHelper(object):
         """
         if fields is None:
             fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled', 'job_id', 'tag_ids', 'estimated_time_remaining']
+                      'testing_enabled', 'job_id', 'tag_id', 'estimated_time_remaining']
 
         new_video = {}
         for field in fields:
@@ -2117,8 +2148,6 @@ class VideoHelper(object):
             elif field == 'title':
                 if request:
                     new_video[field] = request.video_title
-                elif tag:
-                    new_video[field] = tag.video_title
             elif field == 'video_id':
                 new_video[field] = \
                   neondata.InternalVideoID.to_external(video.key)
@@ -2136,8 +2165,8 @@ class VideoHelper(object):
                 new_video[field] = video.updated
             elif field == 'url':
                 new_video[field] = video.url
-            elif field == 'tag_ids':
-                new_video[field] = video.tag_ids or []
+            elif field == 'tag_id':
+                new_video[field] = video.tag_id
             elif field == 'estimated_time_remaining':
                 if request.state == neondata.RequestState.PROCESSING:
                     new_video[field] = VideoHelper.get_estimated_remaining(
@@ -2193,10 +2222,10 @@ class VideoHandler(ShareableContentHandler):
         # Make sure that the external_video_ref is of a form we can handle
         id_match = re.match(neondata.InternalVideoID.VALID_EXTERNAL_REGEX,
                             args['external_video_ref'])
-        if (id_match is None or 
+        if (id_match is None or
             id_match.end() != len(args['external_video_ref'])):
             raise Invalid('Invalid video reference. It must work with the '
-                          'following regex for all characters: %s' % 
+                          'following regex for all characters: %s' %
                           neondata.InternalVideoID.VALID_EXTERNAL_REGEX)
 
         reprocess = args.get('reprocess', None)
@@ -2578,7 +2607,7 @@ class LiftStatsHandler(ThumbnailAuthorize, ShareableContentHandler):
 
         # Check that all the thumbs are keyed to the account.
         query_tids = args['thumbnail_ids'].split(',')
-        self._authorize_tids_or_raise([args['base_id']] + query_tids)
+        self._authorize_thumb_ids_or_raise([args['base_id']] + query_tids)
 
         base_thumb = yield neondata.ThumbnailMetadata.get(
             args['base_id'],
@@ -2802,13 +2831,16 @@ class VideoSearchExternalHandler(APIV2Handler):
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
             'until': All(Coerce(float)),
+            'show_hidden': All(Coerce(bool))
+
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        since = args.get('since', None)
-        until = args.get('until', None)
-        query = args.get('query', None)
+        since = args.get('since')
+        until = args.get('until')
+        query = args.get('query')
+        show_hidden = args.get('show_hidden')
 
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
@@ -2824,7 +2856,7 @@ class VideoSearchExternalHandler(APIV2Handler):
             limit,
             fields,
             base_url=base_url,
-            show_hidden=False)
+            show_hidden=show_hidden)
 
         statemon.state.increment(
             ref=_get_external_search_oks_ref,
