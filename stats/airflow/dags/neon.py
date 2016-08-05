@@ -754,10 +754,12 @@ def _compute_cluster_capacity_zero(op_kwargs):
     """
     Bring down the number of task instances to zero
     """
+    task_instnce = op_kwargs['task_instance']
+
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
-    _log.info("Bringing down the num of task instances to zero")
+    _log.info("{task}: Bringing down the num of task instances to zero".format(task=task_instnce))
     cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
 
