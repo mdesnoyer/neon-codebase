@@ -1515,7 +1515,7 @@ class TestAddingImageData(NeonDbTestCase):
         cdn_metadata = S3CDNHostingMetadata(bucket_name='customer-bucket',
                                             do_salt=False)
 
-        video_info = VideoMetadata('acct1_vid1', tag_ids=['tag_id'])
+        video_info = VideoMetadata('acct1_vid1', tag_id='tag_id')
         thumb_info = ThumbnailMetadata(None,
                                        ttype=ThumbnailType.CUSTOMUPLOAD,
                                        rank=-1,
@@ -2049,16 +2049,26 @@ class TestTagThumbnail(NeonDbTestCase):
     @tornado.testing.gen_test
     def test_get_has_save_delete(self):
         # Both order of keys.
-        given1 = {'tag_id': 100, 'thumbnail_id': '3sdf3rwf', 'async': True}
-        given2 = {'thumbnail_id': '3sdf3rwf', 'tag_id': 101, 'async': True}
+        given1 = {'tag_id': '100', 'thumbnail_id': '3sdf3rwf', 'async': True}
+        given2 = {'thumbnail_id': '3sdf3rwf', 'tag_id': '101', 'async': True}
 
         # Start with nothing.
-        has_result = yield TagThumbnail.has(**given1)
+        has_result = TagThumbnail.has(tag_id='100', thumbnail_id='3sdf3rwf')
         self.assertFalse(has_result)
+        get_result = TagThumbnail.get(tag_id='100')
+        self.assertFalse(get_result)
 
         # Add one row and check.
         save_result = yield TagThumbnail.save(**given1)
         self.assertTrue(save_result)
+
+        get_result = TagThumbnail.get(tag_id=given1['tag_id'])
+        self.assertEqual([given1['thumbnail_id']], get_result)
+        get_result = TagThumbnail.get(thumbnail_id=given1['thumbnail_id'])
+        self.assertEqual([given1['tag_id']], get_result)
+        get_result = TagThumbnail.get(tag_id=given2['tag_id'])
+        self.assertFalse(get_result)
+
         has_result = yield TagThumbnail.has(**given1)
         self.assertTrue(has_result)
         has_result = yield TagThumbnail.has(**given2)
@@ -2067,6 +2077,10 @@ class TestTagThumbnail(NeonDbTestCase):
         # Saving again, 0 row count change.
         save_result = yield TagThumbnail.save(**given1)
         self.assertFalse(save_result)
+        get_result = TagThumbnail.get(tag_id=given1['tag_id'])
+        self.assertEqual([given1['thumbnail_id']], get_result)
+        get_result = TagThumbnail.get(tag_id=given2['tag_id'])
+        self.assertFalse(get_result)
 
         # Saving new tag: one row.
         save_result = yield TagThumbnail.save(**given2)
@@ -2075,6 +2089,8 @@ class TestTagThumbnail(NeonDbTestCase):
         self.assertTrue(has_result)
         has_result = yield TagThumbnail.has(**given2)
         self.assertTrue(has_result)
+        get_result = TagThumbnail.get(thumbnail_id='3sdf3rwf')
+        self.assertEqual({'100', '101'}, set(get_result))
 
         # Delete and check.
         del_result = yield TagThumbnail.delete(**given1)
@@ -2085,6 +2101,8 @@ class TestTagThumbnail(NeonDbTestCase):
         self.assertFalse(has_result)
         has_result = yield TagThumbnail.has(**given2)
         self.assertTrue(has_result)
+        get_result = TagThumbnail.get(thumbnail_id='3sdf3rwf')
+        self.assertEqual(['101'], get_result)
 
     @tornado.testing.gen_test
     def test_has_save_delete_many(self):
@@ -2153,32 +2171,35 @@ class TestTagThumbnail(NeonDbTestCase):
 
     @tornado.testing.gen_test
     def test_empty_get(self):
-        get_result = yield TagThumbnail.get(tag_id=None, async=True)
-        self.assertFalse(get_result)
+        result = yield TagThumbnail.get(tag_id=None, async=True)
+        self.assertEqual([], result)
 
     @tornado.testing.gen_test
     def test_empty_get_many(self):
         get_result = yield TagThumbnail.get_many(tag_id=[], async=True)
-        self.assertFalse(get_result)
+        self.assertEqual({}, get_result)
 
     @tornado.testing.gen_test
     def test_bad_call(self):
-        bad_input1 = {'bad_id': 100, 'thumbnail_id': '3sdf3rwf', 'async': True}
+
+        bad_input1 = {'bad_id': '100', 'thumbnail_id': '3sdf3rwf', 'async': True}
         with self.assertRaises(KeyError):
             yield TagThumbnail.save(**bad_input1)
         bad_input2 = {
             'thumbnail_id': '3sdf3rwf',
-            'tag_id': 100,
-            'bad_id': 15,
+            'tag_id': '100',
+            'bad_id': '15',
             'async': True}
         with self.assertRaises(KeyError):
             yield TagThumbnail.save(**bad_input2)
-        bad_input3 = {'thumbnail_id': None, 'tag_id': 100, 'async': True}
+        bad_input3 = {'thumbnail_id': None, 'tag_id': '100', 'async': True}
         with self.assertRaises(ValueError):
             yield TagThumbnail.save(**bad_input3)
-        bad_input4 = {'thumbnail_id': 123, 'tag_id': 'asdf', 'async': True}
+        bad_input4 = {'thumbnail_id': '123', 'tag_id': 'asdf', 'async': True}
         with self.assertRaises(TypeError):
             yield TagThumbnail.get(**bad_input4)
+        with self.assertRaises(ValueError):
+            yield TagThumbnail.get(tag_id=100, async=True)
 
 
 class BasePGNormalObject(object):
@@ -2705,7 +2726,7 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         tag = Tag()
         yield tag.save(async=True)
         keys = yield Tag.search_for_keys(async=True)
-        self.assertIn(tag.get_id(), keys)
+        self.assertEqual([tag.get_id()], keys)
         tags = yield Tag.search_for_objects(async=True)
         self.assertIn(tag.get_id(), [t.get_id() for t in tags])
 

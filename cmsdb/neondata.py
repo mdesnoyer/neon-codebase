@@ -2204,6 +2204,7 @@ class MappingObject(object):
 
         Example: for TagThumbnail, kwargs={'tag_id': 'a'}, yields
         list of thumbnail ids that are associated with 'a' in the db.'''
+
         _, value = cls._get_key_and_value(**kwargs)
         if not value:
             raise tornado.gen.Return([])
@@ -2391,6 +2392,8 @@ class MappingObject(object):
             raise KeyError('Unrecognized key in %s' % args.keys())
         if type(values) is not list:
             values = [values]
+        if [v for v in values if type(v) not in [str, unicode, None]]:
+            raise ValueError('Unhandled value type %s', values)
         return key, values
 
     @classmethod
@@ -2408,7 +2411,10 @@ class MappingObject(object):
             (type(values1) is list and len(values1) is 1)
         ):
             return
-        raise ValueError('Called with long list or object')
+        raise ValueError(
+            'Called with long list, int or object left:%s right:%s',
+            values0,
+            values1)
 
     @classmethod
     def _validate_keys(cls, keys):
@@ -2552,7 +2558,8 @@ class Tag(Searchable, StoredObject):
             'until',
             'tag_type']
 
-    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
+    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
+                 video_id=None):
         tag_id = tag_id or uuid.uuid4().hex
 
         # Owner
@@ -2562,6 +2569,7 @@ class Tag(Searchable, StoredObject):
         # System's definition of how this tag is used
         self.tag_type = tag_type if tag_type in [
             TagType.VIDEO, TagType.COLLECTION] else None
+        self.video_id = video_id
 
         super(Tag, self).__init__(tag_id)
 
@@ -6233,7 +6241,6 @@ class VideoMetadata(Searchable, StoredObject):
                 request_idx.append(cur_idx)
             cur_idx += 1
 
-        #requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)
         requests = yield NeonApiRequest.get_many(request_keys, async=True)
         for api_request, idx in zip(requests, request_idx):
             retval[idx] = api_request
@@ -6336,13 +6343,6 @@ class VideoMetadata(Searchable, StoredObject):
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
         yield VideoMetadata.delete(key, async=True)
-
-    @staticmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_by_tag(tag_ids):
-        '''Given a list of tag id, return a dict of id->video ids'''
-        return {t: [] for t in tag_ids}
 
 
 class VideoStatus(DefaultedStoredObject):
