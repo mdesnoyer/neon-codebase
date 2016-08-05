@@ -8939,6 +8939,26 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
 
     @tornado.testing.gen_test
+    def test_cannot_create_with_thumbnail_of_other_user(self):
+
+        # Mix valid thumbs and invalid thumb.
+        other_user_thumb = neondata.ThumbnailMetadata(
+            'otheruser_vid0_a0b1c2')
+        other_user_thumb.save()
+        ids = self.thumbnail_ids + [other_user_thumb.key]
+        random.shuffle(ids)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.url,
+                method='POST',
+                headers=self.headers,
+                body=json.dumps({
+                    'name': 'Failure',
+                    'thumbnail_ids': ','.join(ids)}))
+        self.assertEqual(ResponseCode.HTTP_FORBIDDEN, e.exception.code)
+
+    @tornado.testing.gen_test
     def test_delete(self):
         tag = neondata.Tag(account_id=self.account_id, name='Red')
         tag.save()
@@ -9054,9 +9074,9 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
         # Make some thumbnails.
         thumbnails = [neondata.ThumbnailMetadata(
-            '%s_%s' % (
-                uuid.uuid1().hex,
-                self.account_id))
+            '%s_vid0_%s' % (
+                self.account_id,
+                uuid.uuid1().hex))
               for _ in range(5)]
         # This won't appear in the results.
         removed_thumb = random.choice(thumbnails)
@@ -9111,6 +9131,45 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
                     given_thumb_ids,
                     set(_tag['thumbnail_ids']))
 
+    @tornado.testing.gen_test
+    def test_search_query_in_name(self):
+        wanted_tag = neondata.Tag(
+            uuid.uuid1().hex,
+            account_id=self.account_id,
+            name='Apple orange pear')
+        wanted_tag.save()
+        unwanted_tag = neondata.Tag(
+            uuid.uuid1().hex,
+            account_id=self.account_id,
+            name='Croissant bagel doughnut')
+        unwanted_tag.save()
+
+        # Query term in middle.
+        url = self.url + '?query=%s' % 'orange'
+        r = yield self.http_client.fetch(url, headers=self.headers)
+        self.assertEqual(ResponseCode.HTTP_OK, r.code)
+        r = json.loads(r.body)
+        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
+
+        # Case insensitive.
+        url = self.url + '?query=%s' % 'apple'
+        r = yield self.http_client.fetch(url, headers=self.headers)
+        self.assertEqual(ResponseCode.HTTP_OK, r.code)
+        r = json.loads(r.body)
+        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
+
+        # Regex style wildcards.
+        url = self.url + '?query=%s' % 'p..r'  # matches pear.
+        r = yield self.http_client.fetch(url, headers=self.headers)
+        self.assertEqual(ResponseCode.HTTP_OK, r.code)
+        r = json.loads(r.body)
+        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
+
+        url = self.url + '?query=%s' % 'pp.*r'  # matches apple pear.
+        r = yield self.http_client.fetch(url, headers=self.headers)
+        self.assertEqual(ResponseCode.HTTP_OK, r.code)
+        r = json.loads(r.body)
+        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
 
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
