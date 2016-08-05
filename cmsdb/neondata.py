@@ -2392,7 +2392,7 @@ class MappingObject(object):
             raise KeyError('Unrecognized key in %s' % args.keys())
         if type(values) is not list:
             values = [values]
-        if [v for v in values if type(v) not in [str, unicode, None]]:
+        if any([v for v in values if type(v) not in [str, unicode, None]]):
             raise ValueError('Unhandled value type %s', values)
         return key, values
 
@@ -5679,7 +5679,7 @@ class ThumbnailMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def add_image_data(self, image, video_info=None, cdn_metadata=None, save_objects=False):
+    def add_image_data(self, image, video_info=None, cdn_metadata=None):
         '''Incorporates image data to the ThumbnailMetadata object.
 
         Also uploads the image to the CDNs and S3.
@@ -5689,8 +5689,7 @@ class ThumbnailMetadata(StoredObject):
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
                        images. If this is None, it is looked up, which is
                        slow. If a source_crop is requested, the image is also
-                       cropped here.
-        save_objects - Bool- If true, also save thumbnail at end of call'''
+                       cropped here.'''
         image = PILImageUtils.convert_to_rgb(image)
         # Update the image metadata
         self.width = image.size[0]
@@ -5741,8 +5740,6 @@ class ThumbnailMetadata(StoredObject):
         yield [x.upload(image, self.key, s3_url, async=True,
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
-
-        yield self.save(async=True)
 
     @tornado.gen.coroutine
     def score_image(self, predictor, image=None, save_object=False):

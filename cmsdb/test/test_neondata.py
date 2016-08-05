@@ -2435,8 +2435,10 @@ class TestBillingPlans(NeonDbTestCase, BasePGNormalObject):
 
 class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
     def setUp(self):
-        # Create an account and request with a callback
         BasePGNormalObject.keys = [('dynamic', 'key'), ('static', 'a1')]
+
+        # Create an account and request with a callback
+        NeonUserAccount('acct1', 'key1').save()
         NeonApiRequest('j1', 'key1', 'vid1',
                        http_callback='http://some.where').save()
 

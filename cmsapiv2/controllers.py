@@ -1490,8 +1490,8 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
             yield self.thumb.add_image_data(
                 self.image,
                 cdn_metadata=cdn,
-                save_objects=True,
                 async=True)
+            yield self.thumb.save(async=True)
 
             yield self._score_image()
 
