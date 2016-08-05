@@ -2435,7 +2435,6 @@ class TestBillingPlans(NeonDbTestCase, BasePGNormalObject):
 
 class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
     def setUp(self):
-        BasePGNormalObject.keys = [('dynamic', 'key'), ('static', 'a1')]
 
         # Create an account and request with a callback
         NeonUserAccount('acct1', 'key1').save()
@@ -2447,6 +2446,11 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
             self.http_mocker.start().send_request, require_async_kw=True)
         self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         super(NeonDbTestCase, self).setUp()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key'), ('static', 'a1')]
+        super(NeonDbTestCase, cls).setUpClass()
 
     @classmethod
     def _get_object_type(cls):
