@@ -1085,25 +1085,6 @@ TagHandler
 class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
 
     @tornado.gen.coroutine
-    def get(self, account_id):
-        Schema({
-            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList
-        })(self.args)
-
-        # Ensure tags are valid and permitted.
-        tag_ids = self.args['tag_id'].split(',')
-        account_id = self.args['account_id']
-        _tags = yield neondata.Tag.get_many(tag_ids, async=True)
-        tags = [t for t in _tags if t]
-        self._authorize_tags_or_raise(tags)
-
-        # Get dict of tag id to list of thumb id.
-        thumbs = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
-        result = {tag.get_id(): self.db2api(tag, thumbs[tag.get_id()]) for tag in tags if tag}
-        self.success(result)
-
-    @tornado.gen.coroutine
     def post(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
@@ -1127,6 +1108,25 @@ class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
         thumb_ids = yield self._set_thumb_ids(tag, _thumb_ids)
 
         result = self.db2api(tag, thumb_ids)
+        self.success(result)
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList
+        })(self.args)
+
+        # Ensure tags are valid and permitted.
+        tag_ids = self.args['tag_id'].split(',')
+        account_id = self.args['account_id']
+        _tags = yield neondata.Tag.get_many(tag_ids, async=True)
+        tags = [t for t in _tags if t]
+        self._authorize_tags_or_raise(tags)
+
+        # Get dict of tag id to list of thumb id.
+        thumbs = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
+        result = {tag.get_id(): self.db2api(tag, thumbs[tag.get_id()]) for tag in tags if tag}
         self.success(result)
 
     @tornado.gen.coroutine

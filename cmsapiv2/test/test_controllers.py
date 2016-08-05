@@ -4119,6 +4119,8 @@ class TestThumbnailHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body(self):
 
+        start_thumb_ct = len(self.video.thumbnail_ids)
+
         thumbnail_ref = 'kevin'
         url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
             self.account_id_api_key, thumbnail_ref))
@@ -4138,7 +4140,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(response.code, 202)
 
         video = neondata.VideoMetadata.get(self.video.get_id())
-        self.assertEqual(len(video.thumbnail_ids), 2)
+        self.assertEqual(start_thumb_ct + 1, len(video.thumbnail_ids))
 
         thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[-1])
         self.assertEqual(thumbnail.external_id, 'kevin')
@@ -4230,7 +4232,7 @@ class TestThumbnailHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
 
-        self.assertEqual(1, len(self.video.thumbnail_ids))
+        start_thumb_ct = len(self.video.thumbnail_ids)
 
         url = self.get_url('/api/v2/%s/thumbnails?video_id=%s&url=%s' % (
             self.account_id_api_key,
@@ -4252,7 +4254,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(response.code, 202)
         video = neondata.VideoMetadata.get(self.video.get_id())
         thumbnail_ids = video.thumbnail_ids
-        self.assertEqual(len(video.thumbnail_ids), 3)
+        self.assertEqual(start_thumb_ct + 2, len(video.thumbnail_ids))
 
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
