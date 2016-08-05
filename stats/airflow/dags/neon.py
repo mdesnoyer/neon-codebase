@@ -174,6 +174,8 @@ def _cluster_status():
         :rtype : bool
         :return: True if the cluster is running
         """
+    _log.info('Airflow start date is %s' % airflow_start_date)
+
     cluster = ClusterGetter.get_cluster()
     if not cluster.is_alive():
         raise ClusterDown()
@@ -458,30 +460,45 @@ def _stage_files(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_initial_data_load = check_first_run(execution_date)
     if is_first_run and is_initial_data_load:
-        _log.info("This is first run, skipping of stage files as none would exist")
+        _log.info("This is first run, "
+                  "skipping of stage files as none would exist")
         return
+
+    input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
+    staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
+
+    output_prefix = _get_s3_staging_prefix(dag=dag,
+                                           execution_date=execution_date,
+                                           prefix=staging_prefix)
+
+    corner_cases = None
 
     # Check if this is the first run of the day, if so pull the 
     # previous day files for processing
     if execution_date.strftime("%H") == '00':
         staging_date = execution_date - timedelta(days=1)
+    elif execution_date.strftime("%H") == '03':
+        staging_date = execution_date - timedelta(days=1)
+        corner_cases = True
+        _log.info("Corner cases run")
     else:
         staging_date = execution_date
 
-    _log.info('Airflow start date is %s' % airflow_start_date)
     _log.info('Staging date is %s' % staging_date.strftime('%Y/%m/%d'))
-
-    input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
-    staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
 
     input_files = _get_s3_input_files(dag=dag,
                                       execution_date=staging_date,
                                       task=task,
                                       input_path=kwargs['input_path'])
 
-    output_prefix = _get_s3_staging_prefix(dag=dag,
-                                           execution_date=execution_date,
-                                           prefix=staging_prefix)
+    # This will be first time processing files for current day.
+    # Include the previous day files too for this processing to avoid
+    # the broken events across time boundaries
+    if corner_cases:
+        input_files = _get_s3_input_files(dag=dag,
+                                      execution_date=execution_date,
+                                      task=task,
+                                      input_path=kwargs['input_path'])
 
     # Copy files to staging location
     if input_files:
