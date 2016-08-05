@@ -8920,6 +8920,25 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual([], list(tts[tag.get_id()]))
 
     @tornado.testing.gen_test
+    def test_cannot_create_without_name(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.url,
+                method='POST',
+                headers=self.headers,
+                body='')
+        self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
+
+        # Even with an empty string name, I cannot create a tag.
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.url,
+                method='POST',
+                headers=self.headers,
+                body=json.dumps({'name': ''}))
+        self.assertEqual(ResponseCode.HTTP_BAD_REQUEST, e.exception.code)
+
+    @tornado.testing.gen_test
     def test_delete(self):
         tag = neondata.Tag(account_id=self.account_id, name='Red')
         tag.save()
