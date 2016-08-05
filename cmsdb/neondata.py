@@ -2474,7 +2474,7 @@ class MappingObject(object):
 
     @classmethod
     def _get_insert_tuple(cls, values):
-        '''Get insert sql string with %s placeholders, and a list of binds.'''
+        '''Get a merge insert sql string with %s placeholders, and a list of binds.'''
         keys = cls._get_keys()
         return ('''
             WITH new_values AS (

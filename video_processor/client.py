@@ -834,7 +834,7 @@ class VideoProcessor(object):
                 lambda x,y: x | y,
                 [set(x.thumbnail_ids) for x in known_video.job_results],
                 set())
-            known_tids |= set(known_video.thumbnail_ids)
+            known_tids |= set(known_video.thumbnail_ids + known_video.bad_thumbnail_ids)
 
             known_thumbs = yield neondata.ThumbnailMetadata.get_many(
                 known_tids, async=True)
@@ -1010,7 +1010,13 @@ class VideoProcessor(object):
                 statemon.state.increment('default_thumb_error')
                 err_msg = "Failed to download default thumbnail: %s" % e
                 raise DefaultThumbError(err_msg)
-            
+
+        # Set the association of the video tag and each thumbnail.
+        if(new_video_metadata.tag_id):
+            yield neondata.TagThumbnail.save_many(
+                tag_id=new_video_metadata.tag_id,
+                thumbnail_id=known_tids,
+                async=True)
 
         # Enable the video to be served if we have any thumbnails available
         def _set_serving_enabled(video_obj):
