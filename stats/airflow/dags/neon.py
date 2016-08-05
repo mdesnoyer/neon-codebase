@@ -496,10 +496,13 @@ def _stage_files(**kwargs):
     # Include the previous day files too for this processing to avoid
     # the broken events across time boundaries
     if corner_cases:
-        input_files = _get_s3_input_files(dag=dag,
+        input_files_corner_case = _get_s3_input_files(dag=dag,
                                       execution_date=execution_date,
                                       task=task,
                                       input_path=kwargs['input_path'])
+
+        # Concatenate the lists
+        input_files = input_files + input_files_corner_case
 
     # Copy files to staging location
     if input_files:
