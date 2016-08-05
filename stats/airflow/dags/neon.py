@@ -193,7 +193,8 @@ def _create_tables(**kwargs):
     builder = stats.impala_table.ImpalaTableBuilder(cluster, event)
     builder.run()
 
-    time.sleep(15)
+    # Sleep to avoid EMR throttling error
+    time.sleep(random.randrange(5,15,step=3))
 
 
 def _ts_to_datetime(ts):
@@ -905,6 +906,7 @@ update_table_build_times = PythonOperator(
     provide_context=True,
     priority_weight=10,
     python_callable=_update_table_build_times,
+    depends_on_past=True,
     on_success_callback=_compute_cluster_capacity_zero,
     on_failure_callback=_compute_cluster_capacity_zero,
     on_retry_callback=_compute_cluster_capacity_zero)
