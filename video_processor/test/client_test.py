@@ -2275,9 +2275,10 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                  x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
 
         # Validate each thumb is tagged.
-        all_thumb_ids = set(
+        _ids = set(
             chain(*[j.thumbnail_ids + j.bad_thumbnail_ids
                 for j in video_meta.job_results]))
+        all_thumb_ids = _ids.union(video_meta.non_job_thumb_ids)
         tagged_thumb_ids = set(
             neondata.TagThumbnail.get(tag_id=video_meta.tag_id))
         self.assertEqual(all_thumb_ids, tagged_thumb_ids)

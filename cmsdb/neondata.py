@@ -6244,6 +6244,13 @@ class VideoMetadata(Searchable, StoredObject):
                     raise IOError("Could not save video data")
             else:
                 self.__dict__ = updated_video.__dict__
+
+            # Tag the thumbnail with the video's tag.
+            if self.tag_id:
+                yield TagThumbnail.save(
+                    tag_id=self.tag_id,
+                    thumbnail_id=thumb.get_id(),
+                    async=True)
         else:
             _add_thumb_to_video_object(self)
 

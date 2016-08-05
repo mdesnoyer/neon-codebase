@@ -1463,6 +1463,9 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
                          'acct1_vid1')
 
+        self.assertTrue(
+            TagThumbnail.has(tag_id='tag_id', thumbnail_id=thumb_info.get_id()))
+
     @tornado.testing.gen_test
     def test_add_thumbnail_to_video_and_save_with_cloudinary_hosting(self):
         '''
@@ -2445,12 +2448,12 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         self.http_mock = self._future_wrap_mock(
             self.http_mocker.start().send_request, require_async_kw=True)
         self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
-        super(NeonDbTestCase, self).setUp()
+        super(TestNeonRequest, self).setUp()
 
     @classmethod
     def setUpClass(cls):
+        super(TestNeonRequest, cls).setUpClass()
         BasePGNormalObject.keys = [('dynamic', 'key'), ('static', 'a1')]
-        super(NeonDbTestCase, cls).setUpClass()
 
     @classmethod
     def _get_object_type(cls):

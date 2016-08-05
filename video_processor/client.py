@@ -1014,7 +1014,8 @@ class VideoProcessor(object):
         # Set the association of the video tag and each thumbnail.
         if(new_video_metadata.tag_id):
             _tag_thumb_ids = (video_result.thumbnail_ids +
-                video_result.bad_thumbnail_ids)
+                video_result.bad_thumbnail_ids +
+                new_video_metadata.non_job_thumb_ids)
             ct = yield neondata.TagThumbnail.save_many(
                 tag_id=new_video_metadata.tag_id,
                 thumbnail_id=_tag_thumb_ids,
