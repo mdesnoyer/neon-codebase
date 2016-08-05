@@ -979,95 +979,6 @@ class TestNeondataDataSpecific(NeonDbTestCase):
                 else:
                     self.assertEquals(value, value_two)
 
-    @tornado.testing.gen_test
-    def test_send_invalid_callback(self):
-      request = NeonApiRequest('j1', 'key1', http_callback='null')
-      request.save()
-
-      with self.assertLogExists(logging.ERROR, 'Invalid callback url '):
-        yield request.send_callback(async=True)
-
-      # Make sure the state is correct now
-      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
-                        neondata.CallbackState.ERROR)
-
-    @patch('cmsdb.neondata.utils.http')
-    @tornado.testing.gen_test
-    def test_callback_with_experiment_state(self, http_mock):
-      fetch_mock = self._future_wrap_mock(http_mock.send_request,
-                                          require_async_kw=True)
-      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
-      request = NeonApiRequest('j1', 'key1', 'vid1',
-                               http_callback='http://some.where')
-      request.state = neondata.RequestState.SERVING
-      request.response['framenos'] = [34, 61]
-      request.response['serving_url'] = 'http://some_serving_url.com'
-      request.save()
-      VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
-                           winner_tid='key1_vid1_t2').save()
-
-      yield request.send_callback(async=True)
-
-      found_request = NeonApiRequest.get('j1', 'key1')
-      self.assertEquals(found_request.callback_state,
-                        neondata.CallbackState.SUCESS)
-      expected_response = {
-        'job_id' : 'j1',
-         'video_id' : 'vid1',
-         'error': None,
-         'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
-         'processing_state' : neondata.ExternalRequestState.SERVING,
-         'experiment_state' : neondata.ExperimentState.COMPLETE,
-         'winner_thumbnail' : 'key1_vid1_t2'}
-
-      self.assertDictContainsSubset(expected_response, found_request.response)
-
-      # Check the callback
-      self.assertTrue(fetch_mock.called)
-      cargs, kwargs = fetch_mock.call_args
-      found_request = cargs[0]
-      response_dict = json.loads(found_request.body)
-      self.assertDictContainsSubset(expected_response, response_dict)
-
-    @patch('cmsdb.neondata.utils.http')
-    @tornado.testing.gen_test
-    def test_callback_with_error_state(self, http_mock):
-      fetch_mock = self._future_wrap_mock(http_mock.send_request,
-                                          require_async_kw=True)
-      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
-      request = NeonApiRequest('j1', 'key1', 'vid1',
-                               http_callback='http://some.where')
-      request.state = neondata.RequestState.CUSTOMER_ERROR
-      request.response['framenos'] = []
-      request.response['serving_url'] = None
-      request.response['error'] = 'some customer error'
-      request.save()
-
-      yield request.send_callback(async=True)
-
-      found_request = NeonApiRequest.get('j1', 'key1')
-      self.assertEquals(found_request.callback_state,
-                        neondata.CallbackState.SUCESS)
-      expected_response = {
-        'job_id' : 'j1',
-         'video_id' : 'vid1',
-         'error': 'some customer error',
-         'framenos' : [],
-         'serving_url' : None,
-         'processing_state' : neondata.ExternalRequestState.FAILED,
-         'experiment_state' : neondata.ExperimentState.UNKNOWN,
-         'winner_thumbnail' : None}
-
-      self.assertDictContainsSubset(expected_response, found_request.response)
-
-      # Check the callback
-      self.assertTrue(fetch_mock.called)
-      cargs, kwargs = fetch_mock.call_args
-      found_request = cargs[0]
-      response_dict = json.loads(found_request.body)
-      self.assertDictContainsSubset(expected_response, response_dict)
-
     def test_request_state_conversion(self):
       for state_name, val in neondata.RequestState.__dict__.items():
         if state_name.startswith('__'):
@@ -2517,18 +2428,23 @@ class TestAccountLimits(NeonDbTestCase, BasePGNormalObject):
     def _get_object_type(cls):
         return neondata.AccountLimits
 
-
 class TestBillingPlans(NeonDbTestCase, BasePGNormalObject):
     @classmethod
     def _get_object_type(cls):
         return neondata.BillingPlans
 
-
 class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
-    @classmethod
-    def setUpClass(cls):
+    def setUp(self):
+        # Create an account and request with a callback
         BasePGNormalObject.keys = [('dynamic', 'key'), ('static', 'a1')]
-        super(TestNeonRequest, cls).setUpClass()
+        NeonApiRequest('j1', 'key1', 'vid1',
+                       http_callback='http://some.where').save()
+
+        self.http_mocker = patch('cmsdb.neondata.utils.http')
+        self.http_mock = self._future_wrap_mock(
+            self.http_mocker.start().send_request, require_async_kw=True)
+        self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+        super(NeonDbTestCase, self).setUp()
 
     @classmethod
     def _get_object_type(cls):
@@ -2542,6 +2458,216 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         yield request.save(async=True)
         out_of_db = yield request.get(request.job_id, 'a1', async=True)
         self.assertEquals(out_of_db.key, request.key)
+
+    @tornado.testing.gen_test
+    def test_callback_with_experiment_state(self):
+      def _mod_request(x):
+        x.state = neondata.RequestState.SERVING
+        x.http_callback='http://some.where'
+        x.response['framenos'] = [34, 61]
+        x.response['serving_url'] = 'http://some_serving_url.com'
+      request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      neondata.VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
+                           winner_tid='key1_vid1_t2').save()
+
+      yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.WINNER_SENT)
+      expected_response = {
+        'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': None,
+         'framenos' : [34, 61],
+         'serving_url' : 'http://some_serving_url.com',
+         'processing_state' : neondata.ExternalRequestState.SERVING,
+         'experiment_state' : neondata.ExperimentState.COMPLETE,
+         'winner_thumbnail' : 'key1_vid1_t2'}
+
+      self.assertDictContainsSubset(expected_response, found_request.response)
+
+      # Check the callback
+      self.assertTrue(self.http_mock.called)
+      cargs, kwargs = self.http_mock.call_args
+      cb_request = cargs[0]
+      response_dict = json.loads(cb_request.body)
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+      # Do it again and it should not send a call
+      yield found_request.send_callback(async=True)
+      self.assertEquals(self.http_mock.call_count, 1)
+
+    @tornado.testing.gen_test
+    def test_callback_on_serving(self):
+      def _mod_request(x):
+        x.state = neondata.RequestState.SERVING
+        x.http_callback='http://some.where'
+        x.response['framenos'] = [34, 61]
+        x.response['serving_url'] = 'http://some_serving_url.com'
+      request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+
+      yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.SERVING_SENT)
+      expected_response = {
+        'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': None,
+         'framenos' : [34, 61],
+         'serving_url' : 'http://some_serving_url.com',
+         'processing_state' : neondata.ExternalRequestState.SERVING,
+         'experiment_state' : neondata.ExperimentState.UNKNOWN,
+         'winner_thumbnail' : None}
+
+      self.assertDictContainsSubset(expected_response, found_request.response)
+
+      # Check the callback
+      self.assertTrue(self.http_mock.called)
+      cargs, kwargs = self.http_mock.call_args
+      cb_request = cargs[0]
+      response_dict = json.loads(cb_request.body)
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+      # Do it again and it should not send a call
+      yield found_request.send_callback(async=True)
+      self.assertEquals(self.http_mock.call_count, 1)
+
+    @tornado.testing.gen_test
+    def test_callback_on_finished(self):
+      def _mod_request(x):
+        x.state = neondata.RequestState.FINISHED
+        x.http_callback='http://some.where'
+        x.response['framenos'] = [34, 61]
+        x.response['serving_url'] = 'http://some_serving_url.com'
+      request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+
+      yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.PROCESSED_SENT)
+      expected_response = {
+        'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': None,
+         'framenos' : [34, 61],
+         'serving_url' : 'http://some_serving_url.com',
+         'processing_state' : neondata.ExternalRequestState.PROCESSED,
+         'experiment_state' : neondata.ExperimentState.UNKNOWN,
+         'winner_thumbnail' : None}
+
+      self.assertDictContainsSubset(expected_response, found_request.response)
+
+      # Check the callback
+      self.assertTrue(self.http_mock.called)
+      cargs, kwargs = self.http_mock.call_args
+      cb_request = cargs[0]
+      response_dict = json.loads(cb_request.body)
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+      # Do it again and it should not send a call
+      yield found_request.send_callback(async=True)
+      self.assertEquals(self.http_mock.call_count, 1)
+
+    @tornado.testing.gen_test
+    def test_callback_with_error_state(self):
+      def _mod_request(x):
+        x.state = neondata.RequestState.CUSTOMER_ERROR
+        x.http_callback='http://some.where'
+        x.response['framenos'] = []
+        x.response['serving_url'] = None
+        x.response['error'] = 'some customer error'
+      request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+
+      yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.FAILED_SENT)
+      expected_response = {
+        'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': 'some customer error',
+         'framenos' : [],
+         'serving_url' : None,
+         'processing_state' : neondata.ExternalRequestState.FAILED,
+         'experiment_state' : neondata.ExperimentState.UNKNOWN,
+         'winner_thumbnail' : None}
+
+      self.assertDictContainsSubset(expected_response, found_request.response)
+
+      # Check the callback
+      self.assertTrue(self.http_mock.called)
+      cargs, kwargs = self.http_mock.call_args
+      cb_request = cargs[0]
+      response_dict = json.loads(cb_request.body)
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+      # Do it again and it should not send a call
+      yield found_request.send_callback(async=True)
+      self.assertEquals(self.http_mock.call_count, 1)
+
+    @tornado.testing.gen_test
+    def test_callback_ignore_type(self):
+      def _mod_request(x):
+        x.state = neondata.RequestState.FINISHED
+        x.http_callback='http://some.where'
+        x.response['framenos'] = [34, 61]
+        x.response['serving_url'] = 'http://some_serving_url.com'
+      request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      NeonUserAccount('acct1', 'key1',
+                      callback_states_ignored=[
+                        neondata.CallbackState.PROCESSED_SENT]).save()
+
+      yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.PROCESSED_SENT)
+      self.assertFalse(self.http_mock.called)
+
+    @tornado.testing.gen_test
+    def test_send_callback_failure(self):
+      def _mod_request(x):
+        x.state = neondata.RequestState.FINISHED
+        x.http_callback='http://some.where'
+        x.response['framenos'] = [34, 61]
+        x.response['serving_url'] = 'http://some_serving_url.com'
+      request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+
+      self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, code=500)
+
+      with self.assertLogExists(logging.WARNING,
+                                'Error when sending callback'):
+        yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.ERROR)
+
+    @tornado.testing.gen_test
+    def test_send_invalid_callback(self):
+      request = NeonApiRequest('j1', 'key1', http_callback='null')
+      request.save()
+
+      with self.assertLogExists(logging.ERROR, 'Invalid callback url '):
+        yield request.send_callback(async=True)
+
+      # Make sure the state is correct now
+      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+                        neondata.CallbackState.ERROR)
+      self.assertFalse(self.http_mock.called)
+
+class TestUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
 
 class TestUser(NeonDbTestCase, BasePGNormalObject):

@@ -1039,18 +1039,27 @@ class VideoProcessor(object):
             request.publish_date = time.time() * 1000.0
             request.response = cb_response
             request.callback_state = neondata.CallbackState.NOT_SENT
+        new_request = None
         try:
-            sucess = yield neondata.NeonApiRequest.modify(
+            new_request = yield neondata.NeonApiRequest.modify(
                 api_request.job_id,
                 api_request.api_key,
                 _flag_request_done_in_db,
                 async=True)
-            if not sucess:
+            if not new_request:
                 raise DBError('Api Request finished failed. It was not there')
         except Exception, e:
             _log.error("Error writing request state to database: %s" % e)
             statemon.state.increment('modify_request_error')
             raise DBError("Error finishing api request")
+
+        try:
+            if new_request:
+                yield new_request.send_callback(async=True)
+        except Exception as e:
+            # Logging already done and we do not want this to stop the
+            # flow if there's an error
+            pass
 
         # Send the notifications
         yield self.send_notification_email(api_request, new_video_metadata)

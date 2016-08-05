@@ -1253,7 +1253,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(api_request.state, neondata.RequestState.FINISHED)
         self.assertEquals(api_request.callback_state,
-                          neondata.CallbackState.NOT_SENT)
+                          neondata.CallbackState.PROCESSED_SENT)
         self.assertIsInstance(api_request, neondata.NeonApiRequest)
 
         # Check the video metadata in the database
@@ -2357,7 +2357,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(api_request.state,
                           neondata.RequestState.CUSTOMER_ERROR)
         self.assertEquals(api_request.callback_state,
-                          neondata.CallbackState.SUCESS)
+                          neondata.CallbackState.FAILED_SENT)
 
         # Check the state variables
         self.assertEquals(
@@ -2434,7 +2434,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(api_request.state,
                           neondata.RequestState.CUSTOMER_ERROR)
         self.assertEquals(api_request.callback_state,
-                          neondata.CallbackState.SUCESS)
+                          neondata.CallbackState.FAILED_SENT)
         response = api_request.response
         self.assertEquals(response['video_id'], 'vid1')
         self.assertEquals(response['job_id'], 'job1')
