@@ -60,21 +60,13 @@ class PILImageUtils(object):
     @classmethod
     def to_cv(cls, im):
         '''Convert a PIL image to an OpenCV one in BGR format.'''
-        if im.mode == 'P':
-            im = im.convert('RGBA')
-        if im.mode == 'RGBA':
-            # Render the image onto a white background
-            im_render = Image.new("RGB", im.size, (255, 255, 255))
-            im_render.paste(im, mask=im.split()[3])
-            im = im_render
-            
-        if im.mode == 'RGB':
-            return np.array(im)[:,:,::-1]
-        elif im.mode in ['L', 'I', 'F']:
+
+        # Pass images of these modes through.
+        if im.mode in ['L', 'I', 'F']:
             return np.array(im)
-        
-        raise NotImplementedError(
-            'Conversion for mode %s is not implemented' % im.mode)
+        # All other image formats get conversion to mode=RGB.
+        im = PILImageUtils.convert_to_rgb(im)
+        return np.array(im)[:,:,::-1]
 
     @classmethod
     def from_cv(cls, im):
