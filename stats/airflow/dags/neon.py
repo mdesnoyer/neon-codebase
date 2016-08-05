@@ -480,7 +480,8 @@ def _stage_files(**kwargs):
     elif execution_date.strftime("%H") == '03':
         staging_date = execution_date - timedelta(days=1)
         corner_cases = True
-        _log.info("Corner cases run")
+        _log.info("Corner cases run, input will be current date plus "
+                  "previous date")
     else:
         staging_date = execution_date
 
