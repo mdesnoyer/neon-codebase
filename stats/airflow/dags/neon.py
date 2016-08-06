@@ -560,8 +560,7 @@ def _run_mr_cleaning_job(**kwargs):
         hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
         hdfs_dir = 'mnt/cleaned'
         cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
-        #cleaning_job_input_path = options.full_run_input_path
-        cleaning_job_input_path = 's3://neon-tracker-logs-v2/v2.2/1657678658/2016/07/*'
+        cleaning_job_input_path = options.full_run_input_path
         _log.info("Increasing the number of task instances to %s" % options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
 
