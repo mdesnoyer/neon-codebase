@@ -196,7 +196,7 @@ def _create_tables(**kwargs):
     builder.run()
 
     # Sleep to avoid EMR throttling error
-    time.sleep(random.randrange(5,15,step=3))
+    time.sleep(random.randrange(5,15,step=5))
 
 
 def _ts_to_datetime(ts):
@@ -740,7 +740,10 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     is_first_run, is_initial_data_load = check_first_run(execution_date)
 
     if is_first_run and is_initial_data_load:
-        pass
+        _log.info("Increasing the number of task instances to %s" 
+                % options.max_task_instances)
+        cluster.change_instance_group_size(group_type='TASK', 
+                          new_size=options.max_task_instances)
     else:
         _log.info("S3 copy not applicable for this run")
         return
@@ -883,6 +886,9 @@ s3copy = PythonOperator(
     dag=clicklogs,
     python_callable=_checkpoint_hdfs_to_s3,
     provide_context=True,
+    on_success_callback=_compute_cluster_capacity_zero,
+    on_failure_callback=_compute_cluster_capacity_zero,
+    on_retry_callback=_compute_cluster_capacity_zero,
     op_kwargs=dict(output_path=options.output_path, timeout=60 * 600))
 s3copy.set_upstream(mr_cleaning_job)
 
@@ -904,6 +910,7 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_load_impala_table,
         provide_context=True,
+        depends_on_past=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
         priority_weight=9)
