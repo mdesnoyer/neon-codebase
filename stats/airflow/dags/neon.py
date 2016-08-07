@@ -679,9 +679,9 @@ def _execution_date_has_input_files(**kwargs):
         if is_initial_data_load:
             _log.info("This is first instance of run, skipping the check for existence of files")
             return 'stage_files'
-        else:
-            _log.info("Skipping the run for other instances of first run")
-            return 'no_input_files'
+        # else:
+        #     _log.info("Skipping the run for other instances of first run")
+        #     return 'no_input_files'
 
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
 
