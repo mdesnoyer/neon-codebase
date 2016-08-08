@@ -736,6 +736,9 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     """
     execution_date = kwargs['execution_date']
 
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+
     # Check if this is the first run and take appropriate action
     is_first_run, is_initial_data_load = check_first_run(execution_date)
 
@@ -747,9 +750,6 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     else:
         _log.info("S3 copy not applicable for this run")
         return
-
-    cluster = ClusterGetter.get_cluster()
-    cluster.connect()
 
     hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
     hdfs_dir = 'mnt/cleaned'
@@ -935,10 +935,7 @@ update_table_build_times = PythonOperator(
     provide_context=True,
     priority_weight=10,
     python_callable=_update_table_build_times,
-    depends_on_past=True,
-    on_success_callback=_compute_cluster_capacity_zero,
-    on_failure_callback=_compute_cluster_capacity_zero,
-    on_retry_callback=_compute_cluster_capacity_zero)
+    depends_on_past=True)
 update_table_build_times.set_upstream(load_impala_tables)
 
 
