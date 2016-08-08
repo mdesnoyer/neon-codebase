@@ -580,6 +580,11 @@ def _run_mr_cleaning_job(**kwargs):
         _log.error('Error running the batch cleaning job: %s' % e)
         statemon.state.increment('stats_cleaning_job_failures')
         raise
+    finally:
+        if is_first_run and is_initial_data_load:
+            _log.info("Bringing down the number of task instances to zero")
+            cluster.change_instance_group_size(group_type='TASK', new_size=0)
+
     _log.info('Batch event cleaning job done')
 
 
@@ -600,8 +605,6 @@ def _load_impala_table(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_initial_data_load = check_first_run(execution_date)
 
-    # The first run is going to be big. So provision sufficient number of task instances to enable
-    # faster completion. Bring down the number of task instances to zero later on when complete
     if is_first_run and is_initial_data_load:
         _log.info("This is first & big run, bumping up the num of task instances to %s" %
             options.max_task_instances)
@@ -628,6 +631,11 @@ def _load_impala_table(**kwargs):
     except:
         statemon.state.increment('impala_table_load_failure')
         raise
+    finally:
+        if is_first_run and is_initial_data_load:
+            _log.info("Bringing down the number of task instances to zero")
+            cluster.change_instance_group_size(group_type='TASK', new_size=0)
+
     return "Impala tables loaded"
 
 
@@ -705,13 +713,6 @@ def _update_table_build_times(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
-    # Check if this is the first run and take appropriate action
-    is_first_run, is_initial_data_load = check_first_run(execution_date)
-    
-    if is_first_run and is_initial_data_load:
-        _log.info("First & big run is complete, bring down the num of task instances to zero")
-        cluster.change_instance_group_size(group_type='TASK', new_size=0)
-
     stats.impala_table.update_table_build_times(cluster)
 
 
@@ -778,6 +779,10 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     except Exception as e:
         _log.error('Copy from hdfs to S3 failed: %s' % e)
         raise
+    finally:
+        if is_first_run and is_initial_data_load:
+            _log.info("Bringing down the number of task instances to zero")
+            cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
 
 # ----------------------------------
