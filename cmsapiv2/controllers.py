@@ -1898,6 +1898,7 @@ class VideoHelper(object):
             # Create a Tag for this video.
             tag = neondata.Tag(
                 account_id=account_id_api_key,
+                video_id=internal_video_id,
                 tag_type='video',
                 name=api_request.video_title)
             yield tag.save(async=True)
