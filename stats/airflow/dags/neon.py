@@ -705,6 +705,13 @@ def _update_table_build_times(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
+    
+    if is_first_run and is_initial_data_load:
+        _log.info("First & big run is complete, bring down the num of task instances to zero")
+        cluster.change_instance_group_size(group_type='TASK', new_size=0)
+
     stats.impala_table.update_table_build_times(cluster)
 
 
@@ -771,19 +778,6 @@ def _checkpoint_hdfs_to_s3(**kwargs):
     except Exception as e:
         _log.error('Copy from hdfs to S3 failed: %s' % e)
         raise
-
-
-def _compute_cluster_capacity_zero(op_kwargs):
-    """
-    Bring down the number of task instances to zero
-    """
-    task_instnce = op_kwargs['task_instance']
-
-    cluster = ClusterGetter.get_cluster()
-    cluster.connect()
-
-    _log.info("{task}: Bringing down the num of task instances to zero".format(task=task_instnce))
-    cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
 
 # ----------------------------------
@@ -872,11 +866,7 @@ mr_cleaning_job = PythonOperator(
                    output_path=options.output_path, timeout=60 * 600),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
     priority_weight=8,
-    execution_timeout=timedelta(minutes=600),
-    on_success_callback=_compute_cluster_capacity_zero,
-    on_failure_callback=_compute_cluster_capacity_zero,
-    on_retry_callback=_compute_cluster_capacity_zero,
-    depends_on_past=True)
+    execution_timeout=timedelta(minutes=600))
 mr_cleaning_job.set_upstream(stage_files)
 
 
@@ -886,9 +876,6 @@ s3copy = PythonOperator(
     dag=clicklogs,
     python_callable=_checkpoint_hdfs_to_s3,
     provide_context=True,
-    on_success_callback=_compute_cluster_capacity_zero,
-    on_failure_callback=_compute_cluster_capacity_zero,
-    on_retry_callback=_compute_cluster_capacity_zero,
     op_kwargs=dict(output_path=options.output_path, timeout=60 * 600))
 s3copy.set_upstream(mr_cleaning_job)
 
@@ -910,7 +897,6 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_load_impala_table,
         provide_context=True,
-        depends_on_past=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
         priority_weight=9)
@@ -933,7 +919,7 @@ update_table_build_times = PythonOperator(
     task_id='update_table_build_times',
     dag=clicklogs,
     provide_context=True,
-    priority_weight=10,
+    priority_weight=100,
     python_callable=_update_table_build_times,
     depends_on_past=True)
 update_table_build_times.set_upstream(load_impala_tables)
