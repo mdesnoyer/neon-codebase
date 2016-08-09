@@ -15,6 +15,7 @@ from boto.emr.bootstrap_action import BootstrapAction
 from boto.emr.instance_group import InstanceGroup
 import boto.emr.step
 from boto.s3.connection import S3Connection
+from boto.vpc import VPCConnection
 import datetime
 import dateutil.parser
 import json
@@ -572,7 +573,7 @@ class Cluster():
                                                     'BOOTSTRAPPING',
                                                     'RUNNING',
                                                     'WAITING']):
-        
+
             _log.info("Options.cluster_name is %s" % options.cluster_name)
             _log.info("self.cluster_name is %s" % self.cluster_name)
 
