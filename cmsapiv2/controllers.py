@@ -1765,6 +1765,8 @@ class VideoHelper(object):
                         video, request)
                 else: 
                     new_video[field] = None 
+            elif field == 'share_token':
+                new_video[field] = video.share_token
             else:
                 raise BadRequestError('invalid field %s' % field)
 
