@@ -901,7 +901,8 @@ class StatsDBWatcher(threading.Thread):
             cursor.close()
 
         # Update the state variables
-        self.last_update = most_recent_data
+        self.last_update = datetime.datetime.utcfromtimestamp(
+            play_result[0][0])
         self.last_table_build = cur_table_build
         
         return is_newer
