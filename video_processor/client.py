@@ -1028,6 +1028,8 @@ class VideoProcessor(object):
                 new_video_metadata.get_id())
             tag = neondata.Tag(
                 None,
+                account_id=new_video_metadata.get_account_id(),
+                tag_type=neondata.TagType.VIDEO,
                 name=api_request.video_title,
                 video_id=new_video_metadata.get_id())
             yield tag.save(async=True)

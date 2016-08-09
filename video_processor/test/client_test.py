@@ -1373,6 +1373,63 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(video_data.serving_url)
 
     @tornado.testing.gen_test
+    def test_tag_on_video(self):
+        '''A video has a tag after finalize when it starts with one'''
+
+        # Setup doesn't save a video, so make it here.
+        tag = neondata.Tag(
+            None,
+            name='Video title',
+            tag_type=neondata.TagType.VIDEO,
+            account_id=self.api_key)
+        tag.save()
+        video = neondata.VideoMetadata(
+            self.video_id,
+            tag_id=tag.get_id(),
+            request_id=self.api_request.get_id())
+        video.save()
+
+        yield self.vprocessor.finalize_response()
+
+        video = neondata.VideoMetadata.get(self.video_id)
+        self.assertEqual(tag.get_id(), video.tag_id)
+
+        tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
+        job_result = video.job_results[0]
+        all_video_thumb_ids = set(
+            video.non_job_thumb_ids +
+            job_result.thumbnail_ids +
+            job_result.bad_thumbnail_ids)
+        self.assertEqual(tag_thumb_ids, all_video_thumb_ids)
+
+    @tornado.testing.gen_test
+    def test_no_tag_on_video(self):
+        '''A video has a tag after finalize when it doesn't start with one'''
+
+        # Setup doesn't save a video, so make it here.
+        video = neondata.VideoMetadata(
+            self.video_id,
+            request_id=self.api_request.get_id())
+
+        yield self.vprocessor.finalize_response()
+
+        video = neondata.VideoMetadata.get(self.video_id)
+        tag = neondata.Tag.get(video.tag_id)
+
+        self.assertEqual(tag.video_id, video.get_id())
+        self.assertEqual(tag.account_id, video.get_account_id())
+        self.assertEqual(tag.tag_type, neondata.TagType.VIDEO)
+
+        tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
+        job_result = video.job_results[0]
+        all_video_thumb_ids = set(
+            video.non_job_thumb_ids +
+            job_result.thumbnail_ids +
+            job_result.bad_thumbnail_ids)
+        self.assertEqual(tag_thumb_ids, all_video_thumb_ids)
+
+
+    @tornado.testing.gen_test
     def test_broken_default_thumb(self):
         '''
         Test to validate the flow when default thumb is broken
