@@ -44,7 +44,7 @@ define("cluster_region", default='us-east-1',
 define("public_ip", default='', help='Public elastic ip to assign to cluster')
 define("use_public_ip", default=0,
        help="If set, uses the public ip to talk to the cluster.")
-define("ssh_key", default="s3://neon-keys/emr-runner-2015.pem",
+define("ssh_key", default="s3://neon-keys/emr-runner.pem",
        help="ssh key used to execute jobs on the master node")
 define("resource_manager_port", default=9026,
        help="Port to query the resource manager on")
@@ -54,7 +54,7 @@ define("mapreduce_status_port", default=9046,
        help="Port to query the mapreduce status on")
 define("s3_jar_bucket", default="neon-emr-packages",
        help='S3 bucket where jobs will be stored')
-define("cluster_subnet_id", default="subnet-74c10003",
+define("cluster_subnet_id", default="subnet-e7be7f90,subnet-abf214f2",
        help=('The VPC Subnet Id where the cluster should run. '
              'Default: vpc-90ad09f5 subnet Stats Cluster (10.0.128.0/17).'))
 define("cluster_log_uri",default="s3://neon-cluster-logs/",
@@ -129,14 +129,29 @@ def EC2Connection(cluster_region, **kwargs):
     return boto.ec2.connect_to_region(cluster_region, **kwargs)
 
 class Cluster():
-    # The possible instance and their specs. The format is (HDD GB,
-    # Memory GB, on demand price)
+    # The possible instance and their multiplier of processing
+    # power relative to the r3.xlarge. Bigger machines are
+    # slightly better than an integer multiplier because of
+    # network reduction.
+    #
+    # This table is (type, multiplier, on demand price)
+    #instance_info = {
+    #    'r3.2xlarge' : (2.1, 0.70),
+    #    'r3.4xlarge' : (4.4, 1.40),
+    #    'r3.8xlarge' : (9.6, 2.80),
+    #    'hi1.4xlarge' : (2.5, 3.10),
+    #    'm2.4xlarge' : (2.2, 0.98)
+    #    }
+
+    # We are basing it on a combination of memory and disk space
     instance_info = {
-        'hi1.4xlarge' : (2048., 60.5, 3.1),
-        #'hs1.8xlarge' : (48000., 117., 4.6), # Doesn't have a spot market
-        'cc2.8xlarge' : (3360, 60.5, 2.0),
-        'd2.2xlarge' : (12000, 61.0, 1.38),
-        'd2.4xlarge' : (48000, 122.0, 2.76),
+        'd2.2xlarge'  : (2.0, 1.38),
+        'd2.4xlarge'  : (4.1, 2.76),
+        'd2.8xlarge'  : (8.3, 5.52),
+        'cc2.8xlarge' : (2.2, 2.0),
+        'hi1.4xlarge' : (1.6, 3.1),
+        'i2.4xlarge'  : (3.0, 3.41),
+        'i2.8xlarge'  : (6.1, 6.82)
         }
 
     # Possible cluster roles
@@ -232,12 +247,14 @@ class Cluster():
                 _log.warn("Could not find cluster %s of type %s. "
                           "Starting a new one instead"
                           % (self.cluster_name, self.cluster_type))
+
                 # Below condition is to prevent an airflow task accidentally creating
                 if cluster_manager_create_cluster:
                     _log.info("creating the cluster as the request came from cluster manager")
                     self._create()
                 else:
-                    _log.error("cluster wont be created as the request for create was not from cluster manager")
+                    raise ClusterCreationError("cluster wont be created as the request, "
+                                               "for create was not from cluster manager")
             else:
                 _log.info("Found cluster %s of type %s with id %s" %
                           (self.cluster_name, self.cluster_type,
@@ -347,7 +364,7 @@ class Cluster():
         found_key = bucket.get_key(jar_key.name)
         wait_count = 0
         while found_key is None or jar_key.md5 != found_key.etag.strip('"'):
-            if wait_count > 60:
+            if wait_count > 120:
                 _log.error('Timeout when waiting for the jar to show up in S3')
                 raise IOError('Timeout when uploading jar to s3://%s/%s' %
                               (bucket.name, jar_key.name))
@@ -423,7 +440,8 @@ class Cluster():
         except AttributeError:
             instance_count = group.num_instances
             
-        self.n_core_instances = instance_count
+        self.n_core_instances = instance_count * \
+          Cluster.instance_info[group.instancetype][0]
 
     def change_instance_group_size(self, group_type, incr_amount=None,
                                    new_size=None):
@@ -554,6 +572,10 @@ class Cluster():
                                                     'BOOTSTRAPPING',
                                                     'RUNNING',
                                                     'WAITING']):
+        
+            _log.info("Options.cluster_name is %s" % options.cluster_name)
+            _log.info("self.cluster_name is %s" % self.cluster_name)
+
             if cluster.name != self.cluster_name:
                 # The cluster has to have the right name to be a possible match
                 continue
@@ -694,12 +716,18 @@ class Cluster():
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]
 
-            
+        subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
                           'Master Instance Group'),
-            self._get_core_instance_group()
+            instance_group
             ]
+            
+        # instance_groups = [
+        #     InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
+        #                   'Master Instance Group'),
+        #     self._get_core_instance_group()
+        #     ]
         
         conn = EmrConnection(self.cluster_region)
         _log.info('Creating cluster: %s' % self.cluster_name)
@@ -718,7 +746,7 @@ class Cluster():
                 instance_groups=instance_groups,
                 visible_to_all_users=True,
                 api_params = {'Instances.Ec2SubnetId' : 
-                              self.cluster_subnet_id})
+                              subnet_id})
         except boto.exception.EmrResponseError as e:
             _log.error('Error creating the cluster: %s' % e)
             statemon.state.increment('cluster_creation_error')
@@ -742,7 +770,7 @@ class Cluster():
                 _log.error(msg)
                 raise ClusterCreationError(msg)
 
-            _log.debug('Cluster is booting. State: %s' % cur_state.status.state)
+            _log.info('Cluster is booting. State: %s' % cur_state.status.state)
             time.sleep(30.0)
             cur_state = conn.describe_cluster(self.cluster_id)
 
@@ -753,9 +781,12 @@ class Cluster():
                                                     'RUNNING',
                                                     'WAITING']):
             cluster_info = conn.describe_cluster(cluster.id)
-            if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
-                self.cluster_type):
-                conn.remove_tags(cluster.id, ['cluster-role'])
+            try:
+                if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
+                    self.cluster_type):
+                    conn.remove_tags(cluster.id, ['cluster-role'])
+            except KeyError:
+                pass
         conn.add_tags(self.cluster_id, {
             'cluster-role' : Cluster.ROLE_PRIMARY})
         self._find_master_info()
@@ -763,23 +794,71 @@ class Cluster():
         self.public_ip = None
         self.set_public_ip(cluster_ip)
 
-    def _get_instances_needed(self, disk, memory):
-        '''Get the number if instances needed if they have given disk and mem.
-        '''
-        return max([math.ceil(self.min_memory / memory),
-                    math.ceil(self.min_hdd / disk),
-                    self.min_core_instances])
+    # def _get_instances_needed(self, disk, memory):
+    #     '''Get the number if instances needed if they have given disk and mem.
+    #     '''
+    #     return max([math.ceil(self.min_memory / memory),
+    #                 math.ceil(self.min_hdd / disk),
+    #                 self.min_core_instances])
 
-    def _get_core_instance_group(self):
+    # def _get_core_instance_group(self):
              
+    #     # Calculate the expected costs for each of the instance type options
+    #     data = [(itype, self._get_instances_needed(x[0], x[1]), 
+    #              x[2], cur_price, avg_price)
+    #              for itype, x in Cluster.instance_info.items()
+    #              for cur_price, avg_price in [self._get_spot_prices(itype)]]
+    #     data = sorted(data, key=lambda x: (-x[2] / (np.mean(x[4:6]) * x[1]),
+    #                                        -x[1]))
+    #     chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
+    #       data[0]
+
+    #     _log.info('Choosing core instance type %s because its avg price was %f'
+    #               % (chosen_type, avg_spot_price))
+
+    #     # If the best price is more than the on demand cost, just use on demand
+    #     if (avg_spot_price > 0.80 * on_demand_price or 
+    #         cur_spot_price > on_demand_price):
+    #         _log.info('Spot pricing is too high, chosing on demand instance')
+    #         market_type = 'ON_DEMAND'
+    #     else:
+    #         market_type = 'SPOT'
+
+    #     return InstanceGroup(int(count),
+    #                          'CORE',
+    #                          chosen_type,
+    #                          market_type,
+    #                          'Core instance group',
+    #                          '%.3f' % (1.03 * on_demand_price))
+                             
+    def _get_subnet_id_and_core_instance_group(self):   
         # Calculate the expected costs for each of the instance type options
-        data = [(itype, self._get_instances_needed(x[0], x[1]), 
-                 x[2], cur_price, avg_price)
+        #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
+        #    'us-east-1d' : 'subnet-53fa1901' 
+        #}
+        conn_vpc = VPCConnection()
+
+        avail_zone_to_subnet_id = {}
+        for subnet_requested in options.cluster_subnet_id.split(','):
+            for subnet in conn_vpc.get_all_subnets():
+                if subnet.id == subnet_requested:
+                    avail_zone_to_subnet_id[str(
+                        subnet.availability_zone)] = subnet_requested
+
+        _log.info("Subnets & their avail zones are %s" % 
+                  avail_zone_to_subnet_id)
+
+        data = [(itype, math.ceil(self.min_core_instances / x[0]), 
+                 x[0] * math.ceil(self.min_core_instances / x[0]), 
+                 x[1], cur_price, avg_price, availability_zone)
+                 for availability_zone in avail_zone_to_subnet_id.keys()
                  for itype, x in Cluster.instance_info.items()
-                 for cur_price, avg_price in [self._get_spot_prices(itype)]]
-        data = sorted(data, key=lambda x: (np.mean(x[3:5]) * x[1], -x[1]))
-        chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
-          data[0]
+                 for cur_price, avg_price in [self._get_spot_prices(itype, 
+                   availability_zone)]]
+        data = sorted(data, key=lambda x: (-x[2] / (np.mean(x[4:6]) * x[1]),
+                                           -x[1]))
+        chosen_type, count, cpu_units, on_demand_price, cur_spot_price, \
+          avg_spot_price, availability_zone = data[0]
 
         _log.info('Choosing core instance type %s because its avg price was %f'
                   % (chosen_type, avg_spot_price))
@@ -792,13 +871,14 @@ class Cluster():
         else:
             market_type = 'SPOT'
 
-        return InstanceGroup(int(count),
+        subnet_id = avail_zone_to_subnet_id[availability_zone] 
+
+        return subnet_id, InstanceGroup(int(count),
                              'CORE',
                              chosen_type,
                              market_type,
                              'Core instance group',
                              '%.3f' % (1.03 * on_demand_price))
-                             
 
     def _get_spot_prices(self, instance_type, 
                          tdiff=datetime.timedelta(days=1)):
