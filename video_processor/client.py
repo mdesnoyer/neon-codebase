@@ -1012,18 +1012,31 @@ class VideoProcessor(object):
                 raise DefaultThumbError(err_msg)
 
         # Set the association of the video tag and each thumbnail.
-        if(new_video_metadata.tag_id):
-            _tag_thumb_ids = (video_result.thumbnail_ids +
-                video_result.bad_thumbnail_ids +
-                new_video_metadata.non_job_thumb_ids)
-            ct = yield neondata.TagThumbnail.save_many(
-                tag_id=new_video_metadata.tag_id,
-                thumbnail_id=_tag_thumb_ids,
-                async=True)
+        if not new_video_metadata.tag_id:
+            _log.warn(
+                'Video %s was missing tag at during thumbnail selection',
+                new_video_metadata.get_id())
+            tag = neondata.Tag(
+                None,
+                name=api_request.video_title,
+                video_id=new_video_metadata.get_id())
+            yield tag.save(async=True)
+            new_video_metadata.tag_id = tag.get_id()
+
+        _tag_thumb_ids = (video_result.thumbnail_ids +
+            video_result.bad_thumbnail_ids +
+            new_video_metadata.non_job_thumb_ids)
+        ct = yield neondata.TagThumbnail.save_many(
+            tag_id=new_video_metadata.tag_id,
+            thumbnail_id=_tag_thumb_ids,
+            async=True)
 
         # Enable the video to be served if we have any thumbnails available
+        # (Also, update the tag id in case it has changed.)
         def _set_serving_enabled(video_obj):
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.tag_id = new_video_metadata.tag_id
+
         new_video_metadata = yield neondata.VideoMetadata.modify(
             self.video_metadata.key,
             _set_serving_enabled,

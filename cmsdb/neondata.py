@@ -5632,7 +5632,7 @@ class ThumbnailMetadata(StoredObject):
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
-        return self.key.split('_')[0]
+        return self.get_account_id_from_tid(self.key)
 
     @staticmethod
     def get_account_id_from_tid(tid):
