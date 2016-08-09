@@ -9123,7 +9123,7 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         for item in r['items']:
             _tag = tags_rjson[item['tag_id']]
             if item['tag_id'] == removed_tag.get_id():
-                self.assertEqual('name' + item['key'], item['name'])
+                self.assertEqual('name' + item['tag_id'], item['name'])
                 self.assertFalse(_tag['thumbnail_ids'])
             else:
                 self.assertEqual('name' + item['tag_id'], item['name'])
