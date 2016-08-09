@@ -65,6 +65,8 @@ define("master_instance_type", default="r3.xlarge",
        help='The instance type/size of the EMR MASTER node.')
 define("yarn_max_memory_allocation", default=16000,
        help='Max memory allocation (MB) for containers in YARN')
+define("n_core_instances", default=10,
+       help='Number of core instances requested')
 
 from utils import statemon
 statemon.define("master_connection_error", int)
@@ -180,7 +182,7 @@ class Cluster():
         self.cluster_id = None
         self.master_ip = None
         self.master_id = None
-        self.n_core_instances = n_core_instances
+        self.n_core_instances = n_core_instances or options.n_core_instances
 
         self._lock = threading.RLock()
 
