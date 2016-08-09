@@ -57,16 +57,12 @@ define("s3_jar_bucket", default="neon-emr-packages",
        help='S3 bucket where jobs will be stored')
 define("cluster_subnet_id", default="subnet-e7be7f90,subnet-abf214f2",
        help=('The VPC Subnet Id where the cluster should run. '
-             'Default: vpc-90ad09f5 subnet Stats Cluster (10.0.128.0/17).'))
+             'Default: vpc-90ad09f5 subnet Stats Cluster (10.0.128.0/17).'
+             'Do not leave spaces in the list of subnets'))
 define("cluster_log_uri",default="s3://neon-cluster-logs/",
        help='Where to store EMR Job flow cluster logs.')
 define("master_instance_type", default="r3.xlarge",
        help='The instance type/size of the EMR MASTER node.')
-define("min_hdd_space", default=15000, help='Min amount of disk space (GB)')
-define("min_memory", default=180,
-       help='Min amount of memory in the cluster (GB)')
-define("min_core_instances", default=2,
-       help='Minimum number of core instances')
 define("yarn_max_memory_allocation", default=16000,
        help='Max memory allocation (MB) for containers in YARN')
 
@@ -164,16 +160,16 @@ class Cluster():
     def __init__(self, cluster_type=None, cluster_name=None,
                  cluster_region=None, cluster_subnet_id=None,
                  cluster_log_uri=None, public_ip=None,
-                 min_hdd=None, min_memory=None, min_core_instances=None):
+                 n_core_instances=None):
         '''
         cluster_type - Cluster type to connect to. Uses the cluster-type tag.
         cluster_name - The Name tag to assign the Cluster
         cluster_subnet_id - The VPC SubnetId where the cluster should run.
         cluster_log_uri - The S3 URI where EMR logs should be saved
         public_ip - The public ip to assign to the cluster
-        min_hdd - Minimum hdd space (GB)
-        min_memory - Minimum memory (GB)
-        min_core_instances - Minimum number of core instances
+        n_core_instances - Number of r3.xlarge core instances. 
+                           We will use the cheapest type of r3 instances 
+                           that are equivalent to this number of r3.xlarge.
         '''
         self.cluster_type = cluster_type or options.cluster_type
         self.cluster_name = cluster_name or options.cluster_name
@@ -181,13 +177,10 @@ class Cluster():
         self.public_ip = public_ip or options.public_ip
         self.cluster_log_uri = cluster_log_uri or options.cluster_log_uri
         self.cluster_subnet_id = cluster_subnet_id or options.cluster_subnet_id
-        self.min_hdd = min_hdd or options.min_hdd_space
-        self.min_memory = min_memory or options.min_memory
-        self.min_core_instances = (min_core_instances or 
-                                   options.min_core_instances)
         self.cluster_id = None
         self.master_ip = None
         self.master_id = None
+        self.n_core_instances = n_core_instances
 
         self._lock = threading.RLock()
 
@@ -260,6 +253,7 @@ class Cluster():
                 _log.info("Found cluster %s of type %s with id %s" %
                           (self.cluster_name, self.cluster_type,
                            self.cluster_id))
+                self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
                            output_path, map_memory_mb=None,
@@ -650,6 +644,15 @@ class Cluster():
             raise MasterMissingError("Could not find the master ip")
         _log.info("Found master ip address %s" % self.master_ip)
 
+    def _set_requested_core_instances(self):
+        '''Sets self.n_core_instances to what is currently requested.'''
+        found_group = self._get_instance_group_info('CORE')
+
+        if found_group is not None:
+            self.n_core_instances = int(found_group.requestedinstancecount) * \
+              Cluster.instance_info[found_group.instancetype][0]
+            _log.info('_set_requested_core_instances is %s' % self.n_core_instances)
+
     def _get_instance_group_info(self, group_type):
         conn = EmrConnection(self.cluster_region)
         found_group = None
@@ -723,12 +726,6 @@ class Cluster():
                           'Master Instance Group'),
             instance_group
             ]
-            
-        # instance_groups = [
-        #     InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
-        #                   'Master Instance Group'),
-        #     self._get_core_instance_group()
-        #     ]
         
         conn = EmrConnection(self.cluster_region)
         _log.info('Creating cluster: %s' % self.cluster_name)
@@ -794,51 +791,12 @@ class Cluster():
         cluster_ip = self.public_ip
         self.public_ip = None
         self.set_public_ip(cluster_ip)
-
-    # def _get_instances_needed(self, disk, memory):
-    #     '''Get the number if instances needed if they have given disk and mem.
-    #     '''
-    #     return max([math.ceil(self.min_memory / memory),
-    #                 math.ceil(self.min_hdd / disk),
-    #                 self.min_core_instances])
-
-    # def _get_core_instance_group(self):
-             
-    #     # Calculate the expected costs for each of the instance type options
-    #     data = [(itype, self._get_instances_needed(x[0], x[1]), 
-    #              x[2], cur_price, avg_price)
-    #              for itype, x in Cluster.instance_info.items()
-    #              for cur_price, avg_price in [self._get_spot_prices(itype)]]
-    #     data = sorted(data, key=lambda x: (-x[2] / (np.mean(x[4:6]) * x[1]),
-    #                                        -x[1]))
-    #     chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
-    #       data[0]
-
-    #     _log.info('Choosing core instance type %s because its avg price was %f'
-    #               % (chosen_type, avg_spot_price))
-
-    #     # If the best price is more than the on demand cost, just use on demand
-    #     if (avg_spot_price > 0.80 * on_demand_price or 
-    #         cur_spot_price > on_demand_price):
-    #         _log.info('Spot pricing is too high, chosing on demand instance')
-    #         market_type = 'ON_DEMAND'
-    #     else:
-    #         market_type = 'SPOT'
-
-    #     return InstanceGroup(int(count),
-    #                          'CORE',
-    #                          chosen_type,
-    #                          market_type,
-    #                          'Core instance group',
-    #                          '%.3f' % (1.03 * on_demand_price))
                              
     def _get_subnet_id_and_core_instance_group(self):   
         # Calculate the expected costs for each of the instance type options
-        #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
-        #    'us-east-1d' : 'subnet-53fa1901' 
-        #}
-        conn_vpc = VPCConnection()
 
+        # Map the subnet id's obtained with their availability zones
+        conn_vpc = VPCConnection()
         avail_zone_to_subnet_id = {}
         for subnet_requested in options.cluster_subnet_id.split(','):
             for subnet in conn_vpc.get_all_subnets():
@@ -846,11 +804,13 @@ class Cluster():
                     avail_zone_to_subnet_id[str(
                         subnet.availability_zone)] = subnet_requested
 
-        _log.info("Subnets & their avail zones are %s" % 
+        _log.debug("Subnets & their avail zones are %s" % 
                   avail_zone_to_subnet_id)
 
-        data = [(itype, math.ceil(self.min_core_instances / x[0]), 
-                 x[0] * math.ceil(self.min_core_instances / x[0]), 
+        _log.info("self.n_core_instances is %s" % self.n_core_instances)
+
+        data = [(itype, math.ceil(self.n_core_instances / x[0]), 
+                 x[0] * math.ceil(self.n_core_instances / x[0]), 
                  x[1], cur_price, avg_price, availability_zone)
                  for availability_zone in avail_zone_to_subnet_id.keys()
                  for itype, x in Cluster.instance_info.items()
@@ -863,6 +823,14 @@ class Cluster():
 
         _log.info('Choosing core instance type %s because its avg price was %f'
                   % (chosen_type, avg_spot_price))
+
+        _log.info('chosen_type is %s' % chosen_type)
+        _log.info('count is %s' % count)
+        _log.info('cpu_units is %s' % cpu_units)
+        _log.info('on_demand_price is %s' % on_demand_price)
+        _log.info('cur_spot_price is %s' % cur_spot_price)
+        _log.info('avg_spot_price is %s' % avg_spot_price)
+        _log.info('availability_zone is %s' % availability_zone)
 
         # If the best price is more than the on demand cost, just use on demand
         if (avg_spot_price > 0.80 * on_demand_price or 
