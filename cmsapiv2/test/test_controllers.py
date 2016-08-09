@@ -9059,7 +9059,7 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         tags = rjson['items']
         self.assertEqual('My Photos', tags[0]['name'])
 
-        tag_id = ','.join([t['key'] for t in tags])
+        tag_id = ','.join([t['tag_id'] for t in tags])
         tags_response = yield self.http_client.fetch(
             self.thumbs_url.format(tag_id=tag_id),
             headers=self.headers)
@@ -9121,12 +9121,12 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
         # Each item is a tag->thumbs mapping.
         for item in r['items']:
-            _tag = tags_rjson[item['key']]
-            if item['key'] == removed_tag.get_id():
+            _tag = tags_rjson[item['tag_id']]
+            if item['tag_id'] == removed_tag.get_id():
                 self.assertEqual('name' + item['key'], item['name'])
                 self.assertFalse(_tag['thumbnail_ids'])
             else:
-                self.assertEqual('name' + item['key'], item['name'])
+                self.assertEqual('name' + item['tag_id'], item['name'])
                 self.assertEqual(
                     given_thumb_ids,
                     set(_tag['thumbnail_ids']))
@@ -9149,27 +9149,27 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         r = yield self.http_client.fetch(url, headers=self.headers)
         self.assertEqual(ResponseCode.HTTP_OK, r.code)
         r = json.loads(r.body)
-        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
+        self.assertEqual(wanted_tag.key, r['items'][0]['tag_id'])
 
         # Case insensitive.
         url = self.url + '?query=%s' % 'apple'
         r = yield self.http_client.fetch(url, headers=self.headers)
         self.assertEqual(ResponseCode.HTTP_OK, r.code)
         r = json.loads(r.body)
-        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
+        self.assertEqual(wanted_tag.key, r['items'][0]['tag_id'])
 
         # Regex style wildcards.
         url = self.url + '?query=%s' % 'p..r'  # matches pear.
         r = yield self.http_client.fetch(url, headers=self.headers)
         self.assertEqual(ResponseCode.HTTP_OK, r.code)
         r = json.loads(r.body)
-        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
+        self.assertEqual(wanted_tag.key, r['items'][0]['tag_id'])
 
         url = self.url + '?query=%s' % 'pp.*r'  # matches apple pear.
         r = yield self.http_client.fetch(url, headers=self.headers)
         self.assertEqual(ResponseCode.HTTP_OK, r.code)
         r = json.loads(r.body)
-        self.assertEqual(wanted_tag.key, r['items'][0]['key'])
+        self.assertEqual(wanted_tag.key, r['items'][0]['tag_id'])
 
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()

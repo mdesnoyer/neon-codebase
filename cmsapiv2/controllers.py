@@ -1079,10 +1079,32 @@ class ThumbnailAuthorize(object):
                 raise ForbiddenError()
 
 
+class TagResponse(object):
+
+    @staticmethod
+    def _get_default_returned_fields():
+        return ['tag_id', 'name', 'account_id', 'video_id', 'tag_type', 'created', 'updated', 'thumbnail_ids']
+
+    @staticmethod
+    def _get_passthrough_fields():
+        return ['name', 'account_id', 'video_id', 'tag_type', 'created', 'updated']
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(obj, field):
+        if field == 'tag_id':
+            raise tornado.gen.Return(obj.get_id())
+        if field == 'thumbnail_ids':
+            ids = yield neondata.TagThumbnail.get(tag_id=obj.get_id(), async=True)
+
+            raise tornado.gen.Return(ids)
+        raise BadRequestError('invalid field %s' % field)
+
+
 '''*********************************************************************
 TagHandler
 *********************************************************************'''
-class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
+class TagHandler(TagResponse, ThumbnailAuthorize, ShareableContentHandler):
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1107,14 +1129,15 @@ class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
         self._authorize_thumb_ids_or_raise(_thumb_ids)
         thumb_ids = yield self._set_thumb_ids(tag, _thumb_ids)
 
-        result = self.db2api(tag, thumb_ids)
+        result = yield self.db2api(tag)
         self.success(result)
 
     @tornado.gen.coroutine
     def get(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList
+            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
+            'fields': CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
 
         # Ensure tags are valid and permitted.
@@ -1125,8 +1148,8 @@ class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
         self._authorize_tags_or_raise(tags)
 
         # Get dict of tag id to list of thumb id.
-        thumbs = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
-        result = {tag.get_id(): self.db2api(tag, thumbs[tag.get_id()]) for tag in tags if tag}
+        fields = self.args.get('fields')
+        result = yield {tag.get_id(): self.db2api(tag, fields) for tag in tags if tag}
         self.success(result)
 
     @tornado.gen.coroutine
@@ -1150,16 +1173,15 @@ class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
             if self.args.get('name'):
                 tag.name = self.args['name']
             tag.tag_type = self.args.get('type', TagType.COLLECTION)
-
         tag = yield neondata.Tag.modify(
             self.args['tag_id'],
             _update,
             async=True)
 
-        thumb_ids = yield self._set_thumb_ids(
-            tag,
-            thumb_ids)
-        result = self.db2api(tag, thumb_ids)
+        # Save associations.
+        yield self._set_thumb_ids(tag, thumb_ids)
+
+        result = yield self.db2api(tag)
         self.success(result)
 
     @tornado.gen.coroutine
@@ -1179,18 +1201,9 @@ class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
         yield neondata.Tag.delete(tag.get_id(), async=True)
         self.success({'tag_id': tag.get_id()})
 
-    def db2api(self, tag, thumb_ids):
-        '''Converts Tag'''
-        return {
-            'tag_id': tag.get_id(),
-            'account_id':  tag.account_id,
-            'name': tag.name,
-            'thumbnail_ids': thumb_ids,
-            'tag_type': tag.tag_type}
-
     @tornado.gen.coroutine
     def _set_thumb_ids(self, tag, thumb_ids):
-
+        '''Add the thumb ids to the tag in the database and return all'''
         _thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
         thumbs = [t for t in _thumbs if t]
         if thumbs:
@@ -1205,14 +1218,6 @@ class TagHandler(ThumbnailAuthorize, ShareableContentHandler):
         # Get the current list of thumbnails.
         thumb_ids = yield neondata.TagThumbnail.get(tag_id=tag.get_id(), async=True)
         raise tornado.gen.Return(thumb_ids)
-
-    @classmethod
-    def _get_default_returned_fields(cls):
-        return {'tag_id', 'name', 'tag_type'}
-
-    @classmethod
-    def _get_passthrough_fields(cls):
-        return cls._get_default_returned_fields()
 
     @classmethod
     def get_access_levels(self):
@@ -1240,7 +1245,7 @@ TagSearchExternalHandler : class responsible for searching tags
                            from an external source
    HTTP Verbs     : get
 *********************************************************************'''
-class TagSearchExternalHandler(APIV2Handler):
+class TagSearchExternalHandler(TagResponse, APIV2Handler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -1248,6 +1253,7 @@ class TagSearchExternalHandler(APIV2Handler):
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             'limit': All(Coerce(int), Range(min=1, max=100)),
             'query': str,
+            'fields': CustomVoluptuousTypes.CommaSeparatedList(),
             'since': Coerce(float),
             'until': Coerce(float),
             'show_hidden': Coerce(bool),
@@ -1256,7 +1262,8 @@ class TagSearchExternalHandler(APIV2Handler):
         self.args['base_url'] = '/api/v2/%s/tags/search/' % self.account_id
         searcher = ContentSearcher(**self.args)
         _tags, count, prev_page, next_page = yield searcher.get()
-        tags = yield [self.db2api(t) for t in _tags]
+        fields = self.args.get('fields')
+        tags = yield [self.db2api(t, fields) for t in _tags]
 
         self.success({
             'items': tags,
@@ -1269,14 +1276,6 @@ class TagSearchExternalHandler(APIV2Handler):
         return {
             HTTPVerbs.GET: neondata.AccessLevels.READ,
             'account_required': [HTTPVerbs.GET]}
-
-    @staticmethod
-    def _get_default_returned_fields():
-        return ['updated', 'created', 'name', 'key', 'tag_type']
-
-    @staticmethod
-    def _get_passthrough_fields():
-        return TagSearchExternalHandler._get_default_returned_fields()
 
 
 class ContentSearcher(object):
