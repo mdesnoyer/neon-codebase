@@ -31,6 +31,7 @@ from utils import statemon
 statemon.define('cluster_is_alive', int)
 statemon.define('cluster_deaths', int)
 statemon.define('tasks_cleared', int, default=1)
+statemon.define('dag_pause_error', int)
 
 def main():
 
@@ -44,14 +45,17 @@ def main():
                 _log.error(
                     'Cluster died. Bringing up a new one')
                 statemon.state.increment('cluster_deaths')
+                statemon.state.dag_pause_error = 0
                 try:
                 	_log.info('Pausing the Airflow Dag for the cluster to come up')
                 	subprocess.check_output(['airflow', 'pause',
                                              options.dag],
                                              stderr=subprocess.STDOUT,
                         env=os.environ)
+                	statemon.state.dag_pause_error = 0
                 except subprocess.CalledProcessError as e:
                     _log.error('Error pausing the dag: %s' % e.output)
+                    statemon.state.dag_pause_error = 1
 
                 cluster.connect(cluster_manager_create_cluster=True)
                 statemon.state.tasks_cleared = 0
