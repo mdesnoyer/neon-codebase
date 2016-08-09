@@ -3015,7 +3015,8 @@ class CDNHostingMetadata(UnsaveableStoredObject):
                  source_crop=None,
                  crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True):
+                 crop_with_text_detection=True,
+                 send_query_string=True):
 
         self.key = key
 
@@ -3086,9 +3087,10 @@ class CDNHostingMetadata(UnsaveableStoredObject):
             [875, 500],
             [1280, 720]]
 
-        # the created and updated on these objects
-        # self.created = self.updated = str(datetime.datetime.utcnow())
-
+        # whether or not the tsus generated here should append the 
+        # neontn_w_h filename, and send on the query_string parameters  
+        self.send_query_string = send_query_string 
+        
     @classmethod
     def _create(cls, key, obj_dict):
         obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
@@ -3284,6 +3286,40 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
             del obj.baseurl
         
         return obj
+
+class NibblerCDNHostingMetadata(CDNHostingMetadata):
+    '''
+    VEVO Nibbler CDN Metadata
+    '''
+
+    def __init__(self, key=None, api_key=None, api_secret=None,
+                 cdn_prefixes=None, folder_prefix=None, rendition_sizes=None,
+                 source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True,
+                 send_query_string=True):
+        super(NibblerCDNHostingMetadata, self).__init__(
+            key,
+            cdn_prefixes=cdn_prefixes,
+            resize=False,
+            update_serving_urls=True,
+            rendition_sizes=rendition_sizes,
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection, 
+            send_query_string=send_query_string)
+
+        # Nibbler keys
+        self.api_secret = api_secret
+        self.api_key = api_key
+        
+        # whether or not we should forward the query string 
+        # on a request from ISP 
+        self.send_query_string = send_query_string
+
+        # the prefix after the base_url, but before <key>.jpg
+        self.folder_prefix = folder_prefix 
 
 class AbstractIntegration(NamespacedStoredObject):
     ''' Abstract Integration class '''
@@ -4685,12 +4721,15 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     FNAME_REGEX = ('neontn(%s)_w([0-9]+)_h([0-9]+)\.jpg' % 
                    ThumbnailID.VALID_REGEX)
 
-    def __init__(self, thumbnail_id, size_map=None, base_url=None, sizes=None):
+    def __init__(self, thumbnail_id, 
+                 size_map=None, base_url=None, 
+                 sizes=None, send_query_string=False):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map or {}
         
         self.base_url = base_url
         self.sizes = sizes or set([]) # List of (width, height)
+        self.send_query_string = send_query_string 
 
     def __eq__(self, other):
         '''Sets can't do cmp, so we need to overright so that == and != works.
@@ -4720,7 +4759,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         '''Return the thumbnail id for this mapping.'''
         return self.get_id()
 
-    def add_serving_url(self, url, width, height):
+    def add_serving_url(self, url, width, height, send_query_string=False):
         '''Adds a url to serve for a given width and height.
 
         If there was a previous entry, it is overwritten.
@@ -4729,7 +4768,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             urlRe = re.compile(
                 '%s/%s' % (re.escape(self.base_url),
                            ThumbnailServingURLs.FNAME_REGEX))
-            if urlRe.match(url):
+            if send_query_string or urlRe.match(url):
                 self.sizes.add((width, height))
                 return
             else:

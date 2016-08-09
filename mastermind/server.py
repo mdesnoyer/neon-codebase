@@ -1375,6 +1375,8 @@ class DirectivePublisher(threading.Thread):
                                                                thumb_id)
                 default_thumb_directive['type'] = 'default_thumb'
                 default_thumb_directive['aid'] = account_id
+                default_thumb_directive['send_query_string'] = \
+                    self._get_send_query_string(thumb_id) 
                 stream.write('\n' + json.dumps(default_thumb_directive))
             except KeyError:
                 _log.error_n('Could not find serving url for thumb %s, '
@@ -1392,18 +1394,20 @@ class DirectivePublisher(threading.Thread):
             account_id, video_id = key
             fractions = []
             missing_urls = False
+            send_qs_set = False 
+            send_qs = False
 
-            try: 
-                send_qs = self.send_query_string[account_id]
-            except KeyError: 
-                send_qs = False
- 
             for thumb_id, frac in directive:
                 try:
                     serving_urls = unpack_obj(self.serving_urls[thumb_id])
                     frac_obj = self._get_url_fields(account_id, thumb_id)
                     frac_obj['pct'] = frac
                     frac_obj['tid'] = thumb_id
+
+                    if not send_qs_set: 
+                        send_qs = self._get_send_query_string(thumb_id) 
+                        send_qs_set = True 
+
                     fractions.append(frac_obj)
                     if 'default_url' in frac_obj:
                         need_full_urls += 1
@@ -1485,6 +1489,10 @@ class DirectivePublisher(threading.Thread):
                   datetime.timedelta(seconds=valid_length))
                  .strftime('%Y-%m-%dT%H:%M:%SZ'))
         fp.flush()
+
+    def _get_send_query_string(self, thumb_id): 
+        urls = self.get_serving_urls(thumb_id)
+        return urls.send_query_string
 
     def _get_url_fields(self, account_id, thumb_id):
         '''Returns a dictionary of the url fields for a thumbnail.

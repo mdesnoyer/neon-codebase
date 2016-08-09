@@ -49,6 +49,9 @@ define('cloudinary_api_key', default='433154993476843',
 define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
        help='Cloudinary secret api key')
 
+define('vevo_base_url', default='http://stg-apiv2.vevo.com', 
+       help='Where vevos apis are located at') 
+
 # Monitoring
 statemon.define('upload_error', int)
 statemon.define('s3_upload_error', int)
@@ -119,6 +122,7 @@ class CDNHosting(object):
                           otherwise they take urls.
         '''
         self.resize = cdn_metadata.resize
+        self.send_query_string = cdn_metadata.send_query_string
         self.update_serving_urls = cdn_metadata.update_serving_urls
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
@@ -202,11 +206,12 @@ class CDNHosting(object):
             statemon.state.increment('upload_error')
             raise
 
-
         if self.update_serving_urls and len(new_serving_thumbs) > 0:
             def add_serving_urls(obj):
+                obj.send_query_string = self.send_query_string
                 for params in new_serving_thumbs:
-                    obj.add_serving_url(*params)
+                    obj.add_serving_url(
+                        *params)
 
             if servingurl_overwrite:
                 url_obj = cmsdb.neondata.ThumbnailServingURLs(tid)
@@ -303,7 +308,9 @@ class CDNHosting(object):
         elif isinstance(cdn_metadata,
                         cmsdb.neondata.AkamaiCDNHostingMetadata):
             return AkamaiHosting(cdn_metadata)
-
+        elif isinstance(cdn_metadata,
+                        cmsdb.neondata.NibblerCDNHostingMetadata):
+            return NibblerHosting(cdn_metadata)
         else:
             raise ValueError("CDNHosting type %s not supported yet, please"
                              " implement" % cdn_metadata.__class__.__name__)
@@ -449,6 +456,76 @@ class AWSHosting(CDNHosting):
             # key wasn't there, so that's ok
             pass
 
+class NibblerHosting(CDNHosting): 
+    '''We are uploading to nibbler and nibbler urls look like 
+
+       /cms/assets/now/<unique_key>.jpg?<query_string_params>
+
+       this class will be responsible for only uploading 
+        the images. 
+    ''' 
+    def __init__(self, cdn_metadata):
+        super(NibblerHosting, self).__init__(cdn_metadata)
+        self.cdn_metadata = cdn_metadata 
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def make_post_request(self, params, headers=None):
+        api_url  = "%s/thumb/upload/generate" % options.vevo_base_url
+        encoded_params = urllib.urlencode(params)
+        request = tornado.httpclient.HTTPRequest(api_url, 'POST',
+                                                 body=encoded_params)
+        try:
+            response = yield utils.http.send_request(request, async=True) 
+            raise tornado.gen.Return(response)
+        except socket.error, e:
+            _log.error("Socket error uploading image to cloudinary %s" %\
+                        params['public_id'])
+            raise IOError('Error connecting to cloudinary')
+        except tornado.httpclient.HTTPError, e:
+            _log.error("http error uploading image to cloudinary %s" %\
+                        params['public_id'])
+            raise IOError('Error uploading to cloudinary')
+    
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _upload_impl(self, image, tid, url=None, overwrite=True):
+        '''
+        Upload the image to nibbler.
+
+        The response returns the key we need to build up our url. 
+        '''
+        fmt = 'jpeg'
+        filestream = StringIO()
+        image.save(filestream, fmt, quality=90) 
+        filestream.seek(0)
+        imgdata = filestream.read()
+
+        params = {} 
+        params['file'] = imgdata
+        # TODO generate token not sure, oauth 1/2 spec says weshould have a 
+        # key and secret 
+        #req = tornado.httpclient.HTTPRequest(url = req_url, 
+        #          params={key,secret})
+        #res = yield utils.http.send_request(req, async=True) 
+        #access_token = res['access_token'] 
+        access_token = None
+        headers = {'Authorization Bearer' : access_token}
+        response = yield self.make_post_request(params, headers, async=True)
+        json_body = json.loads(response.body)
+
+        try:
+            folder_prefix = self.cdn_metadata.folder_prefix
+        except IndexError: 
+            folder_prefix = 'cms/assets/now' 
+        
+        cdn_url = "{base_url}/{folder_prefix}/{resp_key}.jpg".format(
+            base_url=options.vevo_base_url,
+            folder_prefix=folder_prefix,  
+            resp_key=json_body['key'])
+ 
+        raise tornado.gen.Return(cdn_url) 
+
 class CloudinaryHosting(CDNHosting):
     
     '''
@@ -540,8 +617,6 @@ class CloudinaryHosting(CDNHosting):
         '''
         to_sign = "&".join(sorted([(k+"="+(",".join(v) if isinstance(v, list) else str(v))) for k, v in params_to_sign.items() if v]))
         return hashlib.sha1(str(to_sign + api_secret)).hexdigest()
-
-   
 
 class AkamaiHosting(CDNHosting):
 

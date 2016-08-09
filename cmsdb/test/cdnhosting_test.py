@@ -834,6 +834,60 @@ class TestAkamaiHosting(CDNTestBase):
             
         # Make sure there are no serving urls
         self.assertIsNone(neondata.ThumbnailServingURLs.get(tid))
+
+class TestNibblerHosting(CDNTestBase):
+    '''
+    Test uploading images to Nibbler
+    '''
+    def setUp(self):
+        super(TestNibblerHosting, self).setUp()
+
+        # Mock out the http requests, one mock for each type
+        self.nibbler_mock = MagicMock()
+        self.nibbler_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+        self.cdn_mock = MagicMock()
+        self.cdn_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+        self.http_patcher = patch('cmsdb.cdnhosting.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+            self.http_patcher.start())
+        def _handle_http_request(request, *args, **kwargs):
+            if 'cdn' in request.url:
+                return self.cdn_mock(request, *args, **kwargs)
+            else:
+                return self.nibbler_mock(request, *args, **kwargs)
+        self.http_mock.side_effect = _handle_http_request
+        
+        random.seed(1654984)
+        
+        self.image = PILImageUtils.create_random_image(480, 640)
+
+    def tearDown(self):
+        self.http_patcher.stop()
+        super(TestNibblerHosting, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_upload_image(self):
+        metadata = neondata.NibblerCDNHostingMetadata(
+            key=None,
+            api_key='akey',
+            api_secret='asecret',
+            folder_prefix='cms/assets/now',
+            send_query_string=True
+            )
+
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        tid = 'customeraccountnamelabel_vid1_tid1'
+        self.nibbler_mock.side_effect = lambda x, **kw: HTTPResponse(
+            x, 200, buffer=StringIO('{"key": "1234"}')) 
+        yield self.hoster.upload(self.image, tid, async=True)
+
+        ts = neondata.ThumbnailServingURLs.get(tid)
+        self.assertGreater(ts.get_serving_url_count(), 0)
+        self.assertEquals(ts.base_url, 'http://stg-apiv2.vevo.com/cms/assets/now')
+        self.assertEquals(ts.send_query_string, True)
+        self.assertEquals(
+            ts.size_map[(640,480)], 
+            'http://stg-apiv2.vevo.com/cms/assets/now/1234.jpg')
         
 if __name__ == '__main__':
     utils.neon.InitNeon()

@@ -1524,6 +1524,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
         self.assertEqual(default_thumbs, {
             'acct1' : {
                 'type' : 'default_thumb',
+                'send_query_string' : False, 
                 'aid' : 'acct1',
                 'base_url' : 'http://first_tids.com',
                 'default_size' : {'h': 90, 'w': 160},
@@ -1534,6 +1535,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
         self.assertDictContainsSubset({
             'aid' : 'acct1',
             'vid' : 'acct1_vid1',
+            'send_query_string' : False, 
             'fractions' : [
                 { 'pct' : 0.1,
                   'tid' : 'acct1_vid1_tid11',
@@ -1562,6 +1564,185 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
         self.assertDictContainsSubset({
             'aid' : 'acct1',
             'vid' : 'acct1_vid2',
+            'send_query_string' : False, 
+            'fractions' : [
+                { 'pct' : 0.0,
+                  'tid' : 'acct1_vid2_tid21',
+                  'default_url' : 'http://two_one.com/neontnacct1_vid2_tid21_w160_h90.jpg',
+                  'imgs' : [
+                      { 'h': 240, 'w': 320, 'url': 't21_320.jpg' },
+                      { 'h': 720, 'w': 1920, 'url': 'http://two_one.com/neontnacct1_vid2_tid21_w1920_h720.jpg' },
+                      { 'h': 90, 'w': 160, 'url': 'http://two_one.com/neontnacct1_vid2_tid21_w160_h90.jpg' },
+                      ]
+                },
+                { 'pct' : 1.0,
+                  'tid' : 'acct1_vid2_tid22',
+                  'base_url' : 'http://two_two.com',
+                  'default_size' : {'h': 90, 'w': 160},
+                  'img_sizes' : [{'h': 500, 'w': 500}, {'h': 90, 'w': 160}
+                ]}]
+            },
+            directives[('acct1', 'acct1_vid2')])
+        self.assertLessEqual(
+            dateutil.parser.parse(directives[('acct1', 'acct1_vid2')]['sla']),
+            date.datetime.now(dateutil.tz.tzutc()))
+        job_many_mocker.stop()
+        get_many_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_basic_directive_send_query_string(self):
+        # I'm copy pasting from above to test one extra 
+        # field, TODO fix this so that's not really necessary 
+        vid_meta = {
+            'acct1_vid1': neondata.VideoMetadata('acct1_vid1',
+                                            tids=['acct1_vid1_tid11', 
+                                                  'acct1_vid1_tid12', 
+                                                  'acct1_vid1_tid13'], 
+                                            request_id='job1'), 
+            'acct1_vid2': neondata.VideoMetadata('acct1_vid2', 
+                                            tids=['acct1_vid2_t21', 
+                                             'acct1_vid2_t22'],
+                                            request_id='job2')
+            }
+        get_many_mocker = patch('mastermind.server.neondata.VideoMetadata.get_many')
+        get_many_mock = self._future_wrap_mock(get_many_mocker.start()) 
+        get_many_mock.side_effect = \
+                        lambda vids: [vid_meta[vid] for vid in vids]
+        job_info = { 
+            ('job1','acct1'): neondata.NeonApiRequest('job1', 'acct1', 'acct1_vid1'), 
+            ('job2','acct1'): neondata.NeonApiRequest('job2', 'acct1', 'acct1_vid2') 
+        }
+        job_many_mocker = patch('mastermind.server.neondata.NeonApiRequest.get_many') 
+        job_many_mock = self._future_wrap_mock(job_many_mocker.start()) 
+        job_many_mock.side_effect = \
+                        lambda jobs: [job_info[job] for job in jobs]
+        self.mastermind.serving_directive = {
+            'acct1_vid1': (('acct1', 'acct1_vid1'), 
+                           [('tid11', 0.1),
+                            ('tid12', 0.2),
+                            ('tid13', 0.8)]),
+            'acct1_vid2': (('acct1', 'acct1_vid2'), 
+                           [('tid21', 0.0),
+                            ('tid22', 1.0)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        
+        self.publisher.update_tracker_id_map({
+            'tai1' : 'acct1',
+            'tai1s' : 'acct1',
+            'tai2p' : 'acct2'})
+        self.publisher.update_default_thumbs({
+            'acct1' : 'acct1_vid1_tid11'}
+            )
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid11',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
+                                          base_url = 'http://first_tids.com',
+                                          send_query_string = True, 
+                                          sizes=[(640, 480), (160,90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid12',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid1_tid12',
+                size_map = { (800, 600): 't12_800.jpg',
+                             (160, 90): 't12_160.jpg'}))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid13',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid13',
+                                          base_url = 'http://third_tids.com',
+                                          send_query_string = True, 
+                                          sizes=[(160, 90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid2_tid21',
+                base_url = 'http://two_one.com',
+                send_query_string = True, 
+                sizes=[(1920,720), (160, 90)],
+                size_map = {(320,240): 't21_320.jpg'}))
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid22',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid22',
+                                          base_url = 'http://two_two.com',
+                                          send_query_string = True, 
+                                          sizes=[(500,500), (160, 90)]))
+
+        yield self.publisher._publish_directives()
+
+        # Make sure that there are two directive files, one is the
+        # REST endpoint and the second is a timestamped one.
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+        keys = [x for x in bucket.get_all_keys()]
+        key_names = [x.name for x in keys]
+        self.assertEquals(len(key_names), 2)
+        self.assertEquals(keys[0].size,keys[1].size)
+        self.assertIn('mastermind', key_names)
+        key_names.remove('mastermind')
+        self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
+       
+        # check that mastermind file has a gzip header 
+        mastermind_file = bucket.get_key('mastermind')
+        self.assertEqual(mastermind_file.content_type, 'application/x-gzip')
+
+        # Now check the data format in the file
+        expiry, tracker_ids, default_thumbs, directives = \
+          self._parse_directive_file(
+            mastermind_file.get_contents_as_string())
+        
+        # Make sure the expiry is valid
+        self.assertGreater(expiry,
+                           date.datetime.now(dateutil.tz.tzutc()) +
+                           date.timedelta(seconds=300))
+
+        # Validate the tracker mappings
+        self.assertEqual(tracker_ids, {'tai1': 'acct1',
+                                       'tai1s': 'acct1',
+                                       'tai2p': 'acct2'})
+
+        # Validate the default thumb
+        self.assertEqual(default_thumbs, {
+            'acct1' : {
+                'type' : 'default_thumb',
+                'send_query_string' : True, 
+                'aid' : 'acct1',
+                'base_url' : 'http://first_tids.com',
+                'default_size' : {'h': 90, 'w': 160},
+                'img_sizes' : [{'h': 480, 'w': 640}, {'h': 90, 'w': 160}]
+            }})
+
+        # Validate the actual directives
+        self.assertDictContainsSubset({
+            'aid' : 'acct1',
+            'vid' : 'acct1_vid1',
+            'send_query_string' : True, 
+            'fractions' : [
+                { 'pct' : 0.1,
+                  'tid' : 'acct1_vid1_tid11',
+                  'base_url' : 'http://first_tids.com',
+                  'default_size' : {'h': 90, 'w': 160},
+                  'img_sizes' : [{'h': 480, 'w': 640}, {'h': 90, 'w': 160}]
+                },
+                { 'pct' : 0.2,
+                  'tid' : 'acct1_vid1_tid12',
+                  'default_url' : 't12_160.jpg',
+                  'imgs' : [
+                      { 'h': 600, 'w': 800, 'url': 't12_800.jpg' },
+                      { 'h': 90, 'w': 160, 'url': 't12_160.jpg' }]
+                },
+                { 'pct' : 0.8,
+                  'tid' : 'acct1_vid1_tid13',
+                  'base_url' : 'http://third_tids.com',
+                  'default_size' : {'h': 90, 'w': 160},
+                  'img_sizes' : [{'h': 90, 'w': 160}]
+                }]
+            },
+            directives[('acct1', 'acct1_vid1')])
+        self.assertLessEqual(
+            dateutil.parser.parse(directives[('acct1', 'acct1_vid1')]['sla']),
+            date.datetime.now(dateutil.tz.tzutc()))
+        self.assertDictContainsSubset({
+            'aid' : 'acct1',
+            'vid' : 'acct1_vid2',
+            'send_query_string' : True, 
             'fractions' : [
                 { 'pct' : 0.0,
                   'tid' : 'acct1_vid2_tid21',
@@ -1657,6 +1838,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
             'acct1' : {
                 'type' : 'default_thumb',
                 'aid' : 'acct1',
+                'send_query_string' : False, 
                 'base_url' : 'http://first_tids.com',
                 'default_size' : {'h': 480, 'w': 640},
                 'img_sizes' : [{'h': 480, 'w': 640}, {'h': 90, 'w': 160}]
@@ -1759,6 +1941,25 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
         expiry, tracker_ids, default_thumbs, directives = \
           self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
+
+    @tornado.testing.gen_test
+    def test_get_send_query_string_false(self):
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs('acct1_vid2_tid21'))
+        self.assertEquals(False,
+           self.publisher._get_send_query_string('acct1_vid2_tid21'))
+
+    @tornado.testing.gen_test
+    def test_get_send_query_string_true(self):
+        self.publisher.add_serving_urls(
+            'acct1_vid2_tid21',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid2_tid21', 
+                send_query_string=True))
+        self.assertEquals(True,
+           self.publisher._get_send_query_string('acct1_vid2_tid21'))
+         
 
 class TestPublisherStatusUpdatesInDB(ServerAsyncPostgresTest):
     '''Tests for updates to the database when directives are published.'''
