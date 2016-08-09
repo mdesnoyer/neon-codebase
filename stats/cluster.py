@@ -881,7 +881,7 @@ class Cluster():
                              'Core instance group',
                              '%.3f' % (1.03 * on_demand_price))
 
-    def _get_spot_prices(self, instance_type, 
+    def _get_spot_prices(self, instance_type, availability_zone,
                          tdiff=datetime.timedelta(days=1)):
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
@@ -892,7 +892,7 @@ class Cluster():
                     end_time=datetime.datetime.utcnow().isoformat(),
                     instance_type=instance_type,
                     product_description='Linux/UNIX (Amazon VPC)',
-                    availability_zone='us-east-1c')]
+                    availability_zone=availability_zone)]
         timestamps, prices = zip(*(data[::-1]))
 
         timestamps = np.array(
