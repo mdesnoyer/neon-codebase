@@ -1323,6 +1323,15 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertEquals(n_thumbs[0].model_version, 'model1')
         self.assertEquals(n_thumbs[0].filtered, '')
 
+        # Check the video has a tag and all the thumbnails have that tag.
+        tag = neondata.Tag.get(video_data.tag_id)
+        self.assertIsNotNone(tag)
+        tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
+        # Validate through the thumbnailmetadata row, not just the thumb id in tag_thumbnail.
+        _non_job_thumbs = neondata.ThumbnailMetadata.get_many(video_data.non_job_thumb_ids)
+        all_thumb_ids = set([t.get_id() for t in thumbs + bad_thumbs + _non_job_thumbs])
+        self.assertEqual(tag_thumb_ids, all_thumb_ids)
+
         # Check that there are thumbnails in s3
         for thumb in thumbs:
             # Check the main archival image

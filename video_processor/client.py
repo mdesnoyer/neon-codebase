@@ -1011,6 +1011,16 @@ class VideoProcessor(object):
                 err_msg = "Failed to download default thumbnail: %s" % e
                 raise DefaultThumbError(err_msg)
 
+        # Enable the video to be served if we have any thumbnails available
+        def _set_serving_enabled(video_obj):
+            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.tag_id = new_video_metadata.tag_id
+
+        new_video_metadata = yield neondata.VideoMetadata.modify(
+            self.video_metadata.key,
+            _set_serving_enabled,
+            async=True)
+
         # Set the association of the video tag and each thumbnail.
         if not new_video_metadata.tag_id:
             _log.warn(
@@ -1022,6 +1032,7 @@ class VideoProcessor(object):
                 video_id=new_video_metadata.get_id())
             yield tag.save(async=True)
             new_video_metadata.tag_id = tag.get_id()
+            yield new_video_metadata.save(async=True)
 
         _tag_thumb_ids = (video_result.thumbnail_ids +
             video_result.bad_thumbnail_ids +
@@ -1031,16 +1042,6 @@ class VideoProcessor(object):
             thumbnail_id=_tag_thumb_ids,
             async=True)
 
-        # Enable the video to be served if we have any thumbnails available
-        # (Also, update the tag id in case it has changed.)
-        def _set_serving_enabled(video_obj):
-            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            video_obj.tag_id = new_video_metadata.tag_id
-
-        new_video_metadata = yield neondata.VideoMetadata.modify(
-            self.video_metadata.key,
-            _set_serving_enabled,
-            async=True)
         # Everything is fine at this point, so lets mark it finished
         api_request.state = neondata.RequestState.FINISHED
 
