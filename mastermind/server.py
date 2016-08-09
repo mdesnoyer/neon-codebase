@@ -839,8 +839,6 @@ class StatsDBWatcher(threading.Thread):
             return False
         
         cursor = self.impala_conn.cursor()
-        most_recent_data = None
-        cur_table_build = None
 
         try:
 
@@ -892,12 +890,6 @@ class StatsDBWatcher(threading.Thread):
                     _log.error('Cannot find any videoplay events')
                     statemon.state.good_connection_to_impala = 0
                     self.is_loaded.set()
-                    return False
-                most_recent_data = datetime.datetime.utcfromtimestamp(
-                    play_result[0][0])
-                is_newer = (self.last_update is None or
-                            most_recent_data > self.last_update)
-                if not is_newer:
                     return False
             except impala.error.RPCError as e:
                 _log.error('SQL Error. Probably a table is not available yet. '
