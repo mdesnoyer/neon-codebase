@@ -46,7 +46,7 @@ public:
     
     Fraction * GetFraction(int index) {return fractions[index];};
 
-    bool sendQueryString; 
+    bool GetSendQueryString() const; 
 
 protected:
     
@@ -56,6 +56,7 @@ protected:
     std::string  accountId;
     std::string  videoId;
     time_t sla;
+    bool sendQueryString; 
     
     std::vector<Fraction*> fractions;
 };
