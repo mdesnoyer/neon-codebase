@@ -41,17 +41,6 @@ def main():
             is_alive = cluster.is_alive()
             statemon.state.cluster_is_alive = 1 if is_alive else 0
 
-            try:
-                _log.info('Restarting the airflow scheduler service')
-                subprocess.check_output(['sudo', 
-                	                     'service', 
-                	                     'airflow-scheduler',
-                                         'restart'],
-                                        stderr=subprocess.STDOUT,
-                    env=os.environ)
-            except subprocess.CalledProcessError as e:
-                    _log.error('Error restarting the scheduler: %s' % e.output)
-
             if not is_alive:
                 _log.error(
                     'Cluster died. Bringing up a new one')
@@ -91,7 +80,18 @@ def main():
                 except subprocess.CalledProcessError as e:
                     _log.error('Error clearing airflow jobs: %s' % e.output)
                     statemon.state.tasks_cleared = 0
-                
+            
+            # Restart the airflow scheduler service
+            try:
+                _log.info('Restarting the airflow scheduler service')
+                subprocess.check_output(['sudo', 
+                	                     'service', 
+                	                     'airflow-scheduler',
+                                         'restart'],
+                                        stderr=subprocess.STDOUT,
+                    env=os.environ)
+            except subprocess.CalledProcessError as e:
+                    _log.error('Error restarting the scheduler: %s' % e.output)
         except Exception as e:
             _log.exception('Unexpected Error: %s' % e)
 
