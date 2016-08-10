@@ -1122,7 +1122,7 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('name'): All(Coerce(unicode), Length(min=1, max=256)),
-            'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
+            'thumbnail_ids': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'type': CustomVoluptuousTypes.TagType()
         })(self.args)
 
@@ -1147,8 +1147,8 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
     def get(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
-            'fields': CustomVoluptuousTypes.CommaSeparatedList
+            Required('tag_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })(self.args)
 
         # Ensure tags are valid and permitted.
@@ -1167,8 +1167,8 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
     def put(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
-            'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
+            Required('tag_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'thumbnail_ids': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'name': All(Coerce(unicode), Length(min=1, max=256)),
             'type': CustomVoluptuousTypes.TagType()
         })(self.args)
@@ -1199,7 +1199,7 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
     def delete(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
+            Required('tag_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
         })(self.args)
 
         tag = yield neondata.Tag.get(self.args['tag_id'], async=True)
@@ -1393,9 +1393,9 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
             Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
             # Video id associates this image as thumbnail of a video.
             'video_id' : All(Coerce(str), Length(min=1, max=256)),
-            'url': CustomVoluptuousTypes.CommaSeparatedList(),
+            'url': All(CustomVoluptuousTypes.CommaSeparatedList(), Coerce(str), Length(min=1)),
             # Tag id associates the image with collection(s).
-            'tag_id': CustomVoluptuousTypes.CommaSeparatedList(),
+            'tag_id': All(CustomVoluptuousTypes.CommaSeparatedList(), Coerce(str), Length(min=1)),
             # This is a partner's id for the image.
             'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
         })
