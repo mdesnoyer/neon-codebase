@@ -43,7 +43,7 @@ def main():
 
             try:
                 _log.info('Restarting the airflow scheduler service')
-                subprocess.check_output(['sudo', '-A', 
+                subprocess.check_output(['sudo', 
                 	                     'service', 
                 	                     'airflow-scheduler',
                                          'restart'],
