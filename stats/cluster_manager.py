@@ -43,8 +43,10 @@ def main():
 
             try:
                 _log.info('Restarting the airflow scheduler service')
-                subprocess.check_output(['sudo', 'service', 'airflow-scheduler',
-                                        'restart'],
+                subprocess.check_output(['sudo', '-A', 
+                	                     'service', 
+                	                     'airflow-scheduler',
+                                         'restart'],
                                         stderr=subprocess.STDOUT,
                     env=os.environ)
             except subprocess.CalledProcessError as e:
