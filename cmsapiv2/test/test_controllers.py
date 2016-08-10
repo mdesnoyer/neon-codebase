@@ -4007,9 +4007,14 @@ class TestThumbnailHandler(TestControllersBase):
         self.im_download_mocker = patch(
             'cvutils.imageutils.PILImageUtils.download_image')
         self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.random_image2 = PILImageUtils.create_random_image(480, 640)
+        self.random_image3 = PILImageUtils.create_random_image(480, 640)
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image]
+        self.im_download_mock.side_effect = [
+            self.random_image,
+            self.random_image2,
+            self.random_image3]
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
@@ -4080,6 +4085,21 @@ class TestThumbnailHandler(TestControllersBase):
         valid_tag_ids = {'tag_0', 'tag_2'}
         thumb1 = rjson['thumbnails'][0]
         self.assertEqual(set(thumb1['tag_ids']), valid_tag_ids)
+
+        # Try two.
+        _url = '/api/v2/{}/thumbnails?thumbnail_ref={}&url={}&tag_id={}'
+        url = self.get_url(_url.format(
+            self.account_id_api_key,
+            thumbnail_ref,
+            '1.jpg,2.jpg',
+            'tag_0,tag_1,tag_2'))
+
+        r = yield self.http_client.fetch(url, body='', method='POST')
+        self.assertEqual(202, r.code)
+        rj = json.loads(r.body)['thumbnails']
+        new_ids = [t['thumbnail_id'] for t in rj]
+        new_thumbs = neondata.ThumbnailMetadata.get_many(new_ids)
+        self.assertEqual(2, len(new_thumbs))
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_with_some_there(self):
@@ -4168,6 +4188,7 @@ class TestThumbnailHandler(TestControllersBase):
             method='POST')
         self.assertEqual(response.code, 202)
         r = json.loads(response.body)
+        r = r['thumbnails'][0]
 
         thumbnail = neondata.ThumbnailMetadata.get(r['thumbnail_id'])
         expect_video_id = neondata.InternalVideoID.generate(
@@ -4184,6 +4205,48 @@ class TestThumbnailHandler(TestControllersBase):
         # Expect that scoring has been done.
         self.assertIsNotNone(thumbnail.model_score)
         self.assertIsNotNone(thumbnail.model_version)
+        print(url)
+
+    @tornado.testing.gen_test
+    def test_add_two_thumbs_by_body(self):
+
+        url = self.get_url('/api/v2/%s/thumbnails?thumbnail_ref=a&tag_id=tag_0,tag_2' %
+            self.account_id_api_key)
+
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
+        buf2 = StringIO()
+        self.random_image2.save(buf2, 'JPEG')
+
+        #body = MultipartEncoder({
+        #    'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
+        # Try two.
+        body = MultipartEncoder([
+            ('upload', ('image1.jpg', buf.getvalue(), 'multipart/form-data')),
+            ('upload', ('image2.jpg', buf2.getvalue(), 'multipart/form-data'))])
+
+        headers = {'Content-Type': body.content_type}
+
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='POST')
+
+        self.assertEqual(response.code, 202)
+        r = json.loads(response.body)
+        new_thumbs = r['thumbnails']
+        self.assertEqual(2, len(new_thumbs))
+        self.assertEqual('a', new_thumbs[0]['external_ref'])
+        new_ids = [t['thumbnail_id'] for t in new_thumbs]
+        thumbs = neondata.ThumbnailMetadata.get_many(new_ids)
+        self.assertEqual(2, len(thumbs))
+        tag_thumb_ids = neondata.TagThumbnail.get_many(tag_id=['tag_0', 'tag_2'])
+        self.assertEqual(set(new_ids), set(tag_thumb_ids['tag_0']))
+        # Tag 0 has a thumbnail from setUp, testingtid.
+        ids = new_ids + ['testingtid']
+        self.assertEqual(set(ids), set(tag_thumb_ids['tag_2']))
+
 
     @tornado.testing.gen_test
     def test_bad_add_new_thumbnail_no_upload(self):

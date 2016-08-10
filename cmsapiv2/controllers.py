@@ -1038,7 +1038,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                }
 
 
-class ThumbnailAuthorize(object):
+class ThumbnailAuth(object):
     """Mixin for checking if thumbnails keys are authorized"""
 
     def _authorize_thumb_ids_or_raise(self, tids):
@@ -1100,11 +1100,22 @@ class TagResponse(object):
             raise tornado.gen.Return(ids)
         raise BadRequestError('invalid field %s' % field)
 
+class TagAuth(object):
+
+    def _authorize_tags_or_raise(self, tags):
+        """Check tag's account id against request"""
+
+        if type(tags) is not list:
+            tags = [tags]
+
+        if any([t for t in tags if t and t.account_id != self.account_id]):
+            raise ForbiddenError()
+
 
 '''*********************************************************************
 TagHandler
 *********************************************************************'''
-class TagHandler(TagResponse, ThumbnailAuthorize, ShareableContentHandler):
+class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1229,15 +1240,6 @@ class TagHandler(TagResponse, ThumbnailAuthorize, ShareableContentHandler):
             'account_required': [HTTPVerbs.GET,
                                  HTTPVerbs.PUT,
                                  HTTPVerbs.POST]}
-
-    def _authorize_tags_or_raise(self, tags):
-        """Check ids in thumbnail object against request ids"""
-
-        if type(tags) is not list:
-            tags = [tags]
-
-        if any([t for t in tags if t and t.account_id != self.account_id]):
-            raise ForbiddenError()
 
 
 '''*********************************************************************
@@ -1375,7 +1377,7 @@ class TagSearchInternalHandler(APIV2Handler):
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
-class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
+class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
 
     def initialize(self):
         super(ThumbnailHandler, self).initialize()
@@ -1391,9 +1393,9 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
             Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
             # Video id associates this image as thumbnail of a video.
             'video_id' : All(Coerce(str), Length(min=1, max=256)),
-            'url': Url(),
-            # Tag id associates the image with a collection.
-            'tag_id': All(Coerce(str), Length(min=1, max=256)),
+            'url': CustomVoluptuousTypes.CommaSeparatedList(),
+            # Tag id associates the image with collection(s).
+            'tag_id': CustomVoluptuousTypes.CommaSeparatedList(),
             # This is a partner's id for the image.
             'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
         })
@@ -1401,7 +1403,16 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
         self.args['account_id'] = account_id
         schema(self.args)
 
-        self.thumb = self.image = self.video = None
+        # Ensure tags are valid and permitted.
+        tag_ids = self.args.get('tag_id', '').split(',')
+        account_id = self.args['account_id']
+        _tags = yield neondata.Tag.get_many(tag_ids, async=True)
+        self.tags = [t for t in _tags if t]
+        self._authorize_tags_or_raise(self.tags)
+
+        self.video = None
+        self.images = []  # 2-ple of (url or None, PIL image)
+        self.thumbs = []  # Thumbnailmetadata
 
         # Switch on whether a video is tied to this submission.
         if self.args.get('video_id'):
@@ -1418,57 +1429,50 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
         thumbnails."""
         _video_id = neondata.InternalVideoID.generate(
             self.account_id, self.args['video_id'])
-        self.video = video = yield neondata.VideoMetadata.get(
+        self.video = yield neondata.VideoMetadata.get(
             _video_id,
             async=True)
-        if not video:
+        if not self.video:
             raise NotFoundError('No video for {}'.format(_video_id))
         thumbs = yield neondata.ThumbnailMetadata.get_many(
-            video.thumbnail_ids,
+            self.video.thumbnail_ids,
             async=True)
 
-        # Calculate new thumbnail's rank: one less than everything else
+        # Calculate new thumbnails' rank: one less than everything else
         # or default value 0 if no other thumbnail.
         existing_thumbs = [t.rank for t in thumbs
                            if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]
         rank = min(existing_thumbs) - 1 if existing_thumbs else 0
 
-        # Save the image file and thumbnail data object.
-        yield self._set_thumb(rank)
+        # Save the image files and thumbnail data objects.
+        yield self._set_thumbs(rank)
 
         statemon.state.increment('post_thumbnail_oks')
-        yield self._respond_with_thumb()
+        yield self._respond_with_thumbs()
 
     @tornado.gen.coroutine
     def _post_without_video(self):
-        """Set the image to CDN. Set the thumb data to database.
+        """Set images to CDN. Set the thumb data to database.
 
         Returns- the new thumbnail."""
-        yield self._set_thumb()
+        yield self._set_thumbs()
         statemon.state.increment('post_thumbnail_oks')
-        yield self._respond_with_thumb()
+        yield self._respond_with_thumbs()
 
     @tornado.gen.coroutine
-    def _set_thumb(self, rank=None):
+    def _set_thumbs(self, rank=None):
         """Set self.thumb to a new thumbnail from submitted image."""
 
-        # Instantiate the thumbnail data object.
+        # Set self.images.
+        yield self._load_images_from_request()
+
+        # Build common objects for all thubmails.
         if self.video:
             video_id = self.video.get_id()
             integration_id = self.video.integration_id
         else:
             video_id = neondata.InternalVideoID.generate(self.account_id)
             integration_id = None
-        self.thumb = neondata.ThumbnailMetadata(
-            None,
-            internal_vid=video_id,
-            external_id=self.args.get('thumbnail_ref'),
-            ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
-            rank=rank)
-
-        # Set the image from url or body form data.
-        yield self._set_image()
-
         # Get CDN store.
         cdn = yield neondata.CDNHostingMetadataList.get(
             neondata.CDNHostingMetadataList.create_key(
@@ -1476,61 +1480,74 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
                 integration_id),
             async=True)
 
-        # If the thumbnail is tied to a video, set that association.
-        if self.video:
-            self.thumb = yield self.video.download_and_add_thumbnail(
-                self.thumb,
-                image=self.image,
-                image_url=self.args.get('url'),
-                cdn_metadata=cdn,
-                save_objects=True,
-                async=True)
-        else:
-            yield self.thumb.add_image_data(
-                self.image,
-                cdn_metadata=cdn,
-                async=True)
-            yield self.thumb.save(async=True)
+        for (url, image) in self.images:
 
-            yield self._score_image()
+            # Instantiate a thumbnail object.
+            _thumb = neondata.ThumbnailMetadata(
+                None,
+                internal_vid=video_id,
+                external_id=self.args.get('thumbnail_ref'),
+                ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
+                rank=rank)
+
+            # If the thumbnail is tied to a video, set that association.
+            if self.video:
+                _thumb = yield self.video.download_and_add_thumbnail(
+                    _thumb,
+                    image=image,
+                    image_url=url,
+                    cdn_metadata=cdn,
+                    save_objects=True,
+                    async=True)
+            else:
+                yield _thumb.add_image_data(
+                    image,
+                    cdn_metadata=cdn,
+                    async=True)
+                yield _thumb.save(async=True)
+
+            self.thumbs.append(_thumb)
+
+        yield self._score_images()
 
         # Set tags if requested.
-        if self.args.get('tag_id'):
-            request_tag_ids = self.args.get('tag_id').split(',')
-            tags = yield neondata.Tag.get_many(request_tag_ids, async=True)
-            valid_tag_ids = [t.get_id() for t in tags
-                if t and t.account_id == self.account_id]
+        if self.tags:
             yield neondata.TagThumbnail.save_many(
-                tag_id=valid_tag_ids,
-                thumbnail_id=self.thumb.get_id(),
+                tag_id=[t.get_id() for t in self.tags],
+                thumbnail_id=[t.get_id() for t in self.thumbs],
                 async=True)
 
     @tornado.gen.coroutine
-    def _set_image(self):
-        """Set self.image to a PIL image or raise HTTP_BAD_REQUEST."""
+    def _load_images_from_request(self):
+        """Sets self.images to PIL images from request urls or multipart body.
 
-        # Get from url.
-        url = self.args.get('url')
-        if url:
-            self.image = yield neondata.ThumbnailMetadata.download_image_from_url(url, async=True)
-            if self.image:
-                return
+        This looks for the array of files in 'upload' in multipart body.
 
-        # Get image from body.
+        Handles mix of submission format. Will set self.images to at least one
+        image or raise 400 on the batch"""
+
+        # Get each from urls.
+        _urls = self.args.get('url', '').split(',')
+        urls = [u.strip() for u in _urls if u]
+        for url in urls:
+            _image = yield neondata.ThumbnailMetadata.download_image_from_url(url, async=True)
+            self.images.append((url, _image))
+
+        # Get each in body.
         try:
-            self.image = ThumbnailHandler._get_image_from_httpfile(
-                self.request.files['upload'][0])
-            if self.image:
-                return
-        except IOError as e:
-            # If an Image() can't be made, the client sent the wrong thing.
-            raise BadRequestError('Image invalid',
-                                  ResponseCode.HTTP_BAD_REQUEST)
+            for upload in self.request.files['upload']:
+                try:
+                    _image = ThumbnailHandler._get_image_from_httpfile(upload)
+                    self.images.append((None, _image))
+                except IOError as e:
+                    _log.warn('Could not get image from request body')
+                    pass
         except KeyError:
-            pass
+            pass  # No upload set in body.
 
-        if not self.image:
-            raise BadRequestError('Image not available',
+        # If all are bad, raise a 400.
+        if not self.images:
+            raise BadRequestError('No image available',
                                   ResponseCode.HTTP_BAD_REQUEST)
 
     @staticmethod
@@ -1542,17 +1559,18 @@ class ThumbnailHandler(ThumbnailAuthorize, ShareableContentHandler):
         return PIL.Image.open(io.BytesIO(httpfile.body))
 
     @tornado.gen.coroutine
-    def _score_image(self):
+    def _score_images(self):
         self._initialize_predictor()
         # Convert from PIL ImageFile to cv2 for predict.
-        cv_image = PILImageUtils.to_cv(self.image)
-        yield self.thumb.score_image(self.predictor, cv_image, True)
+        for (_, i), t in (zip(self.images, self.thumbs)):
+            cv_image = PILImageUtils.to_cv(i)
+            yield t.score_image(self.predictor, cv_image, True)
 
     @tornado.gen.coroutine
-    def _respond_with_thumb(self):
+    def _respond_with_thumbs(self):
         """Success. Reload the thumbnail and return it."""
-        rv = yield self.db2api(self.thumb)
-        self.success(rv, code=ResponseCode.HTTP_ACCEPTED)
+        rv = yield [self.db2api(t) for t in self.thumbs]
+        self.success({'thumbnails': rv}, code=ResponseCode.HTTP_ACCEPTED)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -2591,7 +2609,7 @@ class ThumbnailStatsHandler(APIV2Handler):
 *********************************************************************
 LiftStatsHandler
 *********************************************************************'''
-class LiftStatsHandler(ThumbnailAuthorize, ShareableContentHandler):
+class LiftStatsHandler(ThumbnailAuth, ShareableContentHandler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
