@@ -2390,6 +2390,9 @@ class MappingObject(object):
             key = keys[1]
         else:
             raise KeyError('Unrecognized key in %s' % args.keys())
+        # Ensure strings are not ever treated as indexable list.
+        if isinstance(values, str):
+            values = [values]
         if type(values) is not list:
             values = [values]
         if any([v for v in values if type(v) not in [str, unicode, None]]):
