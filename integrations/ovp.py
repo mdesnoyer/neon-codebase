@@ -505,8 +505,8 @@ class OVPIntegration(object):
                     if is_exist:
                         continue
 
-                    sucess = yield tornado.gen.Task(new_thumb.save)
-                    if not sucess:
+                    success = yield new_thumb.save(async=True)
+                    if not success:
                         raise IOError('Could not save thumbnail')
                     # Even though the video_meta already has the new_thumb
                     # in thumbnail_ids, the database still doesn't have it yet.
@@ -527,6 +527,11 @@ class OVPIntegration(object):
                             raise IOError('Could not save video data')
                     else:
                         video_meta.__dict__ = updated_video.__dict__
+
+                    if updated_video.tag_id:
+                        yield TagThumbnail.save(
+                            tag_id=updated_video.tag_id,
+                            thumbnail=new_thumb.get_id(), async=True)
 
                     _log.info(
                         'Found new thumbnail %s for video %s for account %s.' %
