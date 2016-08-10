@@ -1,4 +1,12 @@
+#!/usr/bin/env python
 """ Extracts a gif from a video by using Aquila."""
+
+import os
+import os.path
+import sys
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 # import scenedetect
 import cv2
@@ -32,11 +40,17 @@ dest = '/tmp/'
 # source = '/tmp/targ2.mkv'
 # source = '/tmp/gopro.mkv'
 # source = '/tmp/poketarg.mp4'
-src_n = 'goats'
-source = '/tmp/%s.mp4' % src_n
+#src_n = 'goats'
+#source = '/tmp/%s.mp4' % src_n
+src_n = 'surfies'
+source = '/data/neon/gopro/raw_yt/Surfies Point (Phillip Island) Raw Gopro Footage-2iMMb-NTSD0.mp4'
+
+target_weights = None
+target_weights = 'pro' # or 'raw'
+weight_file = '/data/neon/gopro/gopro_weights.pkl'
 
 # target gif/clip time in seconds
-target_length = 5
+target_length = 10
 
 # min_shot_distance controls how close to the beginning or the end
 # of the extracted clip scene changes my occur, and it's given in 
@@ -676,7 +690,7 @@ def _asset_assemble(frames, video, fps, outfn):
 ##############################################################################
 #                   WORKER
 ##############################################################################
-def _worker(score_obj, predictor, input_queue, halt_event):
+def _worker(score_obj, predictor, input_queue, halt_event, weights):
     """ reads in the images and then computes the scores, this will
     be the target of the asynchronous threads """
     print 'Worker starting'
@@ -692,8 +706,9 @@ def _worker(score_obj, predictor, input_queue, halt_event):
                 except Exception, e:
                     time.sleep(1)
             scene, frameno, frame = item
-            score_info = predictor.predict(frame)
-            score = score_info[0]
+            score, features, version = predictor.predict(frame)
+            if weights is not None:
+                score = pandas.Series(features).dot(weights)
             score_obj.update('valence', frameno, score)
             if score_obj.n_scored['valence'] % 100 == 0:
                 print '%i images scored so far' % (score_obj.n_scored['valence'])
@@ -747,91 +762,105 @@ def get_gif_regions(results_obj, num_gifs):
 ##############################################################################
 #                   SET-UP
 ##############################################################################
-# open the video
-vid = cv2.VideoCapture(source)
-fps = vid.get(cv2.CAP_PROP_FPS)
-vlen = vid.get(cv2.CAP_PROP_FRAME_COUNT)
-vtime = vlen / fps  # length of video in seconds
-vlen = int(vlen)
-# extract the scenes
-scene_list = []
-detectors = [ContentDetector()]
-downscale_factor = 2
-print 'extracting scenes'
-tot_read, deltas = detect_scenes(vid, scene_list, detectors, 
-                                 downscale_factor=downscale_factor)
-print 'establishing tunnel to aquila'
-proc = establish_tunnel(db_ip=Conn().get_ip())
-predictor = predictor.DeepnetPredictor(aquila_connection=LConn())
-# proc = DummyProc()
-# predictor = DummyPredictor()
-print 'establishing RPC connection to aquila'
-predictor.connect()
-
-# re-open the video, just in case
-print 'Opening video'
-vid = cv2.VideoCapture(source)
-inQ = Queue(maxsize=100)
-
-halter = Event()
-
-score_obj = RegionScore(weights=weight_dict, 
-                        regions=scene_list + [vlen-1], 
-                        filters=region_filters)
-
-
-fe = Thread(target=frame_extractor, 
-            args=(vid, scene_list, inQ, halter))
-workers = [fe]
-for w in range(nworkers):
-    workers.append(Thread(target=_worker, 
-                          args=(score_obj, predictor, inQ, halter)))
-
-start = time.time()
-analysis_time = vtime * processing_time_ratio
-
-for w in workers:
-    w.daemon = True
-    w.start()
-
-while elapsed(start) < analysis_time:
-    ela = elapsed(start)
-    print '%.1fsec elapsed - %.1fsec remain' % (ela, analysis_time - ela)
-    time.sleep(10)
-
-halter.set()
-
-for w in workers:
-    w.join()
-
-print 'Valence scoring complete'
-
-
-# TODO: Update deltas
-
-predictor.shutdown()
-proc.terminate()
-
-# UPDATE THE DELTAS
-for frame, data in deltas.iteritems():
-    if 'delta_hsv_avg' in data.keys():
-        score_obj.update('action', frame, data['delta_hsv_avg'])
-
-r = score_obj.get_results()
-
-gif_starts = get_gif_regions(r, n_to_pick)
-
-clen = int(fps * target_length)
-for i, start in enumerate(gif_starts):
-    end = start + clen
+def main():
+    # open the video
     vid = cv2.VideoCapture(source)
-    frames = range(start, end)
-    outfn = '/tmp/asset_%s_%i.gif' % (src_n, i)
-    _asset_assemble(frames, vid, fps, outfn)
+    fps = vid.get(cv2.CAP_PROP_FPS)
+    vlen = vid.get(cv2.CAP_PROP_FRAME_COUNT)
+    vtime = vlen / fps  # length of video in seconds
+    vlen = int(vlen)
+    # extract the scenes
+    scene_list = []
+    detectors = [ContentDetector()]
+    downscale_factor = 2
+    print 'extracting scenes'
+    tot_read, deltas = detect_scenes(vid, scene_list, detectors, 
+                                     downscale_factor=downscale_factor)
+    print 'establishing tunnel to aquila'
+    #proc = establish_tunnel(db_ip=Conn().get_ip())
+    conn = utils.autoscale.MultipleAutoScaleGroups(['AquilaOnDemandTest',
+                                                    'AquilaSpotTest'])
+    predictor = predictor.DeepnetPredictor(aquila_connection=conn)
+    # proc = DummyProc()
+    # predictor = DummyPredictor()
+    print 'establishing RPC connection to aquila'
+    predictor.connect()
+
+    weights = None
+    if target_weights is not None:
+        weights_mat = pandas.read_pickle(weight_file)
+        weights = weights_mat[target_weights]
+        
+
+    # re-open the video, just in case
+    try:
+        print 'Opening video'
+        vid = cv2.VideoCapture(source)
+        inQ = Queue(maxsize=100)
+
+        halter = Event()
+
+        score_obj = RegionScore(weights=weight_dict, 
+                                regions=scene_list + [vlen-1], 
+                                filters=region_filters)
+
+
+        fe = Thread(target=frame_extractor, 
+                    args=(vid, scene_list, inQ, halter))
+        workers = [fe]
+        for w in range(nworkers):
+            workers.append(Thread(target=_worker, 
+                                  args=(score_obj, predictor, inQ, halter,
+                                        weights)))
+
+        start = time.time()
+        analysis_time = vtime * processing_time_ratio
+
+        for w in workers:
+            w.daemon = True
+            w.start()
+
+        while elapsed(start) < analysis_time:
+            ela = elapsed(start)
+            print '%.1fsec elapsed - %.1fsec remain' % (ela, analysis_time - ela)
+            time.sleep(10)
+
+        halter.set()
+
+        for w in workers:
+            w.join()
+
+        print 'Valence scoring complete'
+
+
+        # TODO: Update deltas
+
+    finally:
+        predictor.shutdown()
+        #proc.terminate()
+
+    # UPDATE THE DELTAS
+    for frame, data in deltas.iteritems():
+        if 'delta_hsv_avg' in data.keys():
+            score_obj.update('action', frame, data['delta_hsv_avg'])
+
+    r = score_obj.get_results()
+
+    gif_starts = get_gif_regions(r, n_to_pick)
+
+    clen = int(fps * target_length)
+    for i, start in enumerate(gif_starts):
+        end = start + clen
+        vid = cv2.VideoCapture(source)
+        frames = range(start, end)
+        outfn = '/tmp/asset_%s_%s_%i.gif' % (src_n, target_weights, i)
+        _asset_assemble(frames, vid, fps, outfn)
 
 
 
-
+if __name__ == '__main__':
+    utils.neon.InitNeon()
+    main()
 
 
 

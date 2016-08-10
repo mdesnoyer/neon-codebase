@@ -478,8 +478,9 @@ class DeepnetPredictor(Predictor):
             if self.channel is not None:
                 with self._ready_lock:
                     self._ready.clear()
-                del self.stub
+                st = self.stub
                 self.stub = None
+                del st
                 self.channel.unsubscribe(self._conn_callback)
                 self._conn_callback = None
                 del self.channel
