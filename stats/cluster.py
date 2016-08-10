@@ -65,7 +65,7 @@ define("master_instance_type", default="r3.xlarge",
        help='The instance type/size of the EMR MASTER node.')
 define("yarn_max_memory_allocation", default=16000,
        help='Max memory allocation (MB) for containers in YARN')
-define("n_core_instances", default=10,
+define("n_core_instances", default=10, type=int,
        help='Number of core instances requested')
 
 from utils import statemon
@@ -810,6 +810,7 @@ class Cluster():
                   avail_zone_to_subnet_id)
 
         _log.info("self.n_core_instances is %s" % self.n_core_instances)
+        _log.info("options.n_core_instances is %s" % options.n_core_instances)
 
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
