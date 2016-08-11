@@ -1153,6 +1153,10 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
 
         # Ensure tags are valid and permitted.
         tag_ids = self.args['tag_id'].split(',')
+
+        # Check share permission.
+        self._allow_request_by_share_or_raise(tag_ids, neondata.Tag.__name__)
+
         account_id = self.args['account_id']
         _tags = yield neondata.Tag.get_many(tag_ids, async=True)
         tags = [t for t in _tags if t]
@@ -2318,6 +2322,11 @@ class VideoHandler(ShareableContentHandler):
         vid_dict = {}
         internal_video_ids = []
         video_ids = args['video_id'].split(',')
+
+        self._allow_request_by_share_or_raise(
+            video_ids,
+            neondata.VideoMetadata.__name__)
+
         for v_id in video_ids:
             internal_video_id = neondata.InternalVideoID.generate(
                 account_id_api_key,v_id)

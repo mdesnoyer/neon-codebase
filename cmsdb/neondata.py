@@ -6106,7 +6106,6 @@ class VideoMetadata(Searchable, StoredObject):
                  job_results=None, non_job_thumb_ids=None,
                  bad_tids=None, tag_id=None):
         super(VideoMetadata, self).__init__(video_id)
-        super(VideoMetadata, self).__init__(video_id)
         # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
         # contain the thumbs from the most recent job only.
         self.thumbnail_ids = tids or []
