@@ -2548,6 +2548,22 @@ class TagThumbnail(MappingObject):
 class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
 
+    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
+                 video_id=None, share_token=None):
+        tag_id = tag_id or uuid.uuid4().hex
+
+        # Owner
+        self.account_id = account_id
+        # User's descriptive name
+        self.name = name
+        # System's definition of how this tag is used
+        self.tag_type = tag_type if tag_type in [
+            TagType.VIDEO, TagType.COLLECTION] else None
+        self.video_id = video_id
+        self.share_token = share_token
+
+        super(Tag, self).__init__(tag_id)
+
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2579,21 +2595,6 @@ class Tag(Searchable, StoredObject):
             'until',
             'tag_type']
 
-    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
-                 video_id=None):
-        tag_id = tag_id or uuid.uuid4().hex
-
-        # Owner
-        self.account_id = account_id
-        # User's descriptive name
-        self.name = name
-        # System's definition of how this tag is used
-        self.tag_type = tag_type if tag_type in [
-            TagType.VIDEO, TagType.COLLECTION] else None
-        self.video_id = video_id
-
-        super(Tag, self).__init__(tag_id)
-
     @staticmethod
     def _get_where_part(key, args={}):
         if key == 'query':
@@ -2602,6 +2603,25 @@ class Tag(Searchable, StoredObject):
     @staticmethod
     def _baseclass_name():
         return Tag.__name__
+
+    def get_account_id(self):
+        return self.account_id
+
+
+class Clip(StoredObject):
+    '''Stub for gif clips'''
+
+    def __init__(self, clip_id, account_id=None, share_token=None):
+        super(Clip, self).__init__(clip_id)
+        self.account_id = account_id
+        self.share_token = share_token
+
+    @staticmethod
+    def _baseclass_name():
+        return Tag.__name__
+
+    def get_account_id(self):
+        return self.account_id
 
 
 class AbstractHashGenerator(object):
