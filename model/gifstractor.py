@@ -768,7 +768,7 @@ def get_gif_regions(results_obj, num_gifs, vlen, fps, scene_list):
         else:
             scene_end = scene_end.min()
         if scene_end > start + clen:
-            start = int((scene_start + scene_end)/2)
+            start = int((scene_start + scene_end - clen)/2)
         
         gif_starts.append(start)
         # now, they can start before
