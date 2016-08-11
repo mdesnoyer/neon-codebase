@@ -8817,6 +8817,26 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(None, blue_tag['tag_type'])
 
     @tornado.testing.gen_test
+    def test_int_vs_ext_video_id(self):
+        tag = neondata.Tag(
+            account_id=self.account_id,
+            name="Red",
+            video_id=neondata.InternalVideoID.generate(self.account_id, 'a0b1c2'),
+            tag_type=neondata.TagType.VIDEO)
+        tag.save()
+
+
+        url = '%s?tag_id=%s' % (self.url, tag.get_id())
+        response = yield self.http_client.fetch(url, headers=self.headers)
+        self.assertEqual(200, response.code)
+        rjson = json.loads(response.body)
+
+        expected_external_video_id = neondata.InternalVideoID.to_external(tag.video_id)
+        self.assertEqual(expected_external_video_id, rjson[tag.get_id()]['video_id'])
+
+
+
+    @tornado.testing.gen_test
     def test_put(self):
         tag = neondata.Tag(
             account_id=self.account_id,

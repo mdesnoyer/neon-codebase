@@ -1087,13 +1087,16 @@ class TagResponse(object):
 
     @staticmethod
     def _get_passthrough_fields():
-        return ['name', 'account_id', 'video_id', 'tag_type', 'created', 'updated']
+        return ['name', 'account_id', 'tag_type', 'created', 'updated']
 
     @staticmethod
     @tornado.gen.coroutine
     def _convert_special_field(obj, field):
         if field == 'tag_id':
             raise tornado.gen.Return(obj.get_id())
+        if field == 'video_id':
+            raise tornado.gen.Return(
+                neondata.InternalVideoID.to_external(obj.video_id))
         if field == 'thumbnail_ids':
             ids = yield neondata.TagThumbnail.get(tag_id=obj.get_id(), async=True)
 
