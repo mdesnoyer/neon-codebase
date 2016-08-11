@@ -1096,7 +1096,7 @@ class TagResponse(object):
             raise tornado.gen.Return(obj.get_id())
         if field == 'video_id':
             raise tornado.gen.Return(
-                neondata.InternalVideoID.to_external(obj.video_id))
+                neondata.InternalVideoID.to_external(obj.video_id) if obj.video_id else None)
         if field == 'thumbnail_ids':
             ids = yield neondata.TagThumbnail.get(tag_id=obj.get_id(), async=True)
 
