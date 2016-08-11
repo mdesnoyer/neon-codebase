@@ -182,7 +182,7 @@ class Cluster():
         self.cluster_id = None
         self.master_ip = None
         self.master_id = None
-        self.n_core_instances = options.n_core_instances
+        self.n_core_instances = n_core_instances or options.n_core_instances
 
         self._lock = threading.RLock()
 

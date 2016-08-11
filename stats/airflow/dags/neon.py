@@ -616,6 +616,10 @@ def _load_impala_table(**kwargs):
 
     _log.info("{task}: Loading data!".format(task=task))
     
+    corner_cases = None
+    if execution_date.strftime("%H") == '03':
+        corner_cases = True
+    
     try:
         _log.info("Path to build for impala is %s" % os.path.join('s3://', output_bucket, cleaned_prefix))
 
@@ -623,7 +627,7 @@ def _load_impala_table(**kwargs):
             cluster=cluster,
             event=event,
             execution_date=execution_date,
-            hour_interval=dag.schedule_interval.total_seconds()/3600,
+            corner_cases=corner_cases,
             input_path=os.path.join('s3://', output_bucket, cleaned_prefix))
     
         builder.run()

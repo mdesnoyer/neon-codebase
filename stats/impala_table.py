@@ -259,6 +259,31 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ExecutionError
 
+    def create_avro_temp_table(self):
+        """"""
+        
+        table = self._avro_table(execution_date)
+        _log.info('Registering Avro Temp table with hive')
+        try:
+            sql = """
+            CREATE TABLE avroeventsequences_temp AS
+            select %s from (
+            select %s from avroeventsequences_corner_cases_cleaned
+            UNION ALL
+            select %s from table) concat
+            """ % (','.join(x.name for x in self.avro_schema.fields),
+                   ','.join(x.name for x in self.avro_schema.fields),
+                   ','.join(x.name for x in self.avro_schema.fields))
+
+            _log.info('CREATE Avro Temp Table SQL: {sql}'.format(sql=sql))
+            self.hive.execute(sql)
+
+        except:
+            _log.error("Error creating Avro Temp Table")
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            raise ExecutionError
+
     def drop_avro_table(self, execution_date):
         """
         Drop the external Avro table for a given date
@@ -421,14 +446,14 @@ class ImpalaTableLoader(threading.Thread):
     Load cleaned data to the Impala Parquet-format table
     """
 
-    def __init__(self, cluster, event, execution_date, hour_interval,
+    def __init__(self, cluster, event, execution_date, corner_cases,
                  input_path):
         super(ImpalaTableLoader, self).__init__()
         self.event = event
         self.cluster = cluster
         self.input_path = input_path
         self.execution_date = execution_date
-        self.hour_interval = hour_interval
+        self.corner_cases = corner_cases
         self.status = 'INIT'
         self._stopped = threading.Event()
         self.table = ImpalaTable(self.cluster, self.event)
@@ -454,6 +479,11 @@ class ImpalaTableLoader(threading.Thread):
             else:
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
+
+            _log.info('self.event is %s' % self.event)
+            _log.info('self.corner_cases is %s' % self.corner_cases)
+            if self.corner_cases and self.event == 'Eventsequences':
+                self.table.create_avro_temp_table(self.execution_date)
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):
