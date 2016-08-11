@@ -19,13 +19,22 @@ from threading import Event
 from collections import defaultdict as ddict
 from collections import Counter
 import time
-import model.predictor as predictor
+import model.predictor
+import pandas
+import pickle
 import utils.autoscale
 import utils.neon
+from utils.options import options, define
 import subprocess
 import socket
 from scipy import stats
 
+define('weight_type', default=None, help='raw, pro or None')
+define('input', default=None, help='Input file')
+define('output', default='/tmp/asset_%s_%s_%i.gif', help='Output template')
+define('valence_weight', default=1.0)
+define('action_weight', default=0.25)
+define('gopro_weight', default=0.0)
 
 # filetypes for the extraction
 filetypes = ['gif', 'mp4']
@@ -42,15 +51,14 @@ dest = '/tmp/'
 # source = '/tmp/poketarg.mp4'
 #src_n = 'goats'
 #source = '/tmp/%s.mp4' % src_n
-src_n = 'surfies'
-source = '/data/neon/gopro/raw_yt/Surfies Point (Phillip Island) Raw Gopro Footage-2iMMb-NTSD0.mp4'
+#src_n = 'surfies'
+#source = '/data/neon/gopro/raw_yt/Surfies Point (Phillip Island) Raw Gopro Footage-2iMMb-NTSD0.mp4'
 
-target_weights = None
-target_weights = 'pro' # or 'raw'
 weight_file = '/data/neon/gopro/gopro_weights.pkl'
+gopro_svc_file = '/data/neon/gopro/gopro_svc.pkl'
 
 # target gif/clip time in seconds
-target_length = 10
+target_length = 5
 
 # min_shot_distance controls how close to the beginning or the end
 # of the extracted clip scene changes my occur, and it's given in 
@@ -75,8 +83,7 @@ max_width = 500
 # the number of workers to spawn
 nworkers = 4
 
-# weighting of valence vs. action
-weight_dict = {'valence': 1.0, 'action': 0.25}
+
 
 # number of gifs to pick
 n_to_pick = 4
@@ -690,7 +697,8 @@ def _asset_assemble(frames, video, fps, outfn):
 ##############################################################################
 #                   WORKER
 ##############################################################################
-def _worker(score_obj, predictor, input_queue, halt_event, weights):
+def _worker(score_obj, predictor, input_queue, halt_event, weights,
+            gopro_model):
     """ reads in the images and then computes the scores, this will
     be the target of the asynchronous threads """
     print 'Worker starting'
@@ -710,17 +718,21 @@ def _worker(score_obj, predictor, input_queue, halt_event, weights):
             if weights is not None:
                 score = pandas.Series(features).dot(weights)
             score_obj.update('valence', frameno, score)
+
+            gopro_scores = gopro_model.decision_function(
+                features.reshape(1,-1))
+            score_obj.update('gopro', frameno, gopro_scores[0])
             if score_obj.n_scored['valence'] % 100 == 0:
                 print '%i images scored so far' % (score_obj.n_scored['valence'])
-        except:
-            print 'WORKER ENCOUNTERED ERROR!'
+        except Exception as e:
+            print 'WORKER ENCOUNTERED ERROR: %s' % e
             halt_event.set()
 
 
 ##############################################################################
 #                   OPTIMAL REGION FINDER
 ##############################################################################
-def get_gif_regions(results_obj, num_gifs):
+def get_gif_regions(results_obj, num_gifs, vlen, fps, scene_list):
     """
     Returns the start point of all the gifs that you want. `results_obj` is
     a results structure in the style returned by the scoring object. This
@@ -745,16 +757,29 @@ def get_gif_regions(results_obj, num_gifs):
     # now, it's a matter of selecting the best region here:
     allow_and_score = reg_score * (allowable == 0)
     gif_starts = []
+    np_scene_list = np.array(scene_list)
     for i in range(n_to_pick):
         start = int((allow_and_score == np.max(allow_and_score)).nonzero()[0][0])
+        # Pick the middle of the scene to start at
+        scene_start = np_scene_list[np_scene_list < start].max()
+        scene_end = np_scene_list[np_scene_list > start]
+        if len(scene_end) == 0:
+            scene_end = vlen
+        else:
+            scene_end = scene_end.min()
+        if scene_end > start + clen:
+            start = int((scene_start + scene_end)/2)
+        
         gif_starts.append(start)
         # now, they can start before
         #   int(start - clen * (1 - max_overlap))
         # or after
         #   int(end - clen * max_overlap)
-        disallow_region_start = int(start - (clen * (1 - max_overlap)))
-        disallow_region_end = int(start + clen - (clen * max_overlap))
-        allow_and_score[disallow_region_start:disallow_region_end] = 0
+        #disallow_region_start = int(start - (clen * (1 - max_overlap)))
+        #disallow_region_end = int(start + clen - (clen * max_overlap))
+        disallow_region_start = int(scene_start - (clen * (1 - max_overlap)))
+        disallow_region_end = int(scene_end)
+        allow_and_score[max(disallow_region_start, 0):disallow_region_end] = 0
     return gif_starts
 
 
@@ -764,14 +789,14 @@ def get_gif_regions(results_obj, num_gifs):
 ##############################################################################
 def main():
     # open the video
-    vid = cv2.VideoCapture(source)
+    vid = cv2.VideoCapture(options.input)
     fps = vid.get(cv2.CAP_PROP_FPS)
     vlen = vid.get(cv2.CAP_PROP_FRAME_COUNT)
     vtime = vlen / fps  # length of video in seconds
     vlen = int(vlen)
     # extract the scenes
     scene_list = []
-    detectors = [ContentDetector()]
+    detectors = [ContentDetector(threshold=20.0)]
     downscale_factor = 2
     print 'extracting scenes'
     tot_read, deltas = detect_scenes(vid, scene_list, detectors, 
@@ -779,26 +804,35 @@ def main():
     print 'establishing tunnel to aquila'
     #proc = establish_tunnel(db_ip=Conn().get_ip())
     conn = utils.autoscale.MultipleAutoScaleGroups(['AquilaOnDemandTest',
-                                                    'AquilaSpotTest'])
-    predictor = predictor.DeepnetPredictor(aquila_connection=conn)
+                                                    'AquilaTestSpot'])
+    predictor = model.predictor.DeepnetPredictor(aquila_connection=conn)
+
+    with open(gopro_svc_file) as svc_file:
+        gopro_model = pickle.load(svc_file)
+        
     # proc = DummyProc()
     # predictor = DummyPredictor()
     print 'establishing RPC connection to aquila'
     predictor.connect()
 
-    weights = None
-    if target_weights is not None:
-        weights_mat = pandas.read_pickle(weight_file)
-        weights = weights_mat[target_weights]
+    try:
+        weights = None
+        if options.weight_type is not None:
+            weights_mat = pandas.read_pickle(weight_file)
+            weights = weights_mat[options.weight_type]
         
 
-    # re-open the video, just in case
-    try:
+        # re-open the video, just in case
         print 'Opening video'
-        vid = cv2.VideoCapture(source)
+        vid = cv2.VideoCapture(options.input)
         inQ = Queue(maxsize=100)
 
         halter = Event()
+
+        # weighting of valence vs. action
+        weight_dict = {'valence': options.valence_weight,
+                       'action': options.action_weight,
+                       'gopro' : options.gopro_weight}
 
         score_obj = RegionScore(weights=weight_dict, 
                                 regions=scene_list + [vlen-1], 
@@ -811,7 +845,7 @@ def main():
         for w in range(nworkers):
             workers.append(Thread(target=_worker, 
                                   args=(score_obj, predictor, inQ, halter,
-                                        weights)))
+                                        weights, gopro_model)))
 
         start = time.time()
         analysis_time = vtime * processing_time_ratio
@@ -846,14 +880,20 @@ def main():
 
     r = score_obj.get_results()
 
-    gif_starts = get_gif_regions(r, n_to_pick)
+    gif_starts = get_gif_regions(r, n_to_pick, vlen, fps, scene_list)
 
+    output_base = os.path.basename(options.input).rpartition('.')[0]
     clen = int(fps * target_length)
     for i, start in enumerate(gif_starts):
         end = start + clen
-        vid = cv2.VideoCapture(source)
+        vid = cv2.VideoCapture(options.input)
         frames = range(start, end)
-        outfn = '/tmp/asset_%s_%s_%i.gif' % (src_n, target_weights, i)
+        weight_string = '%3.2f_%3.2f_%3.2f' % (weight_dict['valence'],
+                                               weight_dict['gopro'],
+                                               weight_dict['action'])
+        outfn = options.output % (output_base, options.weight_type,
+                                  weight_string, i)
+
         _asset_assemble(frames, vid, fps, outfn)
 
 
