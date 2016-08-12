@@ -266,7 +266,7 @@ class ImpalaTable(object):
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
         
-        if is_first_run:
+        if self.is_first_run:
             sql = """
             CREATE TABLE corner_cases_input AS
             SELECT {columns} from {table}
