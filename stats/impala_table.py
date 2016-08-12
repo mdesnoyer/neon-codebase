@@ -261,7 +261,7 @@ class ImpalaTable(object):
 
     def create_avro_temp_table(self, execution_date):
         """"""
-        
+        """"""
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
         try:
@@ -272,13 +272,25 @@ class ImpalaTable(object):
             select %s from (
             select %s from avroeventsequences_corner_cases_cleaned
             UNION ALL
-            select %s from table) concat
+            select %s from %s) concat
             """ % (','.join(x.name for x in self.avro_schema.fields),
                    ','.join(x.name for x in self.avro_schema.fields),
-                   ','.join(x.name for x in self.avro_schema.fields))
+                   ','.join(x.name for x in self.avro_schema.fields),
+                   table)
 
             _log.info('CREATE Avro Temp Table SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
+
+            sql1 = """
+            CREATE TABLE avroeventsequences_temp AS
+            select {columns} from (
+            select {columns} from avroeventsequences_corner_cases_cleaned
+            UNION ALL
+            select {columns} from {table}) concat
+            """.format(columns=','.join(x.name for x in self.avro_schema.fields),
+                table=table)
+
+            _log.info('CREATE Avro Temp Table SQL: {sql}'.format(sql=sql1))
 
         except:
             _log.error("Error creating Avro Temp Table")
