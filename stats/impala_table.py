@@ -34,6 +34,7 @@ import urllib2
 from urlparse import urlparse
 from utils.options import define, options
 from utils import statemon
+from datetime import datetime, timedelta
 
 _log = logging.getLogger(__name__)
 
@@ -259,39 +260,122 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ExecutionError
 
-    def create_avro_temp_table(self, execution_date):
+    def handle_corner_cases(self, execution_date):
         """"""
         """"""
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
-        try:
-            self.hive.execute('DROP TABLE IF EXISTS avroeventsequences_temp')
-
+        
+        if is_first_run:
             sql = """
-            CREATE TABLE avroeventsequences_temp AS
-            select %s from (
-            select %s from avroeventsequences_corner_cases_cleaned
+            CREATE TABLE corner_cases_input AS
+            SELECT {columns} from {table}
+            """.format(columns=','.join(x.name for x in self.avro_schema.fields),
+                          table=table)
+            self.hive.execute(sql)
+        else:
+            cleaned_previousday = 'avro_cc_cleaned_{dt}'. \
+                            format(dt=(execution_date - timedelta(days=1)). \
+                            strftime("%Y%m%d%H"))
+            sql = """
+            CREATE TABLE corner_cases_input AS
+            SELECT {columns} from
+            (
+            SELECT {columns} from {table}
             UNION ALL
-            select %s from %s) concat
-            """ % (','.join(x.name for x in self.avro_schema.fields),
-                   ','.join(x.name for x in self.avro_schema.fields),
-                   ','.join(x.name for x in self.avro_schema.fields),
-                   table)
-
-            _log.info('CREATE Avro Temp Table SQL: {sql}'.format(sql=sql))
+            SELECT {columns} from {cleaned_previousday}
+            ) cc_input
+            """.format(columns=','.join(x.name for x in self.avro_schema.fields),
+                       table=table,
+                       cleaned_previousday=cleaned_previousday)
             self.hive.execute(sql)
 
-            sql1 = """
-            CREATE TABLE avroeventsequences_temp AS
-            select {columns} from (
-            select {columns} from avroeventsequences_corner_cases_cleaned
-            UNION ALL
-            select {columns} from {table}) concat
-            """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                table=table)
+        _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
 
-            _log.info('CREATE Avro Temp Table SQL: {sql}'.format(sql=sql1))
+        imload_group = """
+        row_number() over (partition by 
+        thumbnail_id,
+        clientip,
+        imloadservertime 
+        order by 
+        thumbnail_id,
+        clientip,
+        imloadservertime desc,
+        imvisservertime desc,
+        imclickservertime desc,
+        adplayservertime desc,
+        videoplayservertime desc)
+        """
 
+        imvis_group = """
+        row_number() over (partition by 
+        thumbnail_id,
+        clientip,
+        imvisservertime 
+        order by 
+        thumbnail_id,
+        clientip,
+        imvisservertime desc,
+        imclickservertime desc,
+        adplayservertime desc,
+        videoplayservertime desc)
+        """
+
+        imclick_group = """
+        row_number() over (partition by 
+        thumbnail_id,
+        clientip,
+        imclickservertime 
+        order by 
+        thumbnail_id,
+        clientip,
+        imclickservertime desc,
+        adplayservertime desc,
+        videoplayservertime desc)
+        """
+
+        adplay_group = """
+        row_number() over (partition by 
+        thumbnail_id,
+        clientip,
+        adplayservertime 
+        order by 
+        thumbnail_id,
+        clientip,
+        adplayservertime desc,
+        videoplayservertime desc)
+        """
+
+        sql = """
+        CREATE TABLE avro_cc_cleaned_{dt} AS
+        select {columns} from (
+        select {columns} from 
+        (
+        select {columns}, {imload_group} as rownum 
+        from corner_cases_input where imloadservertime is not null
+        ) imload_cleaned
+        where rownum = 1
+        UNION ALL
+        select {columns} from 
+        (
+        select {columns}, {imvis_group} as rownum 
+        from corner_cases_input where imvisservertime is not null and 
+        imloadservertime is null
+        ) imvis_cleaned 
+        where rownum = 1
+        ) overall_cleaned
+        """.format(columns=','.join(x.name for x in self.avro_schema.fields),
+            imload_group=imload_group,imvis_group=imvis_group,
+            dt=execution_date.strftime("%Y%m%d%H"))
+
+        try:
+            _log.info('Corner cases SQL: {sql}'.format(sql=sql))
+            self.hive.execute(sql)
+
+            self.hive.execute('DROP TABLE IF EXISTS {table}'. \
+                format(table=cleaned_previousday))
+
+            self.hive.execute('DROP TABLE IF EXISTS corner_cases_input')
         except:
             _log.error("Error creating Avro Temp Table")
             statemon.state.increment('impala_table_creation_failure')
@@ -461,13 +545,15 @@ class ImpalaTableLoader(threading.Thread):
     """
 
     def __init__(self, cluster, event, execution_date, corner_cases,
-                 input_path):
+                 is_first_run, is_initial_data_load, input_path):
         super(ImpalaTableLoader, self).__init__()
         self.event = event
         self.cluster = cluster
         self.input_path = input_path
         self.execution_date = execution_date
         self.corner_cases = corner_cases
+        self.is_first_run = is_first_run
+        self.is_initial_data_load = is_initial_data_load
         self.status = 'INIT'
         self._stopped = threading.Event()
         self.table = ImpalaTable(self.cluster, self.event)
@@ -496,8 +582,10 @@ class ImpalaTableLoader(threading.Thread):
 
             _log.info('self.event is %s' % self.event)
             _log.info('self.corner_cases is %s' % self.corner_cases)
+            _log.info('self.is_first_run is %s' % self.is_first_run)
+            _log.info('is_initial_data_load is %s' % is_initial_data_load)
             if self.corner_cases and self.event == 'EventSequence':
-                self.table.create_avro_temp_table(self.execution_date)
+                self.table.handle_corner_cases(self.execution_date)
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):

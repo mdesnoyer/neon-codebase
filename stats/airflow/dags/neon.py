@@ -471,17 +471,10 @@ def _stage_files(**kwargs):
                                            execution_date=execution_date,
                                            prefix=staging_prefix)
 
-    corner_cases = None
-
     # Check if this is the first run of the day, if so pull the 
     # previous day files for processing
     if execution_date.strftime("%H") == '00':
         staging_date = execution_date - timedelta(days=1)
-    elif execution_date.strftime("%H") == '03':
-        staging_date = execution_date - timedelta(days=1)
-        corner_cases = True
-        _log.info("Corner cases run, input will be current date plus "
-                  "previous date")
     else:
         staging_date = execution_date
 
@@ -491,18 +484,6 @@ def _stage_files(**kwargs):
                                       execution_date=staging_date,
                                       task=task,
                                       input_path=kwargs['input_path'])
-
-    # This will be first time processing files for current day.
-    # Include the previous day files too for this processing to avoid
-    # the broken events across time boundaries
-    if corner_cases:
-        input_files_corner_case = _get_s3_input_files(dag=dag,
-                                      execution_date=execution_date,
-                                      task=task,
-                                      input_path=kwargs['input_path'])
-
-        # Concatenate the lists
-        input_files = input_files + input_files_corner_case
 
     # Copy files to staging location
     if input_files:
@@ -628,6 +609,8 @@ def _load_impala_table(**kwargs):
             event=event,
             execution_date=execution_date,
             corner_cases=corner_cases,
+            is_first_run=is_first_run,
+            is_initial_data_load=is_initial_data_load,
             input_path=os.path.join('s3://', output_bucket, cleaned_prefix))
     
         builder.run()
