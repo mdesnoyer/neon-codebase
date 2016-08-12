@@ -260,13 +260,13 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ExecutionError
 
-    def handle_corner_cases(self, execution_date):
+    def handle_corner_cases(self, execution_date, is_first_run):
         """"""
         """"""
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
         
-        if self.is_first_run:
+        if is_first_run:
             sql = """
             CREATE TABLE corner_cases_input AS
             SELECT {columns} from {table}
@@ -585,7 +585,8 @@ class ImpalaTableLoader(threading.Thread):
             _log.info('self.is_first_run is %s' % self.is_first_run)
             _log.info('is_initial_data_load is %s' % self.is_initial_data_load)
             if self.corner_cases and self.event == 'EventSequence':
-                self.table.handle_corner_cases(self.execution_date)
+                self.table.handle_corner_cases(self.execution_date,
+                                               self.is_first_run)
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):
