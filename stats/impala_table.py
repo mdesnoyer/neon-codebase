@@ -583,7 +583,7 @@ class ImpalaTableLoader(threading.Thread):
             _log.info('self.event is %s' % self.event)
             _log.info('self.corner_cases is %s' % self.corner_cases)
             _log.info('self.is_first_run is %s' % self.is_first_run)
-            _log.info('is_initial_data_load is %s' % is_initial_data_load)
+            _log.info('is_initial_data_load is %s' % self.is_initial_data_load)
             if self.corner_cases and self.event == 'EventSequence':
                 self.table.handle_corner_cases(self.execution_date)
 
