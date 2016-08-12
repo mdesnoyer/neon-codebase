@@ -265,6 +265,8 @@ class ImpalaTable(object):
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
         try:
+            self.hive.execute('DROP TABLE IF EXISTS avroeventsequences_temp')
+            
             sql = """
             CREATE TABLE avroeventsequences_temp AS
             select %s from (
@@ -482,7 +484,7 @@ class ImpalaTableLoader(threading.Thread):
 
             _log.info('self.event is %s' % self.event)
             _log.info('self.corner_cases is %s' % self.corner_cases)
-            if self.corner_cases and self.event == 'Eventsequences':
+            if self.corner_cases and self.event == 'EventSequence':
                 self.table.create_avro_temp_table(self.execution_date)
 
             parq_table = self.table._parquet_table()

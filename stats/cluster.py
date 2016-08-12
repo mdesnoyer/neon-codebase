@@ -570,9 +570,6 @@ class Cluster():
                                                     'RUNNING',
                                                     'WAITING']):
 
-            _log.info("Options.cluster_name is %s" % options.cluster_name)
-            _log.info("self.cluster_name is %s" % self.cluster_name)
-
             if cluster.name != self.cluster_name:
                 # The cluster has to have the right name to be a possible match
                 continue
