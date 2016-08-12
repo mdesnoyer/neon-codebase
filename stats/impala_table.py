@@ -359,6 +359,7 @@ class ImpalaTable(object):
         clientip,
         videoplayservertime desc
         )
+        """
 
         sql = """
         CREATE TABLE avro_cc_cleaned_{dt} AS
