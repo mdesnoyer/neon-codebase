@@ -709,6 +709,13 @@ class AccessLevels(object):
                  ACCOUNT_EDITOR | INTERNAL_ONLY_USER |\
                  GLOBAL_ADMIN
 
+class ResultType(object):
+    THUMBNAILS = 'thumbnails'
+    CLIPS = 'clips'
+
+    # Helpers 
+    ARRAY_OF_TYPES = [ THUMBNAILS, CLIPS ]
+
 class PythonNaNStrings(object): 
     INF = 'Infinite' 
     NEGINF = '-Infinite' 
@@ -4834,7 +4841,9 @@ class NeonApiRequest(NamespacedStoredObject):
             callback_state=CallbackState.NOT_SENT, 
             callback_email=None,
             age=None,
-            gender=None):
+            gender=None, 
+            result_type=None, 
+            n_clips=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -4881,6 +4890,12 @@ class NeonApiRequest(NamespacedStoredObject):
         # Demographic parameters for the video processing
         self.age = age
         self.gender= gender
+
+        # what result type (currently tnails or clips) we would like 
+        self.result_type = result_type 
+
+        # number of clips that would be desired if clips are chosen 
+        self.n_clips = n_clips  
 
     @classmethod
     def key2id(cls, key):
@@ -5557,6 +5572,50 @@ class ThumbnailURLMapper(NamespacedStoredObject):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
+class ClipMetadata(StoredObject): 
+    '''
+    Class schema for Clip information.
+
+    Keyed by clip_id
+    '''
+    def __init__(self, clip_id, video_id=None, urls=None,
+                 model_version=None, enabled=True,
+                 rank=None, refid=None,
+                 serving_frac=None, ctr=None,
+                 features=None, start_frame=None, end_frame=None):
+        super(ClipMetadata,self).__init__(clip_id)
+       
+        # video id this clip was generated from  
+        self.video_id = video_id
+        # url for this clip
+        self.urls = urls or [] 
+        # is this clip enabled for mastermind A/B testing 
+        self.enabled = enabled
+        # where this clip ranks amongst the other clips
+        self.rank = 0 if not rank else rank 
+        # what version of the model generated this clip
+        self.model_version = model_version 
+        # what frame this clip starts at 
+        self.start_frame = start_frame
+        # what frame this clip ends at 
+        self.end_frame = end_frame
+        
+        # This is a full feature vector. It stores a numpy array of
+        # floats.  Each index is dependent on the model used. Human
+        # readable versions of this exist in the Features table.
+        self.features = features 
+         
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ClipMetadata.__name__
+
+    @classmethod
+    def _additional_columns(cls):
+        return [PostgresColumn('features', '%s::bytea', 'features')]
+
+
 class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
@@ -6056,10 +6115,12 @@ class VideoJobThumbnailList(UnsaveableStoredObject):
     '''Represents the list of thumbnails from a video processing job.'''
     def __init__(self, age=None, gender=None, thumbnail_ids=None,
                  bad_thumbnail_ids=None,
+                 clip_ids=None, 
                  model_version=None):
         self.model_version = model_version
         self.thumbnail_ids = thumbnail_ids or []
         self.bad_thumbnail_ids = bad_thumbnail_ids or []
+        self.clip_ids = clip_ids or []
 
         # WARNING: If anything is added here, make sure to update
         # _merge_video_data in video_processor/client.py
@@ -6085,7 +6146,6 @@ class VideoMetadata(Searchable, StoredObject):
                  publish_date=None, hidden=None, share_token=None,
                  job_results=None, non_job_thumb_ids=None,
                  bad_tids=None, tag_id=None):
-        super(VideoMetadata, self).__init__(video_id)
         super(VideoMetadata, self).__init__(video_id)
         # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
         # contain the thumbs from the most recent job only.

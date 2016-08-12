@@ -114,6 +114,20 @@ CREATE TABLE cdnhostingmetadatalist (
 ALTER TABLE cdnhostingmetadatalist OWNER TO pgadmin;
 
 --
+-- Name: clipmetadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+--
+
+CREATE TABLE clipmetadata (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp,
+    updated_time timestamp DEFAULT current_timestamp,
+    features bytea DEFAULT NULL
+);
+
+ALTER TABLE clipmetadata OWNER to pgadmin;
+ 
+--
 -- Name: experimentstrategy; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 

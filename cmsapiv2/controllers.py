@@ -1847,10 +1847,19 @@ class VideoHelper(object):
         request.default_thumbnail = args.get('default_thumbnail_url', None)
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
-        request.api_param = int(args.get('n_thumbs', 5))
         request.callback_email = args.get('callback_email', None)
         request.age = args.get('age', None)
         request.gender = args.get('gender', None)
+       
+        # set the requests result type  
+        result_type = args.get('result_type', None) 
+        if result_type and result_type.lower() == neondata.ResultType.CLIPS:
+            request.n_clips = int(args.get('n_clips', 1)) 
+            request.result_type = result_type 
+        else: 
+            request.result_type = neondata.ResultType.THUMBNAILS 
+            request.api_param = int(args.get('n_thumbs', 5))
+
         yield request.save(async=True)
 
         if request:
@@ -2230,11 +2239,17 @@ class VideoHandler(ShareableContentHandler):
             'callback_email': All(Coerce(str), Length(min=1, max=2048)),
             'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
             'gender': In(model.predictor.VALID_GENDER),
-            'age': In(model.predictor.VALID_AGE_GROUP)
+            'age': In(model.predictor.VALID_AGE_GROUP),
+            'n_clips': All(Coerce(int), Range(min=1, max=8)),  
+            'result_type': In(neondata.ResultType.ARRAY_OF_TYPES) 
         })
 
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
+        result_type = args.get('result_type', None) 
+        if not result_type: 
+            args['result_type'] = neondata.ResultType.THUMBNAILS 
+
         schema(args)
 
         # Make sure that the external_video_ref is of a form we can handle
@@ -3845,6 +3860,72 @@ class SocialImageHandler(ShareableContentHandler):
     def get_access_levels(cls):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
+class ClipHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            'clip_ids': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+        }) 
+        
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+
+        clip_ids = args['clip_ids'].split(',')
+        
+        fields = args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
+
+        _clips = yield neondata.ClipMetadata.get_many(
+            clip_ids,
+            create_default=False,
+            log_missing=False,
+            async=True)
+
+        clips_dict = {}
+        clips = yield [self.db2api(obj, fields)
+                         for obj in _clips]
+        clips_dict['clips'] = clips
+        clips_dict['count'] = len(clips)
+
+        self.success(clips_dict)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['video_id', 'clip_id', 'rank', 'start_frame',
+                'enabled', 'urls', 'renditions', 'end_frame', 
+                'created', 'updated']
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['rank', 'start_frame',
+                'enabled', 'urls', 'renditions', 'end_frame', 
+                'created', 'updated']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field, age=None, gender=None):
+        if field == 'video_id':
+            retval = neondata.InternalVideoID.to_external(
+                neondata.InternalVideoID.from_thumbnail_id(obj.key))
+        elif field == 'clip_id':
+            retval = obj.key
+        # TODO neon_score, feature_ids, renditions 
+        elif field == 'url':
+            retval = obj.urls[0] if obj.urls else []
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ 
+        } 
 
 '''*********************************************************************
 Endpoints
@@ -3856,7 +3937,6 @@ application = tornado.web.Application([
     (r'/api/v2/videos/search/?$', VideoSearchInternalHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler),
     (r'/api/v2/email/support/?$', EmailSupportHandler),
-
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$', BillingAccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
@@ -3885,11 +3965,11 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/tags/search/?$', TagSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/clips/?$', ClipHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', VideoShareHandler),
-
     (r'/healthcheck/?$', HealthCheckHandler)
 ], gzip=True)
 
