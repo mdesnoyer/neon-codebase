@@ -431,7 +431,8 @@ class ImpalaTable(object):
         ) 
         overall_cleaned
         """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-            imload_group=imload_group,imvis_group=imvis_group,
+            imload_group=imload_group,imvis_group=imvis_group,imclick_group=imclick_group,
+            adplay_group=adplay_group,videoplay_group=videoplay_group,
             dt=execution_date.strftime("%Y%m%d%H"))
 
         try:
