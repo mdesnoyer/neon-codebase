@@ -259,14 +259,14 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ExecutionError
 
-    def create_avro_temp_table(self):
+    def create_avro_temp_table(self, execution_date):
         """"""
         
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
         try:
             self.hive.execute('DROP TABLE IF EXISTS avroeventsequences_temp')
-            
+
             sql = """
             CREATE TABLE avroeventsequences_temp AS
             select %s from (
