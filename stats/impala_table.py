@@ -273,8 +273,11 @@ class ImpalaTable(object):
                           table=table)
         else:
             cleaned_previousday = 'avro_cc_cleaned_{dt}'. \
-                            format(dt=(execution_date - timedelta(days=1)). \
-                            strftime("%Y%m%d%H"))
+                                  format(dt=(execution_date - timedelta(days=1)). \
+                                  strftime("%Y%m%d%H"))
+            avro_previousday = 'avroeventsequences_{dt}'. \
+                               format(dt=(execution_date - timedelta(hours=3)).
+                               strftime("%Y%m%d%H"))
             sql = """
             CREATE TABLE corner_cases_input AS
             SELECT {columns} from
@@ -282,11 +285,13 @@ class ImpalaTable(object):
             SELECT {columns} from {table}
             UNION ALL
             SELECT {columns} from {cleaned_previousday}
+            UNION ALL
+            SELECT {columns} from {avro_previousday}
             ) cc_input
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                        table=table,
                        cleaned_previousday=cleaned_previousday)
-        
+
         _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
         self.hive.execute(sql)
 
@@ -344,24 +349,86 @@ class ImpalaTable(object):
         videoplayservertime desc)
         """
 
+        videoplay_group = """
+        row_number() over (partition by
+        thumbnail_id,
+        clientip,
+        videoplayservertime
+        order by
+        thumbnail_id,
+        clientip,
+        videoplayservertime desc
+        )
+
         sql = """
         CREATE TABLE avro_cc_cleaned_{dt} AS
-        select {columns} from (
+        select {columns} from 
+        (
         select {columns} from 
         (
         select {columns}, {imload_group} as rownum 
-        from corner_cases_input where imloadservertime is not null
+        from corner_cases_input 
+        where
+        thumbnail_id is not null and
+        imloadservertime is not null
         ) imload_cleaned
         where rownum = 1
         UNION ALL
         select {columns} from 
         (
         select {columns}, {imvis_group} as rownum 
-        from corner_cases_input where imvisservertime is not null and 
+        from corner_cases_input 
+        where
+        thumbnail_id is not null and
+        imvisservertime is not null and 
         imloadservertime is null
         ) imvis_cleaned 
         where rownum = 1
-        ) overall_cleaned
+        UNION ALL
+        select {columns} from
+        (
+        select {columns}, {imclick_group} as rownum
+        from corner_cases_input 
+        where
+        thumbnail_id is not null and
+        imclickservertime is not null and 
+        imloadservertime is null and 
+        imvisservertime is null
+        ) imclick_cleaned
+        where rownum = 1
+        UNION ALL
+        select {columns} from
+        (
+        select {columns}, {adplay_group} as rownum
+        from corner_cases_input
+        where
+        thumbnail_id is not null and
+        adplayservertime is not null and 
+        imloadservertime is null and 
+        imvisservertime is null and 
+        imclickservertime is null
+        ) adplay_cleaned
+        where rownum = 1
+        UNION ALL
+        select {columns} from
+        (
+        select {columns}, {videoplay_group} as rownum
+        from corner_cases_input
+        where
+        thumbnail_id is not null and
+        videoplayservertime is not null and
+        imloadservertime is null and 
+        imvisservertime is null and 
+        imclickservertime is null and
+        adplayservertime is null
+        ) videoplay_cleaned
+        where rownum = 1
+        UNION ALL
+        select {columns} 
+        from corner_cases_input
+        where thumbnail_id is null
+        ) 
+        overall_cleaned
         """.format(columns=','.join(x.name for x in self.avro_schema.fields),
             imload_group=imload_group,imvis_group=imvis_group,
             dt=execution_date.strftime("%Y%m%d%H"))
@@ -370,10 +437,26 @@ class ImpalaTable(object):
             _log.info('Corner cases SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
-            self.hive.execute('DROP TABLE IF EXISTS {table}'. \
-                format(table=cleaned_previousday))
+            _log.info('Done corner cases')
 
-            self.hive.execute('DROP TABLE IF EXISTS corner_cases_input')
+            sql="""
+            DROP IF EXISTS {table}
+            """.format(table=cleaned_previousday)
+
+            _log.info('Delete sql is %s' % sql)
+
+            self.hive.execute(sql)
+
+            _log.info('Done delete ')
+
+            sql="""
+            DROP TABLE IF EXISTS corner_cases_input
+            """
+            _log.info('Delete sql for cc input is %s' % sql)
+
+            self.hive.execute(sql)
+
+            _log.info('Done delete ccinput')
         except:
             _log.error("Error creating Avro Temp Table")
             statemon.state.increment('impala_table_creation_failure')
@@ -590,7 +673,7 @@ class ImpalaTableLoader(threading.Thread):
                 _log.info("Parquet table for event '%s' exists: %s" % 
                            (self.event, parq_table))
                 self.table.load_parquet_table(self.execution_date)
-                self.table.drop_avro_table(self.execution_date)
+                self.table.drop_avro_table((self.execution_date - timedelta(hours=3)))
             else:
                 _log.error("Parquet table for event '%s' missing: %s" %
                            (self.event, parq_table))
