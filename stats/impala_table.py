@@ -17,7 +17,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'gen-py'))
 import avro.schema
 from boto.s3.connection import S3Connection
 import boto.s3.key
-import datetime
 from hive_service import ThriftHive
 from hive_service.ttypes import HiveServerException
 import impala.dbapi
@@ -272,7 +271,6 @@ class ImpalaTable(object):
             SELECT {columns} from {table}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                           table=table)
-            self.hive.execute(sql)
         else:
             cleaned_previousday = 'avro_cc_cleaned_{dt}'. \
                             format(dt=(execution_date - timedelta(days=1)). \
@@ -288,9 +286,9 @@ class ImpalaTable(object):
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                        table=table,
                        cleaned_previousday=cleaned_previousday)
-            self.hive.execute(sql)
-
+        
         _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
+        self.hive.execute(sql)
 
         imload_group = """
         row_number() over (partition by 
@@ -585,8 +583,7 @@ class ImpalaTableLoader(threading.Thread):
             _log.info('self.is_first_run is %s' % self.is_first_run)
             _log.info('is_initial_data_load is %s' % self.is_initial_data_load)
             if self.corner_cases and self.event == 'EventSequence':
-                self.table.handle_corner_cases(self.execution_date,
-                                               self.is_first_run)
+                self.table.handle_corner_cases(self.execution_date,self.is_first_run)
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):
@@ -624,13 +621,13 @@ def update_table_build_times(cluster):
     if 'table_build_times' in tables:
         _log.info('table_build_times exists, updating it')
         cursor.execute("insert into table_build_times (done_time) values ('%s')" %
-            datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+            datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
     else:
         _log.info('table_build_times does not exist, creating and updating')
         cursor.execute('create table table_build_times '
             '(done_time timestamp) stored as PARQUET')
         cursor.execute("insert into table_build_times (done_time) values ('%s')" %
-            datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+            datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
 
     _log.debug('Finished building Impala tables')
 
