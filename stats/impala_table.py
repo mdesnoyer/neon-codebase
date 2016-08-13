@@ -693,7 +693,7 @@ class ImpalaTableLoader(threading.Thread):
                            (self.event, parq_table))
                 self.table.load_parquet_table(self.execution_date,
                                               self.is_initial_data_load)
-                self.table.drop_avro_table((self.execution_date - timedelta(hours=3)))
+                self.table.drop_avro_table(self.execution_date)
             else:
                 _log.error("Parquet table for event '%s' missing: %s" %
                            (self.event, parq_table))
