@@ -542,10 +542,11 @@ class ImpalaTable(object):
             if is_initial_data_load:
                 sql = """
                 insert overwrite table %s
-                partition(tai, yr, mnth, day=-1)
+                partition(tai, yr, mnth, day)
                 select %s, trackerAccountId,
                 year(cast(serverTime as timestamp)),
-                month(cast(serverTime as timestamp))
+                month(cast(serverTime as timestamp)),
+                -1
                 from %s""" % (parq_table,
                               ','.join(x.name for x in self.avro_schema.fields),
                               avro_table)
