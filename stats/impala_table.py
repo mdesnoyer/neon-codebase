@@ -491,7 +491,7 @@ class ImpalaTable(object):
             self.hive.execute("""
             CREATE TABLE IF NOT EXISTS %s
             (%s)
-            partitioned by (tai string, yr int, mnth int)
+            partitioned by (tai string, yr int, mnth int, day int)
             ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe'
             STORED AS INPUTFORMAT 'parquet.hive.DeprecatedParquetInputFormat'
             OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
