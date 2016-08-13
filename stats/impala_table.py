@@ -260,8 +260,9 @@ class ImpalaTable(object):
             raise ExecutionError
 
     def handle_corner_cases(self, execution_date, is_first_run):
-        """"""
-        """"""
+        """
+        put in hive parameters
+        """
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
         
@@ -502,7 +503,7 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ImpalaError
 
-    def load_parquet_table(self, execution_date):
+    def load_parquet_table(self, execution_date, is_initial_data_load=None):
         '''Load data into the Parquet table from the external Avro table
         :param execution_date: the Airflow execution_date object
         :param_type datetime.datetime:
@@ -536,17 +537,33 @@ class ImpalaTable(object):
             self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
 
-            sql = """
-            insert overwrite table %s
-            partition(tai, yr, mnth)
-            select %s, trackerAccountId,
-            year(cast(serverTime as timestamp)),
-            month(cast(serverTime as timestamp))
-            from %s""" % (parq_table,
-                          ','.join(x.name for x in self.avro_schema.fields),
-                          avro_table)
+            _log.info('is_initial_data_load is %s' % is_initial_data_load)
+
+            if is_initial_data_load:
+                sql = """
+                insert overwrite table %s
+                partition(tai, yr, mnth, day=-1)
+                select %s, trackerAccountId,
+                year(cast(serverTime as timestamp)),
+                month(cast(serverTime as timestamp))
+                from %s""" % (parq_table,
+                              ','.join(x.name for x in self.avro_schema.fields),
+                              avro_table)
+            else:
+                sql = """
+                insert overwrite table %s
+                partition(tai, yr, mnth, day)
+                select %s, trackerAccountId,
+                year(cast(serverTime as timestamp)),
+                month(cast(serverTime as timestamp)),
+                day(cast(serverTime as timestamp))
+                from %s""" % (parq_table,
+                              ','.join(x.name for x in self.avro_schema.fields),
+                              avro_table)
+
             _log.info('LOAD Impala-Parquet table command: {sql}'.format(
                 sql=sql))
+
             self.hive.execute(sql)
             self._refresh_table(parq_table)
 
@@ -667,14 +684,15 @@ class ImpalaTableLoader(threading.Thread):
             _log.info('self.corner_cases is %s' % self.corner_cases)
             _log.info('self.is_first_run is %s' % self.is_first_run)
             _log.info('is_initial_data_load is %s' % self.is_initial_data_load)
-            if self.corner_cases and self.event == 'EventSequence':
-                self.table.handle_corner_cases(self.execution_date,self.is_first_run)
+            #if self.corner_cases and self.event == 'EventSequence':
+            #    self.table.handle_corner_cases(self.execution_date,self.is_first_run)
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):
                 _log.info("Parquet table for event '%s' exists: %s" % 
                            (self.event, parq_table))
-                self.table.load_parquet_table(self.execution_date)
+                self.table.load_parquet_table(self.execution_date,
+                                              self.is_initial_data_load)
                 self.table.drop_avro_table((self.execution_date - timedelta(hours=3)))
             else:
                 _log.error("Parquet table for event '%s' missing: %s" %
