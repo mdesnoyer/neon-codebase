@@ -408,8 +408,8 @@ class ImpalaTable(object):
         _log.info('Registering Avro Temp table with hive')
 
         sql="""
-        DROP TABLE IF EXISTS corner_cases_input
-        """
+        DROP TABLE IF EXISTS corner_cases_input_{dt}
+        """.format(dt=execution_date.strftime("%Y%m%d%H"))
 
         _log.info('Drop corner cases SQL: {sql}'.format(sql=sql))
         self.hive.execute(sql)
@@ -417,10 +417,10 @@ class ImpalaTable(object):
         if is_first_run and is_initial_data_load:
             # add where condition here for yr,month,day
             sql = """
-            CREATE TABLE corner_cases_input AS
+            CREATE TABLE corner_cases_input_{dt} AS
             SELECT {columns} from {table}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       table=table)
+                       table=table,dt=execution_date.strftime("%Y%m%d%H"))
         else:
             cc_cleaned_previousrun = 'avro_cc_cleaned_{dt}'. \
                                      format(dt=(execution_date - timedelta(hours=3)). \
@@ -445,7 +445,7 @@ class ImpalaTable(object):
             self.hive.execute(sql)
 
             sql = """
-            CREATE TABLE corner_cases_input AS
+            CREATE TABLE corner_cases_input_{dt} AS
             SELECT {columns} from
             (
             SELECT {columns} from {table}
@@ -453,7 +453,7 @@ class ImpalaTable(object):
             SELECT {columns} from {cc_cleaned_previousrun}
             ) cc_input
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       table=table,
+                       table=table,dt=execution_date.strftime("%Y%m%d%H"),
                        cc_cleaned_previousrun=cc_cleaned_previousrun)
 
         _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
@@ -541,7 +541,7 @@ class ImpalaTable(object):
         select {columns} from 
         (
         select {columns}, {imload_group} as rownum 
-        from corner_cases_input 
+        from corner_cases_input_{dt}
         where
         thumbnail_id is not null and
         imloadservertime is not null
@@ -551,7 +551,7 @@ class ImpalaTable(object):
         select {columns} from 
         (
         select {columns}, {imvis_group} as rownum 
-        from corner_cases_input 
+        from corner_cases_input_{dt} 
         where
         thumbnail_id is not null and
         imvisservertime is not null and 
@@ -562,7 +562,7 @@ class ImpalaTable(object):
         select {columns} from
         (
         select {columns}, {imclick_group} as rownum
-        from corner_cases_input 
+        from corner_cases_input_{dt} 
         where
         thumbnail_id is not null and
         imclickservertime is not null and 
@@ -574,7 +574,7 @@ class ImpalaTable(object):
         select {columns} from
         (
         select {columns}, {adplay_group} as rownum
-        from corner_cases_input
+        from corner_cases_input_{dt}
         where
         thumbnail_id is not null and
         adplayservertime is not null and 
@@ -587,7 +587,7 @@ class ImpalaTable(object):
         select {columns} from
         (
         select {columns}, {videoplay_group} as rownum
-        from corner_cases_input
+        from corner_cases_input_{dt}
         where
         thumbnail_id is not null and
         videoplayservertime is not null and
@@ -599,7 +599,7 @@ class ImpalaTable(object):
         where rownum = 1
         UNION ALL
         select {columns} 
-        from corner_cases_input
+        from corner_cases_input_{dt}
         where thumbnail_id is null
         ) 
         overall_cleaned
@@ -619,8 +619,8 @@ class ImpalaTable(object):
 
 
             sql="""
-            DROP TABLE IF EXISTS corner_cases_input
-            """
+            DROP TABLE IF EXISTS corner_cases_input_{dt}
+            """.format(dt=execution_date.strftime("%Y%m%d%H"))
             self.hive.execute(sql)
 
             _log.info('Done delete ccinput: {sql}'.format(sql=sql))
