@@ -620,10 +620,11 @@ class ImpalaTable(object):
 
 
             sql="""
-            INSERT OVERWRITE DIRECTORY cc_cleaned_path_current
+            INSERT OVERWRITE DIRECTORY {cc_cleaned_path_current}
             select {columns} from avro_cc_cleaned_{dt}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       dt=execution_date.strftime("%Y%m%d%H"))
+                       dt=execution_date.strftime("%Y%m%d%H"),
+                       cc_cleaned_path_current=cc_cleaned_path_current)
 
             _log.info('Done moving data to S3: {sql}'.format(sql=sql))
             self.hive.execute(sql)
