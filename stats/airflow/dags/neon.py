@@ -957,7 +957,7 @@ cc_handler = PythonOperator(
     provide_context=True,
     op_kwargs=dict(output_path=options.output_path,
                    cc_cleaned_path=options.cc_cleaned_path))
-cc_handler.set_upstream(mr_cleaning_job, s3copy)
+cc_handler.set_upstream([mr_cleaning_job, s3copy])
 
 
 # Load the cleaned files from Map/Reduce into Impala
