@@ -104,13 +104,19 @@ options.define('staging_path', default='s3://neon-tracker-logs-test-hadoop/',
                help=('S3 URI base path where to stage files for input to '
                      'Map/Reduce jobs. Staged files, relative to this '
                      'setting, are prefixed '
-                     '<dag_id>/staging/<YYYY>/<MM>/<DD>/<HH>/.'))
+                     'staging/<YYYY>/<MM>/<DD>/<HH>/.'))
 options.define('output_path', default='s3://neon-tracker-logs-test-hadoop/',
                type=str,
                help=('S3 URI base path where to put cleaned files from '
                      'Map/Reduce jobs. Cleaned files, relative to this '
                      'setting, are prefixed '
-                     '<dag_id>/cleaned/<YYYY>/<MM>/<DD>/<HH>/'))
+                     'cleaned/<YYYY>/<MM>/<DD>/<HH>/'))
+options.define('cc_cleaned_path', default='s3://neon-tracker-logs-v2/airflow/cc_cleaned',
+               type=str,
+               help=('S3 URI base path where to put corner cases cleaned files from '
+                     'Map/Reduce jobs. Cleaned files, relative to this '
+                     'setting, are prefixed '
+                     'cc_cleaned/<YYYY>/<MM>/<DD>/<HH>/'))
 options.define('cleaning_mr_memory', default=2048, type=int,
                help='Memory in MB needed for the map of the cleaning job')
 options.define('clicklog_period', default=3, type=int,
@@ -441,7 +447,7 @@ def _quiet_period(**kwargs):
     execution_date = kwargs['execution_date']
 
     # Do not wait when doing backfill
-    if execution_date.strftime("%Y/%m/%d/%H") < datetime.utcnow().strftime("%Y/%m/%d/%H"):
+    if execution_date.strftime("%Y/%m/%d") == datetime.utcnow().strftime("%Y/%m/%d"):
         _log.info('Skipping quiet period as this is a backfill run')
     else:
         _log.info('Sleeping for quiet period')
@@ -772,6 +778,76 @@ def _checkpoint_hdfs_to_s3(**kwargs):
             cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
 
+def _handle_corner_cases(**kwargs):
+    """
+    Handle the corner cases. Since we process the full day's file every run,
+    we will have to handle corner cases too. Only exception being first run 
+    which is going to be a consolidated big run, will skip corner case handling
+    for this run
+    """
+    dag = kwargs['dag']
+    execution_date = kwargs['execution_date']
+    task = kwargs['task_instance_key_str']
+
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+
+    # Check if this is the first run and take appropriate action
+    is_first_run, is_initial_data_load = check_first_run(execution_date)
+
+    if is_first_run and is_initial_data_load:
+        _log.info("This is first & big run, bumping up the num of task instances to %s" %
+            options.max_task_instances)
+        cluster.change_instance_group_size(group_type='TASK', 
+                                           new_size=options.max_task_instances)
+
+    output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
+    cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                            prefix=output_prefix)
+
+    cc_bucket, cc_op_prefix = _get_s3_tuple(kwargs['cc_cleaned_path'])
+    cc_prev_prefix = _get_s3_cleaned_prefix(execution_date=
+                                           (execution_date - timedelta(hours=3)),
+                                           prefix=cc_op_prefix)
+    cc_curr_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                           prefix=cc_op_prefix)
+
+
+    _log.info("{task}: Handling corner cases!".format(task=task))
+    
+    try:
+        _log.info("Input Path for clean up cases is %s" % 
+            os.path.join('s3://', output_bucket, cleaned_prefix))
+
+        _log.info("Input Path for prev clean up cases is %s" %
+            os.path.join('s3://'), cc_bucket, cc_prev_prefix)
+
+        _log.info("Input Path for curr clean up cases is %s" %
+            os.path.join('s3://'), cc_bucket, cc_curr_prefix)
+
+        builder = stats.impala_table.CornerCaseHandler(
+            cluster=cluster,
+            execution_date=execution_date,
+            is_first_run=is_first_run,
+            is_initial_data_load=is_initial_data_load,
+            input_path=os.path.join('s3://', output_bucket, cleaned_prefix),
+            cc_cleaned_path_prev=os.path.join('s3://', cc_bucket, cc_prev_prefix),
+            cc_cleaned_path_current=os.path.join('s3://', cc_bucket, cc_curr_prefix))
+    
+        builder.run()
+
+    except:
+        statemon.state.increment('impala_table_load_failure')
+        raise
+    finally:
+        if is_first_run and is_initial_data_load:
+            _log.info("Bringing down the number of task instances to zero")
+            cluster.change_instance_group_size(group_type='TASK', new_size=0)
+
+    return "Corner Cases Cleaned"
+
+
+
 # ----------------------------------
 # AIRFLOW
 # ----------------------------------
@@ -858,6 +934,7 @@ mr_cleaning_job = PythonOperator(
                    output_path=options.output_path, timeout=60 * 600),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
     priority_weight=8,
+    depends_on_past=True,
     execution_timeout=timedelta(minutes=600))
 mr_cleaning_job.set_upstream(stage_files)
 
@@ -872,6 +949,17 @@ s3copy = PythonOperator(
 s3copy.set_upstream(mr_cleaning_job)
 
 
+# Handle Corner Cases
+cc_handler = PythonOperator(
+    task_id='handle_corner_cases',
+    dag=clicklogs,
+    python_callable=_handle_corner_cases,
+    provide_context=True,
+    op_kwargs=dict(output_path=options.output_path,
+                   cc_cleaned_path=options.cc_cleaned_path))
+cc_handler.set_upstream(mr_cleaning_job, s3copy)
+
+
 # Load the cleaned files from Map/Reduce into Impala
 load_impala_tables = []
 for event in __EVENTS:
@@ -881,7 +969,6 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_create_tables,
         op_kwargs=dict(event=event))
-    create_op.set_upstream(mr_cleaning_job)
 
     # Load the data into the impala table
     op = PythonOperator(
@@ -891,8 +978,8 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-        priority_weight=9)
-    op.set_upstream([create_op, mr_cleaning_job, s3copy])
+        priority_weight=90)
+    op.set_upstream([mr_cleaning_job, s3copy])
     load_impala_tables.append(op)
 
 

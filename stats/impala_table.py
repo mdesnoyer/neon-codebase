@@ -259,42 +259,207 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ExecutionError
 
-    def handle_corner_cases(self, execution_date, is_first_run):
+    def create_cc_avro_table(self, execution_date, input_path):
+        """"""
+        self._upload_schema()
+        # External Avro table in S3
+        table = self._avro_table(execution_date)
+        _log.info('Registering event {event} Avro table {table} with Hive'
+                  .format(event=self.event, table=table))
+        try:
+            self.drop_avro_table(execution_date)
+            sql = """
+            CREATE EXTERNAL TABLE %s
+            ROW FORMAT SERDE
+            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+            STORED AS
+            INPUTFORMAT
+            'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
+            OUTPUTFORMAT
+            'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
+            LOCATION '%s'
+            TBLPROPERTIES (
+            'avro.schema.url'='%s'
+            )""" % (table, os.path.join(input_path, self.event_schema),
+                    self._schema_path())
+            _log.info('CREATE Avro Table SQL: {sql}'.format(sql=sql))
+            self.hive.execute(sql)
+
+        except:
+            _log.error("Error creating event %s Avro table %s" % (self.event, table))
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            raise ExecutionError
+
+    def drop_avro_table(self, execution_date):
+        """
+        Drop the external Avro table for a given date
+        :param execution_date:
+        :return:
+        """
+        try:
+            table = self._avro_table(execution_date)
+            _log.debug('Dropping Avro table {table}'.format(table=table))
+            self.hive.execute('DROP TABLE IF EXISTS {table}'.format(table=table))
+            if self.exists(table):
+                self.hive.execute('invalidate metadata {0:s}'.format(table))
+        except:
+            _log.error('Error dropping Avro table {table}'.format(table=table))
+            self.status = 'ERROR'
+            raise ExecutionError
+
+    def create_parquet_table(self):
+        """Create the Impala Parquet-format table"""
+        try:
+            table = self._parquet_table()
+            _log.info("Creating Impala Parquet table: %s" % table)
+            self.hive.execute("""
+            CREATE TABLE IF NOT EXISTS %s
+            (%s)
+            partitioned by (tai string, yr int, mnth int, day int)
+            ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe'
+            STORED AS INPUTFORMAT 'parquet.hive.DeprecatedParquetInputFormat'
+            OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
+            """ % (table, self._generate_table_definition()))
+            self._refresh_table(table)
+        except:
+            _log.error('Error creating event %s Parquet table %s' % (self.event, table))
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            raise ImpalaError
+
+    def load_parquet_table(self, execution_date, is_initial_data_load=None):
+        '''Load data into the Parquet table from the external Avro table
+        :param execution_date: the Airflow execution_date object
+        :param_type datetime.datetime:
+        :param_type integer:
+        '''
+        # Building parquet tables takes a lot of
+        # memory, so make sure we give the job enough.
+        # We partition by tai-year-month to allow for idempotent inserts.
+        # https://cwiki.apache.org/confluence/display/Hive/DynamicPartitions
+        try:
+            parq_table = self._parquet_table()
+            avro_table = self._avro_table(execution_date)
+
+            _log.info('Loading to Impala Parquet-format table {parq} from '
+                      '{avro}'.format(parq=parq_table, avro=avro_table))
+            heap_size = int(options.parquet_memory * 0.9)
+
+            self.hive.execute('SET hive.exec.compress.output=true')
+            self.hive.execute('SET avro.output.codec=snappy')
+            self.hive.execute('SET parquet.compression=SNAPPY')
+            self.hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
+            self.hive.execute('SET hive.exec.max.created.files=500000')
+            self.hive.execute('SET hive.exec.max.dynamic.partitions.pernode=200')
+
+            self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
+                              options.parquet_memory)
+            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                              heap_size)
+            self.hive.execute('SET mapreduce.map.memory.mb=%d' %
+                              options.parquet_memory)
+            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                              heap_size)
+
+            _log.info('is_initial_data_load is %s' % is_initial_data_load)
+
+            if is_initial_data_load:
+                sql = """
+                insert overwrite table %s
+                partition(tai, yr, mnth, day)
+                select %s, trackerAccountId,
+                year(cast(serverTime as timestamp)),
+                month(cast(serverTime as timestamp)),
+                -1
+                from %s""" % (parq_table,
+                              ','.join(x.name for x in self.avro_schema.fields),
+                              avro_table)
+            else:
+                sql = """
+                insert overwrite table %s
+                partition(tai, yr, mnth, day)
+                select %s, trackerAccountId,
+                year(cast(serverTime as timestamp)),
+                month(cast(serverTime as timestamp)),
+                day(cast(serverTime as timestamp))
+                from %s""" % (parq_table,
+                              ','.join(x.name for x in self.avro_schema.fields),
+                              avro_table)
+
+            _log.info('LOAD Impala-Parquet table command: {sql}'.format(
+                sql=sql))
+
+            self.hive.execute(sql)
+            self._refresh_table(parq_table)
+
+        except:
+            _log.error("Error loading event %s Parquet table %s" % (self.event, parq_table))
+            statemon.state.increment('impala_table_creation_failure')
+            self.status = 'ERROR'
+            raise ImpalaTableLoadError
+
+    def create_input_for_cc(self, execution_date, is_first_run, 
+                            is_initial_data_load, cc_cleaned_path_prev):
         """
         put in hive parameters
         """
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
+
+        sql="""
+        DROP TABLE IF EXISTS corner_cases_input
+        """
+
+        _log.info('Drop corner cases SQL: {sql}'.format(sql=sql))
+        self.hive.execute(sql)
         
-        if is_first_run:
+        if is_first_run and is_initial_data_load:
+            # add where condition here for yr,month,day
             sql = """
             CREATE TABLE corner_cases_input AS
             SELECT {columns} from {table}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                          table=table)
+                       table=table)
         else:
-            cleaned_previousday = 'avro_cc_cleaned_{dt}'. \
-                                  format(dt=(execution_date - timedelta(days=1)). \
-                                  strftime("%Y%m%d%H"))
-            avro_previousday = 'avroeventsequences_{dt}'. \
-                               format(dt=(execution_date - timedelta(hours=3)).
-                               strftime("%Y%m%d%H"))
+            cc_cleaned_previousrun = 'avro_cc_cleaned_{dt}'. \
+                                     format(dt=(execution_date - timedelta(hours=3)). \
+                                     strftime("%Y%m%d%H"))
+
+            sql = """
+            CREATE EXTERNAL TABLE IF NOT EXISTS %s
+            ROW FORMAT SERDE
+            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+            STORED AS
+            INPUTFORMAT
+            'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
+            OUTPUTFORMAT
+            'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
+            LOCATION '%s'
+            TBLPROPERTIES (
+            'avro.schema.url'='%s'
+            )""" % (cc_cleaned_previousrun, cc_cleaned_path_prev,
+                    self._schema_path())
+            
+            _log.info('CREATE cc previous run SQL: {sql}'.format(sql=sql))
+            self.hive.execute(sql)
+
             sql = """
             CREATE TABLE corner_cases_input AS
             SELECT {columns} from
             (
             SELECT {columns} from {table}
             UNION ALL
-            SELECT {columns} from {cleaned_previousday}
-            UNION ALL
-            SELECT {columns} from {avro_previousday}
+            SELECT {columns} from {cc_cleaned_previousrun}
             ) cc_input
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                        table=table,
-                       cleaned_previousday=cleaned_previousday)
+                       cc_cleaned_previousrun=cc_cleaned_previousrun)
 
         _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
         self.hive.execute(sql)
+
+    def resolve_corner_cases(self, execution_date, cc_cleaned_path_current):
 
         imload_group = """
         row_number() over (partition by 
@@ -432,148 +597,40 @@ class ImpalaTable(object):
         ) 
         overall_cleaned
         """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-            imload_group=imload_group,imvis_group=imvis_group,imclick_group=imclick_group,
-            adplay_group=adplay_group,videoplay_group=videoplay_group,
+            imload_group=imload_group,
+            imvis_group=imvis_group,
+            imclick_group=imclick_group,
+            adplay_group=adplay_group,
+            videoplay_group=videoplay_group,
             dt=execution_date.strftime("%Y%m%d%H"))
 
         try:
             _log.info('Corner cases SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
-            _log.info('Done corner cases')
+            _log.info('Done corner cases: {sql}'.format(sql=sql))
 
-            sql="""
-            DROP IF EXISTS {table}
-            """.format(table=cleaned_previousday)
-
-            _log.info('Delete sql is %s' % sql)
-
-            self.hive.execute(sql)
-
-            _log.info('Done delete ')
 
             sql="""
             DROP TABLE IF EXISTS corner_cases_input
             """
-            _log.info('Delete sql for cc input is %s' % sql)
-
             self.hive.execute(sql)
 
-            _log.info('Done delete ccinput')
-        except:
-            _log.error("Error creating Avro Temp Table")
-            statemon.state.increment('impala_table_creation_failure')
-            self.status = 'ERROR'
-            raise ExecutionError
+            _log.info('Done delete ccinput: {sql}'.format(sql=sql))
 
-    def drop_avro_table(self, execution_date):
-        """
-        Drop the external Avro table for a given date
-        :param execution_date:
-        :return:
-        """
-        try:
-            table = self._avro_table(execution_date)
-            _log.debug('Dropping Avro table {table}'.format(table=table))
-            self.hive.execute('DROP TABLE IF EXISTS {table}'.format(table=table))
-            if self.exists(table):
-                self.hive.execute('invalidate metadata {0:s}'.format(table))
-        except:
-            _log.error('Error dropping Avro table {table}'.format(table=table))
-            self.status = 'ERROR'
-            raise ExecutionError
 
-    def create_parquet_table(self):
-        """Create the Impala Parquet-format table"""
-        try:
-            table = self._parquet_table()
-            _log.info("Creating Impala Parquet table: %s" % table)
-            self.hive.execute("""
-            CREATE TABLE IF NOT EXISTS %s
-            (%s)
-            partitioned by (tai string, yr int, mnth int, day int)
-            ROW FORMAT SERDE 'parquet.hive.serde.ParquetHiveSerDe'
-            STORED AS INPUTFORMAT 'parquet.hive.DeprecatedParquetInputFormat'
-            OUTPUTFORMAT 'parquet.hive.DeprecatedParquetOutputFormat'
-            """ % (table, self._generate_table_definition()))
-            self._refresh_table(table)
-        except:
-            _log.error('Error creating event %s Parquet table %s' % (self.event, table))
-            statemon.state.increment('impala_table_creation_failure')
-            self.status = 'ERROR'
-            raise ImpalaError
+            sql="""
+            INSERT OVERWRITE DIRECTORY cc_cleaned_path_current
+            select {columns} from avro_cc_cleaned_{dt}
+            """.format(columns=','.join(x.name for x in self.avro_schema.fields),
+                       dt=execution_date.strftime("%Y%m%d%H"))
 
-    def load_parquet_table(self, execution_date, is_initial_data_load=None):
-        '''Load data into the Parquet table from the external Avro table
-        :param execution_date: the Airflow execution_date object
-        :param_type datetime.datetime:
-        :param_type integer:
-        '''
-        # Building parquet tables takes a lot of
-        # memory, so make sure we give the job enough.
-        # We partition by tai-year-month to allow for idempotent inserts.
-        # https://cwiki.apache.org/confluence/display/Hive/DynamicPartitions
-        try:
-            parq_table = self._parquet_table()
-            avro_table = self._avro_table(execution_date)
-
-            _log.info('Loading to Impala Parquet-format table {parq} from '
-                      '{avro}'.format(parq=parq_table, avro=avro_table))
-            heap_size = int(options.parquet_memory * 0.9)
-
-            self.hive.execute('SET hive.exec.compress.output=true')
-            self.hive.execute('SET avro.output.codec=snappy')
-            self.hive.execute('SET parquet.compression=SNAPPY')
-            self.hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
-            self.hive.execute('SET hive.exec.max.created.files=500000')
-            self.hive.execute('SET hive.exec.max.dynamic.partitions.pernode=200')
-
-            self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
-                              options.parquet_memory)
-            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
-            self.hive.execute('SET mapreduce.map.memory.mb=%d' %
-                              options.parquet_memory)
-            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
-
-            _log.info('is_initial_data_load is %s' % is_initial_data_load)
-
-            if is_initial_data_load:
-                sql = """
-                insert overwrite table %s
-                partition(tai, yr, mnth, day)
-                select %s, trackerAccountId,
-                year(cast(serverTime as timestamp)),
-                month(cast(serverTime as timestamp)),
-                -1
-                from %s""" % (parq_table,
-                              ','.join(x.name for x in self.avro_schema.fields),
-                              avro_table)
-            else:
-                sql = """
-                insert overwrite table %s
-                partition(tai, yr, mnth, day)
-                select %s, trackerAccountId,
-                year(cast(serverTime as timestamp)),
-                month(cast(serverTime as timestamp)),
-                day(cast(serverTime as timestamp))
-                from %s""" % (parq_table,
-                              ','.join(x.name for x in self.avro_schema.fields),
-                              avro_table)
-
-            _log.info('LOAD Impala-Parquet table command: {sql}'.format(
-                sql=sql))
-
+            _log.info('Done moving data to S3: {sql}'.format(sql=sql))
             self.hive.execute(sql)
-            self._refresh_table(parq_table)
-
         except:
-            _log.error("Error loading event %s Parquet table %s" % (self.event, parq_table))
-            statemon.state.increment('impala_table_creation_failure')
+            _log.error("Error resolving corner cases")
             self.status = 'ERROR'
-            raise ImpalaTableLoadError
-
+            raise ExecutionError
 
 class ImpalaTableBuilder(threading.Thread):
     '''Thread that will dispatch and monitor the job to build the Impala Parquet-format table.'''
@@ -713,6 +770,67 @@ class ImpalaTableLoader(threading.Thread):
             _log.debug("Closing Impala connection")
             self.table.transport.close()
 
+class CornerCaseHandler(threading.Thread):
+    """
+    This class handles the corner cases that happen across day boundaries
+    """
+
+    def __init__(self, cluster, execution_date,
+                 is_first_run, is_initial_data_load, input_path, 
+                 cc_cleaned_path_prev, cc_cleaned_path_current):
+        super(CornerCaseHandler, self).__init__()
+        self.event = 'EventSequence'
+        self.cluster = cluster
+        self.input_path = input_path
+        self.execution_date = execution_date
+        self.is_first_run = is_first_run
+        self.is_initial_data_load = is_initial_data_load
+        self.cc_cleaned_path_prev = cc_cleaned_path_prev
+        self.cc_cleaned_path_current = cc_cleaned_path_current
+        self.status = 'INIT'
+        self._stopped = threading.Event()
+        self.table = ImpalaTable(self.cluster, self.event)
+
+        # Cleanup after ourselves on a failure?
+        self._drop_avro_on_failure = False
+
+    def stop(self):
+        self._stopped.set()
+
+    def run(self):
+        self._stopped.clear()
+        self.status = 'RUNNING'
+        _log.info("Event '%s' table build thread running" % self.event)
+
+        try:
+            self.table.cluster.connect()
+            self.table.transport.open()
+            avro_table = self.table._avro_table(self.execution_date)
+            if self.table.exists(avro_table):
+                _log.info("Avro table for event '%s' exists: %s" % 
+                           (self.event, avro_table))
+            else:
+                self.table.create_avro_table(self.execution_date,
+                                             self.input_path)
+
+            self.create_input_for_cc(self.execution_date, self.is_first_run,
+                                     self.is_initial_data_load,
+                                     self.cc_cleaned_path_prev)
+
+            self.resolve_corner_cases(self.execution_date,
+                                      self.cc_cleaned_path_current)
+
+        except:
+            _log.exception('Error loading Impala table for event %s' %
+                           self.event)
+            if self._drop_avro_on_failure:
+                self.table.drop_avro_table(self.execution_date)
+            raise ImpalaTableLoadError
+
+        finally:
+            _log.debug("Closing Impala connection")
+            self.table.transport.close()
+
 def update_table_build_times(cluster):
     _log.debug("Updating the table build times")
     
@@ -734,84 +852,3 @@ def update_table_build_times(cluster):
             datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
 
     _log.debug('Finished building Impala tables')
-
-def wait_for_running_batch_job(cluster, sample_period=30):
-    '''Blocks until a currently running batch cleaning job is done.
-
-    If there is no currently running job, this returns quickly
-
-    Returns: True if the job was running at some point.
-    '''
-    found_job = False
-    cluster.connect()
-
-    while True:
-        response = \
-            cluster.query_resource_manager('/ws/v1/cluster/apps?states=RUNNING,NEW,SUBMITTED,ACCEPTED')
-
-        app = _get_last_batch_app(response)
-        if app is None:
-            return found_job
-        found_job = True
-
-        time.sleep(sample_period)
-
-
-def _get_last_batch_app(rm_response):
-    '''Finds the last batch application from the resource manager response.'''
-
-    if rm_response['apps'] is None:
-        # There are no apps running
-        return None
-
-    last_app = None
-    last_started_time = None
-    for app in rm_response['apps']['app']:
-        if (app['name'] == 'Raw Tracker Data Cleaning' and
-                (last_app is None or last_started_time < app['startedTime'])):
-            last_app = app
-            last_started_time = app['startedTime']
-
-    if last_app is None:
-        return None
-
-    _log.info('The batch job with id %s is in state %s with '
-              'progress of %i%%' %
-              (last_app['id'], last_app['state'], last_app['progress']))
-    return last_app
-
-
-def get_last_successful_batch_output(cluster):
-    '''Determines the last sucessful batch output path.
-
-    Returns: The s3 patch of the last sucessful job, or None if there wasn't one
-    '''
-    cluster.connect()
-
-    response = cluster.query_resource_manager(
-        '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')
-    app = _get_last_batch_app(response)
-
-    if app is None:
-        return None
-
-    # Check the config on the history server to get the path
-    query = ('/ws/v1/history/mapreduce/jobs/job_%s/conf' %
-             re.compile(r'application_(\S+)').search(app['id']).group(1))
-    try:
-        conf = cluster.query_history_manager(query)
-    except urllib2.HTTPError as e:
-        _log.warn('Could not get the job history for job %s. HTTP Code %s' %
-                  (app['id'], e.code))
-        return None
-
-    if not 'conf' in conf:
-        raise UnexpectedInfo('Unexpected response from the history server: %s'
-                             % conf)
-    for prop in conf['conf']['property']:
-        if prop['name'] == 'mapreduce.output.fileoutputformat.outputdir':
-            _log.info('Found the last successful output directory as %s' %
-                      prop['value'])
-            return prop['value']
-
-    return None
