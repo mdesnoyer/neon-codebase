@@ -812,6 +812,8 @@ def _handle_corner_cases(**kwargs):
     cc_curr_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                            prefix=cc_op_prefix)
 
+    _delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
+                                     output_path=kwargs['cc_cleaned_path'])
 
     _log.info("{task}: Handling corner cases!".format(task=task))
     
@@ -969,6 +971,7 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_create_tables,
         op_kwargs=dict(event=event))
+    create_op.set_upstream(mr_cleaning_job)
 
     # Load the data into the impala table
     op = PythonOperator(
@@ -979,7 +982,7 @@ for event in __EVENTS:
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
         priority_weight=90)
-    op.set_upstream([mr_cleaning_job, s3copy])
+    op.set_upstream([mr_cleaning_job, s3copy, create_op])
     load_impala_tables.append(op)
 
 

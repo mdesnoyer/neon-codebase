@@ -219,7 +219,8 @@ class ImpalaTable(object):
         :param execution_date: a datetime.datetime object
         :param_type: datetime.datetime
         """
-        return '{prefix}_{dt}'.format(prefix=self.event_avro.lower(),dt=execution_date.strftime("%Y%m%d%H"))
+        return '{prefix}_{dt}'.format(prefix=self.event_avro.lower(),
+                                      dt=execution_date.strftime("%Y%m%d%H"))
 
     def _parquet_table(self):
         """
@@ -291,15 +292,19 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ExecutionError
 
-    def drop_avro_table(self, execution_date):
+    def drop_avro_table(self, execution_date, corner_case_table=None):
         """
         Drop the external Avro table for a given date
         :param execution_date:
+        :param corner_case_table - A table from corner cases processing
         :return:
         """
         try:
-            table = self._avro_table(execution_date)
-            _log.debug('Dropping Avro table {table}'.format(table=table))
+            if corner_case_table:
+                table = corner_case_table
+            else:
+                table = self._avro_table(execution_date)
+            _log.info('Dropping Avro table {table}'.format(table=table))
             self.hive.execute('DROP TABLE IF EXISTS {table}'.format(table=table))
             if self.exists(table):
                 self.hive.execute('invalidate metadata {0:s}'.format(table))
@@ -407,12 +412,8 @@ class ImpalaTable(object):
         table = self._avro_table(execution_date)
         _log.info('Registering Avro Temp table with hive')
 
-        sql="""
-        DROP TABLE IF EXISTS corner_cases_input_{dt}
-        """.format(dt=execution_date.strftime("%Y%m%d%H"))
-
-        _log.info('Drop corner cases SQL: {sql}'.format(sql=sql))
-        self.hive.execute(sql)
+        corner_case_table = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_table)
         
         if is_first_run and is_initial_data_load:
             # add where condition here for yr,month,day
@@ -461,12 +462,8 @@ class ImpalaTable(object):
 
     def resolve_corner_cases(self, execution_date, cc_cleaned_path_current):
 
-        sql="""
-        DROP TABLE IF EXISTS avro_cc_cleaned_{dt}
-        """.format(dt=execution_date.strftime("%Y%m%d%H"))
-        self.hive.execute(sql)
-
-        _log.info('Done delete resolved: {sql}'.format(sql=sql))
+        corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_table)
 
         imload_group = """
         row_number() over (partition by 
@@ -617,15 +614,6 @@ class ImpalaTable(object):
 
             _log.info('Done corner cases: {sql}'.format(sql=sql))
 
-
-            sql="""
-            DROP TABLE IF EXISTS corner_cases_input_{dt}
-            """.format(dt=execution_date.strftime("%Y%m%d%H"))
-            self.hive.execute(sql)
-
-            _log.info('Done delete ccinput: {sql}'.format(sql=sql))
-
-
             sql="""
             INSERT OVERWRITE DIRECTORY '{cc_cleaned_path_current}'
             select {columns} from avro_cc_cleaned_{dt}
@@ -635,6 +623,9 @@ class ImpalaTable(object):
 
             _log.info('Done moving data to S3: {sql}'.format(sql=sql))
             self.hive.execute(sql)
+
+            corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+            self.drop_avro_table(execution_date, corner_case_table)
 
         except:
             _log.error("Error resolving corner cases")
