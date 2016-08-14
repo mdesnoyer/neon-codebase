@@ -461,6 +461,13 @@ class ImpalaTable(object):
 
     def resolve_corner_cases(self, execution_date, cc_cleaned_path_current):
 
+        sql="""
+        DROP TABLE IF EXISTS avro_cc_cleaned_{dt}
+        """.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.hive.execute(sql)
+
+        _log.info('Done delete resolved: {sql}'.format(sql=sql))
+
         imload_group = """
         row_number() over (partition by 
         thumbnail_id,
@@ -624,10 +631,11 @@ class ImpalaTable(object):
             select {columns} from avro_cc_cleaned_{dt}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                        dt=execution_date.strftime("%Y%m%d%H"),
-                       cc_cleaned_path_current=cc_cleaned_path_current)
+                       cc_cleaned_path_current=str(cc_cleaned_path_current))
 
             _log.info('Done moving data to S3: {sql}'.format(sql=sql))
             self.hive.execute(sql)
+
         except:
             _log.error("Error resolving corner cases")
             self.status = 'ERROR'
