@@ -813,12 +813,13 @@ class CornerCaseHandler(threading.Thread):
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
 
-            self.create_input_for_cc(self.execution_date, self.is_first_run,
-                                     self.is_initial_data_load,
-                                     self.cc_cleaned_path_prev)
+            self.table.create_input_for_cc(self.execution_date, 
+                                           self.is_first_run,
+                                           self.is_initial_data_load,
+                                           self.cc_cleaned_path_prev)
 
-            self.resolve_corner_cases(self.execution_date,
-                                      self.cc_cleaned_path_current)
+            self.table.resolve_corner_cases(self.execution_date,
+                                            self.cc_cleaned_path_current)
 
         except:
             _log.exception('Error loading Impala table for event %s' %

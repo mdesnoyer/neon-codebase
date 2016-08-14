@@ -820,10 +820,10 @@ def _handle_corner_cases(**kwargs):
             os.path.join('s3://', output_bucket, cleaned_prefix))
 
         _log.info("Input Path for prev clean up cases is %s" %
-            os.path.join('s3://'), cc_bucket, cc_prev_prefix)
+            os.path.join('s3://', cc_bucket, cc_prev_prefix))
 
         _log.info("Input Path for curr clean up cases is %s" %
-            os.path.join('s3://'), cc_bucket, cc_curr_prefix)
+            os.path.join('s3://', cc_bucket, cc_curr_prefix))
 
         builder = stats.impala_table.CornerCaseHandler(
             cluster=cluster,
@@ -1010,6 +1010,6 @@ hdfs_maintenance = PythonOperator(
     python_callable=_hdfs_maintenance,
     provide_context=True,
     op_kwargs=dict(days_ago=30))
-hdfs_maintenance.set_upstream(load_impala_tables)
+hdfs_maintenance.set_upstream(mr_cleaning_job)
 
 
