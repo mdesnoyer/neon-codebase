@@ -465,6 +465,22 @@ class ImpalaTable(object):
         corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_table)
 
+        sql = """
+            CREATE TABLE IF NOT EXISTS %s
+            ROW FORMAT SERDE
+            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+            STORED AS
+            INPUTFORMAT
+            'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
+            OUTPUTFORMAT
+            'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
+            TBLPROPERTIES (
+            'avro.schema.url'='%s'
+        )""" % (corner_case_table, self._schema_path())
+
+        self.execute(sql)
+        _log.info('creat table {sql}'.format(sql=sql))
+
         imload_group = """
         row_number() over (partition by 
         thumbnail_id,
@@ -532,7 +548,7 @@ class ImpalaTable(object):
         """
 
         sql = """
-        CREATE TABLE avro_cc_cleaned_{dt} AS
+        INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}
         select {columns} from 
         (
         select {columns} from 
