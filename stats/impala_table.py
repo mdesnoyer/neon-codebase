@@ -468,22 +468,6 @@ class ImpalaTable(object):
         self._upload_schema()
 
         sql = """
-        CREATE TABLE IF NOT EXISTS {corner_case_table}
-        ROW FORMAT SERDE
-        'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
-        STORED AS
-        INPUTFORMAT
-        'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
-        OUTPUTFORMAT
-        'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
-        TBLPROPERTIES ('avro.schema.url'='{schema_path}')
-        """.format(corner_case_table=corner_case_table, 
-                   schema_path=self._schema_path())
-
-        _log.info('creat table {sql}'.format(sql=sql))
-        self.hive.execute(sql)
-
-        sql = """
         CREATE TABLE EXTERNAL IF NOT EXISTS {corner_case_table}_copy
         ROW FORMAT SERDE
         'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
@@ -569,7 +553,7 @@ class ImpalaTable(object):
         """
 
         sql = """
-        INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}
+        CREATE TABLE avro_cc_cleaned_{dt} AS
         select {columns} from 
         (
         select {columns} from 
@@ -652,7 +636,7 @@ class ImpalaTable(object):
             _log.info('Done corner cases: {sql}'.format(sql=sql))
 
             sql="""
-            INSERT OVERWRITE TABLE {corner_case_table}_temp
+            INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}_copy
             select {columns} from avro_cc_cleaned_{dt}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                        dt=execution_date.strftime("%Y%m%d%H"))
@@ -663,7 +647,7 @@ class ImpalaTable(object):
             corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
             self.drop_avro_table(execution_date, corner_case_table)
 
-            corner_case_table = 'avro_cc_cleaned_{dt}_temp'.format(dt=execution_date.strftime("%Y%m%d%H"))
+            corner_case_table = 'avro_cc_cleaned_{dt}_copy'.format(dt=execution_date.strftime("%Y%m%d%H"))
             self.drop_avro_table(execution_date, corner_case_table)
 
         except:
