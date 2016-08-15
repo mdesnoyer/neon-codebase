@@ -669,18 +669,13 @@ def _execution_date_has_input_files(**kwargs):
 
     input_path = kwargs['input_path']
     
-    # Check if this is the first run and allow only first hour run ('00') to run
-    # Skip all other runs for the current date. This will get get processed at 
-    # hour ('00') run of next day. This is to ensure to minimize the backfill
+    # Check if this is the first run and take appropriate action
     is_first_run, is_initial_data_load = check_first_run(execution_date)
 
     if is_first_run:
         if is_initial_data_load:
             _log.info("This is first instance of run, skipping the check for existence of files")
             return 'stage_files'
-        # else:
-        #     _log.info("Skipping the run for other instances of first run")
-        #     return 'no_input_files'
 
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
 
@@ -826,7 +821,6 @@ def _handle_corner_cases(**kwargs):
         builder = stats.impala_table.CornerCaseHandler(
             cluster=cluster,
             execution_date=execution_date,
-            is_first_run=is_first_run,
             is_initial_data_load=is_initial_data_load,
             input_path=os.path.join('s3://', output_bucket, cleaned_prefix),
             cc_cleaned_path_prev=os.path.join('s3://', cc_bucket, cc_prev_prefix),
@@ -835,7 +829,6 @@ def _handle_corner_cases(**kwargs):
         builder.run()
 
     except:
-        statemon.state.increment('impala_table_load_failure')
         raise
     finally:
         if is_first_run and is_initial_data_load:
