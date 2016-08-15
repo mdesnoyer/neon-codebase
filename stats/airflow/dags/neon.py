@@ -594,28 +594,28 @@ def _load_impala_table(**kwargs):
         _log.info("This is first & big run, bumping up the num of task instances to %s" %
             options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
+        
+        # This is going to be the mapreduce output path
+        path_for_impala_build = options.output_path
+    else:
+        # This is going to be the corner cases cleaned path
+        path_for_impala_build = kwargs['output_path']
 
-    output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
-    cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
-                                            prefix=output_prefix)
+        output_bucket, output_prefix = _get_s3_tuple(path_for_impala_build)
+        cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                                prefix=output_prefix)
 
     _log.info("{task}: Loading data!".format(task=task))
     
-    corner_cases = None
-    if execution_date.strftime("%H") == '03':
-        corner_cases = True
     
     try:
-        _log.info("Path to build for impala is %s" % os.path.join('s3://', output_bucket, cleaned_prefix))
+        _log.info("Path to build for impala is %s" % path_for_impala_build)
 
         builder = stats.impala_table.ImpalaTableLoader(
             cluster=cluster,
             event=event,
             execution_date=execution_date,
-            corner_cases=corner_cases,
-            is_first_run=is_first_run,
-            is_initial_data_load=is_initial_data_load,
-            input_path=os.path.join('s3://', output_bucket, cleaned_prefix))
+            input_path=path_for_impala_build)
     
         builder.run()
 
@@ -779,9 +779,7 @@ def _checkpoint_hdfs_to_s3(**kwargs):
 def _handle_corner_cases(**kwargs):
     """
     Handle the corner cases. Since we process the full day's file every run,
-    we will have to handle corner cases too. Only exception being first run 
-    which is going to be a consolidated big run, will skip corner case handling
-    for this run
+    we will have to handle corner cases too. 
     """
     dag = kwargs['dag']
     execution_date = kwargs['execution_date']
@@ -981,7 +979,7 @@ for event in __EVENTS:
         op_kwargs=dict(output_path=options.cc_cleaned_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
         priority_weight=90)
-    op.set_upstream([mr_cleaning_job, s3copy, create_op])
+    op.set_upstream([mr_cleaning_job, s3copy, create_op, cc_handler])
     load_impala_tables.append(op)
 
 
