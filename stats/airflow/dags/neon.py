@@ -448,8 +448,6 @@ def _quiet_period(**kwargs):
 
     # Do not wait when doing backfill
     if execution_date.strftime("%Y/%m/%d") == datetime.utcnow().strftime("%Y/%m/%d"):
-        _log.info('Skipping quiet period as this is a backfill run')
-    else:
         _log.info('Sleeping for quiet period')
         time.sleep(wait_time)
 
@@ -957,6 +955,7 @@ cc_handler = PythonOperator(
     dag=clicklogs,
     python_callable=_handle_corner_cases,
     provide_context=True,
+    depends_on_past=True,
     op_kwargs=dict(output_path=options.output_path,
                    cc_cleaned_path=options.cc_cleaned_path))
 cc_handler.set_upstream([mr_cleaning_job, s3copy])
