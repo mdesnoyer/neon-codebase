@@ -694,6 +694,10 @@ class ImpalaTable(object):
         corner_case_table = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_table)
 
+        # Drop table pointing to mapreduce output of current run
+        corner_case_table = 'avroeventsequences_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, cc_input_current)
+
 class ImpalaTableBuilder(threading.Thread):
     '''Thread that will dispatch and monitor the job to build the Impala Parquet-format table.'''
 
