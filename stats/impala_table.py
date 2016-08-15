@@ -420,8 +420,15 @@ class ImpalaTable(object):
             sql = """
             CREATE TABLE corner_cases_input_{dt} AS
             SELECT {columns} from {table}
+            WHERE 
+            year(cast(serverTime as timestamp)) = {year} AND
+            month(cast(serverTime as timestamp)) = {month} AND
+            day(cast(serverTime as timestamp)) = {day}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       table=table,dt=execution_date.strftime("%Y%m%d%H"))
+                       table=table,dt=execution_date.strftime("%Y%m%d%H"),
+                       year=execution_date.year,
+                       month=execution_date.month,
+                       day=execution_date.day)
         else:
             cc_cleaned_previousrun = 'avro_cc_cleaned_{dt}'. \
                                      format(dt=(execution_date - timedelta(hours=3)). \
@@ -468,7 +475,7 @@ class ImpalaTable(object):
         self._upload_schema()
 
         sql = """
-        CREATE TABLE EXTERNAL IF NOT EXISTS {corner_case_table}_copy
+        CREATE EXTERNAL TABLE IF NOT EXISTS {corner_case_table}_copy
         ROW FORMAT SERDE
         'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
         STORED AS
