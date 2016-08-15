@@ -61,6 +61,7 @@ class TimeoutException(NeonDataPipelineException): pass
 class UnexpectedInfo(NeonDataPipelineException): pass
 class SchemaUploadError(ExecutionError): pass
 class ImpalaTableLoadError(ExecutionError): pass
+class CornerCaseExecutionError(ExecutionError): pass
 
 class ImpalaTable(object):
     '''Representation of an Impala table'''
@@ -228,13 +229,24 @@ class ImpalaTable(object):
         """
         return self.event_parq.lower()
 
-    def create_avro_table(self, execution_date, input_path):
+    def create_avro_table(self, execution_date, input_path=None, cc_table=None,
+                          cc_location=None):
         """"""
         self._upload_schema()
         # External Avro table in S3
-        table = self._avro_table(execution_date)
-        _log.info('Registering event {event} Avro table {table} with Hive'
+        if cc_table:
+            table = cc_table
+        else:
+            table = self._avro_table(execution_date)
+            _log.info('Registering event {event} Avro table {table} with Hive'
                   .format(event=self.event, table=table))
+
+        # Location of table in S3
+        if cc_location:
+            location_s3 = cc_location
+        else:
+            location_s3 = os.path.join(input_path, self.event_schema)
+
         try:
             self.drop_avro_table(execution_date)
             sql = """
@@ -249,39 +261,7 @@ class ImpalaTable(object):
             LOCATION '%s'
             TBLPROPERTIES (
             'avro.schema.url'='%s'
-            )""" % (table, os.path.join(input_path, self.event_schema),
-                    self._schema_path())
-            _log.info('CREATE Avro Table SQL: {sql}'.format(sql=sql))
-            self.hive.execute(sql)
-
-        except:
-            _log.error("Error creating event %s Avro table %s" % (self.event, table))
-            statemon.state.increment('impala_table_creation_failure')
-            self.status = 'ERROR'
-            raise ExecutionError
-
-    def create_cc_avro_table(self, execution_date, input_path):
-        """"""
-        self._upload_schema()
-        # External Avro table in S3
-        table = self._avro_table(execution_date)
-        _log.info('Registering event {event} Avro table {table} with Hive'
-                  .format(event=self.event, table=table))
-        try:
-            self.drop_avro_table(execution_date)
-            sql = """
-            CREATE EXTERNAL TABLE %s
-            ROW FORMAT SERDE
-            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
-            STORED AS
-            INPUTFORMAT
-            'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
-            OUTPUTFORMAT
-            'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
-            LOCATION '%s'
-            TBLPROPERTIES (
-            'avro.schema.url'='%s'
-            )""" % (table, os.path.join(input_path, self.event_schema),
+            )""" % (table, location_s3,
                     self._schema_path())
             _log.info('CREATE Avro Table SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
@@ -304,6 +284,7 @@ class ImpalaTable(object):
                 table = corner_case_table
             else:
                 table = self._avro_table(execution_date)
+
             _log.info('Dropping Avro table {table}'.format(table=table))
             self.hive.execute('DROP TABLE IF EXISTS {table}'.format(table=table))
             if self.exists(table):
@@ -367,8 +348,6 @@ class ImpalaTable(object):
             self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
 
-            _log.info('is_initial_data_load is %s' % is_initial_data_load)
-
             if is_initial_data_load:
                 sql = """
                 insert overwrite table %s
@@ -404,95 +383,108 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ImpalaTableLoadError
 
-    def create_input_for_cc(self, execution_date, is_first_run, 
-                            is_initial_data_load, cc_cleaned_path_prev):
+    def create_input_for_cc(self, execution_date, is_initial_data_load, cc_cleaned_path_prev):
         """
-        put in hive parameters
-        """
-        table = self._avro_table(execution_date)
-        _log.info('Registering Avro Temp table with hive')
+        Create the input required for corner cases processing
 
-        corner_case_table = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
-        self.drop_avro_table(execution_date, corner_case_table)
+        The first and big run: is always going to be clean as it is run over the entire input bucket
+        in S3. So corner cases need not be handled. However we need to carry forward the clean data 
+        for this execution date. The next run will use this as corner case cleaned data for
+        previous run.
+
+        On subsequent runs: we will take in current cleaned output from mapreduce job and previous corner cases
+        cleaned output from corner case S3 bucket. The input from previous corner case clean run is required
+        because for each run we process the data for that entire day. So we should be carrying over the corner cases
+        that were cleaned at the first run of this day. 
+
+        Inputs:
+        execution_date - The execution date of airflow task 
+        is_initial_data_load - Indicates if this is the first and big run
+        cc_cleaned_path_prev - The corner cases cleaned path of previous run
+        """
+        try:
+            # Upload schema to S3
+            self._upload_schema()
+
+            #Set the hive parameters
+            heap_size = int(options.parquet_memory * 0.9)
+
+            self.hive.execute('SET hive.exec.compress.output=true')
+            self.hive.execute('SET avro.output.codec=snappy')
+            self.hive.execute('SET parquet.compression=SNAPPY')
+
+            self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
+                              options.parquet_memory)
+            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                              heap_size)
+            self.hive.execute('SET mapreduce.map.memory.mb=%d' %
+                              options.parquet_memory)
+            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                              heap_size)
+
+            # Avro table name pointing to mapreduce cleaned ouput for current run
+            table = self._avro_table(execution_date)
+
+            # Drop table for corner cases input for current run
+            cc_input_current = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+            self.drop_avro_table(execution_date, cc_input_current)
         
-        if is_first_run and is_initial_data_load:
-            # add where condition here for yr,month,day
-            sql = """
-            CREATE TABLE corner_cases_input_{dt} AS
-            SELECT {columns} from {table}
-            WHERE 
-            year(cast(serverTime as timestamp)) = {year} AND
-            month(cast(serverTime as timestamp)) = {month} AND
-            day(cast(serverTime as timestamp)) = {day}
-            """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       table=table,dt=execution_date.strftime("%Y%m%d%H"),
-                       year=execution_date.year,
-                       month=execution_date.month,
-                       day=execution_date.day)
-        else:
-            cc_cleaned_previousrun = 'avro_cc_cleaned_{dt}'. \
-                                     format(dt=(execution_date - timedelta(hours=3)). \
-                                     strftime("%Y%m%d%H"))
+            if is_initial_data_load:
+                sql = """
+                CREATE TABLE corner_cases_input_{dt} AS
+                SELECT {columns} from {table}
+                WHERE 
+                year(cast(serverTime as timestamp)) = {year} AND
+                month(cast(serverTime as timestamp)) = {month} AND
+                day(cast(serverTime as timestamp)) = {day}
+                """.format(columns=','.join(x.name for x in self.avro_schema.fields),
+                            table=table,dt=execution_date.strftime("%Y%m%d%H"),
+                            year=execution_date.year,
+                            month=execution_date.month,
+                            day=execution_date.day)
+            else:
+                # Avro table pointing to s3 bucket of previous corner case run
+                cc_cleaned_previous = 'avro_cc_cleaned_{dt}'. \
+                                         format(dt=(execution_date - timedelta(hours=3)). \
+                                         strftime("%Y%m%d%H"))
 
-            sql = """
-            CREATE EXTERNAL TABLE IF NOT EXISTS %s
-            ROW FORMAT SERDE
-            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
-            STORED AS
-            INPUTFORMAT
-            'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
-            OUTPUTFORMAT
-            'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
-            LOCATION '%s'
-            TBLPROPERTIES (
-            'avro.schema.url'='%s'
-            )""" % (cc_cleaned_previousrun, cc_cleaned_path_prev,
-                    self._schema_path())
-            
-            _log.info('CREATE cc previous run SQL: {sql}'.format(sql=sql))
+                # Create the table pointing to previous corner case run output
+                self.drop_avro_table(execution_date, cc_cleaned_previous)
+                self.create_avro_table(execution_date, cc_table=cc_cleaned_previous, 
+                                       cc_location=cc_cleaned_path_prev)
+
+                sql = """
+                CREATE TABLE corner_cases_input_{dt} AS
+                SELECT {columns} from
+                (
+                SELECT {columns} from {table}
+                UNION ALL
+                SELECT {columns} from {cc_cleaned_previous}
+                ) cc_input
+                """.format(columns=','.join(x.name for x in self.avro_schema.fields),
+                           table=table,dt=execution_date.strftime("%Y%m%d%H"),
+                           cc_cleaned_previous=cc_cleaned_previous)
+
+            _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
-            sql = """
-            CREATE TABLE corner_cases_input_{dt} AS
-            SELECT {columns} from
-            (
-            SELECT {columns} from {table}
-            UNION ALL
-            SELECT {columns} from {cc_cleaned_previousrun}
-            ) cc_input
-            """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       table=table,dt=execution_date.strftime("%Y%m%d%H"),
-                       cc_cleaned_previousrun=cc_cleaned_previousrun)
-
-        _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
-        self.hive.execute(sql)
+        except:
+            _log.error("Error creating input for corner cases")
+            self.status = 'ERROR'
+            raise CornerCaseExecutionError
 
     def resolve_corner_cases(self, execution_date, cc_cleaned_path_current):
+        """
+        For all the possible entry points for an event, define a group. This will be used by the query to 
+        pick up a single row with most columns filled in case of duplicates and any non-duplicate rows. 
+        """
+        # Create Avro table pointing to S3
+        corner_case_copy = 'avro_cc_cleaned_{dt}_copy'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_copy)
+        self.create_avro_table(execution_date, cc_table=corner_case_copy, 
+                               cc_location=cc_cleaned_path_current)
 
-        corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
-        self.drop_avro_table(execution_date, corner_case_table)
-
-        self._upload_schema()
-
-        sql = """
-        CREATE EXTERNAL TABLE IF NOT EXISTS {corner_case_table}_copy
-        ROW FORMAT SERDE
-        'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
-        STORED AS
-        INPUTFORMAT
-        'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
-        OUTPUTFORMAT
-        'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
-        LOCATION
-        '{cc_cleaned_path_current}'
-        TBLPROPERTIES ('avro.schema.url'='{schema_path}')
-        """.format(corner_case_table=corner_case_table, 
-                   schema_path=self._schema_path(),
-                   cc_cleaned_path_current=cc_cleaned_path_current)
-
-        _log.info('creat table external {sql}'.format(sql=sql))
-        self.hive.execute(sql)
-
+        # Define groups for each possible event entry
         imload_group = """
         row_number() over (partition by 
         thumbnail_id,
@@ -558,6 +550,33 @@ class ImpalaTable(object):
         videoplayservertime desc
         )
         """
+
+        self.execute_cc_query(imload_group, imvis_group, imclick_group,
+                              adplay_group, videoplay_group)
+
+    def execute_cc_query(self, imload_group, imvis_group, imclick_group,
+                               adplay_group, videoplay_group):
+        """
+        The corner case query will combine all the individual corner case cleaned events. There are also some
+        rows in the table that have null thumbnail id's with all imclick,imvis,imload,adplay,videoplay being null so
+        we will also carry them forward so that we dont drop any rows (are these required?). 
+        """
+
+        #Set the hive parameters
+        heap_size = int(options.parquet_memory * 0.9)
+
+        self.hive.execute('SET hive.exec.compress.output=true')
+        self.hive.execute('SET avro.output.codec=snappy')
+        self.hive.execute('SET parquet.compression=SNAPPY')
+
+        self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
+                            options.parquet_memory)
+        self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                            heap_size)
+        self.hive.execute('SET mapreduce.map.memory.mb=%d' %
+                            options.parquet_memory)
+        self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                            heap_size)
 
         sql = """
         CREATE TABLE avro_cc_cleaned_{dt} AS
@@ -642,25 +661,38 @@ class ImpalaTable(object):
 
             _log.info('Done corner cases')
 
+            # Write the data to s3 corner case bucket
             sql="""
             INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}_copy
             select {columns} from avro_cc_cleaned_{dt}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                        dt=execution_date.strftime("%Y%m%d%H"))
 
-            _log.info('Done moving data to S3: {sql}'.format(sql=sql))
+            _log.info('Moving data to s3: {sql}'.format(sql=sql))
+
             self.hive.execute(sql)
-
-            corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
-            self.drop_avro_table(execution_date, corner_case_table)
-
-            corner_case_table = 'avro_cc_cleaned_{dt}_copy'.format(dt=execution_date.strftime("%Y%m%d%H"))
-            self.drop_avro_table(execution_date, corner_case_table)
+            _log.info('Done moving data to S3')
 
         except:
             _log.error("Error resolving corner cases")
             self.status = 'ERROR'
-            raise ExecutionError
+            raise CornerCaseExecutionError
+
+    def cleanup_after_cc_processing(self):
+        """
+        Clean up all the tables we created during corner case processing
+        """
+        # Drop the corner case cleaned table as this data has been written to s3 now
+        corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_table)
+
+        # Drop the copy table
+        corner_case_table = 'avro_cc_cleaned_{dt}_copy'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_table)
+
+        # Drop table for corner cases input for current run
+        corner_case_table = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_table)
 
 class ImpalaTableBuilder(threading.Thread):
     '''Thread that will dispatch and monitor the job to build the Impala Parquet-format table.'''
@@ -732,16 +764,12 @@ class ImpalaTableLoader(threading.Thread):
     Load cleaned data to the Impala Parquet-format table
     """
 
-    def __init__(self, cluster, event, execution_date, corner_cases,
-                 is_first_run, is_initial_data_load, input_path):
+    def __init__(self, cluster, event, execution_date, input_path):
         super(ImpalaTableLoader, self).__init__()
         self.event = event
         self.cluster = cluster
         self.input_path = input_path
         self.execution_date = execution_date
-        self.corner_cases = corner_cases
-        self.is_first_run = is_first_run
-        self.is_initial_data_load = is_initial_data_load
         self.status = 'INIT'
         self._stopped = threading.Event()
         self.table = ImpalaTable(self.cluster, self.event)
@@ -767,13 +795,6 @@ class ImpalaTableLoader(threading.Thread):
             else:
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
-
-            _log.info('self.event is %s' % self.event)
-            _log.info('self.corner_cases is %s' % self.corner_cases)
-            _log.info('self.is_first_run is %s' % self.is_first_run)
-            _log.info('is_initial_data_load is %s' % self.is_initial_data_load)
-            #if self.corner_cases and self.event == 'EventSequence':
-            #    self.table.handle_corner_cases(self.execution_date,self.is_first_run)
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):
@@ -806,14 +827,13 @@ class CornerCaseHandler(threading.Thread):
     """
 
     def __init__(self, cluster, execution_date,
-                 is_first_run, is_initial_data_load, input_path, 
+                 is_initial_data_load, input_path, 
                  cc_cleaned_path_prev, cc_cleaned_path_current):
         super(CornerCaseHandler, self).__init__()
         self.event = 'EventSequence'
         self.cluster = cluster
         self.input_path = input_path
         self.execution_date = execution_date
-        self.is_first_run = is_first_run
         self.is_initial_data_load = is_initial_data_load
         self.cc_cleaned_path_prev = cc_cleaned_path_prev
         self.cc_cleaned_path_current = cc_cleaned_path_current
@@ -822,7 +842,7 @@ class CornerCaseHandler(threading.Thread):
         self.table = ImpalaTable(self.cluster, self.event)
 
         # Cleanup after ourselves on a failure?
-        self._drop_avro_on_failure = False
+        self._drop_avro_on_failure = True
 
     def stop(self):
         self._stopped.set()
@@ -843,20 +863,20 @@ class CornerCaseHandler(threading.Thread):
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
 
-            self.table.create_input_for_cc(self.execution_date, 
-                                           self.is_first_run,
+            self.table.create_input_for_cc(self.execution_date,
                                            self.is_initial_data_load,
                                            self.cc_cleaned_path_prev)
 
             self.table.resolve_corner_cases(self.execution_date,
                                             self.cc_cleaned_path_current)
 
+            self.table.cleanup_after_cc_processing()
+
         except:
-            _log.exception('Error loading Impala table for event %s' %
-                           self.event)
+            _log.exception('Error processing corner cases')
             if self._drop_avro_on_failure:
                 self.table.drop_avro_table(self.execution_date)
-            raise ImpalaTableLoadError
+            raise CornerCaseExecutionError
 
         finally:
             _log.debug("Closing Impala connection")
