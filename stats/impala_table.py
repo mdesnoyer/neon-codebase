@@ -483,6 +483,25 @@ class ImpalaTable(object):
         _log.info('creat table {sql}'.format(sql=sql))
         self.hive.execute(sql)
 
+        sql = """
+        CREATE TABLE EXTERNAL IF NOT EXISTS {corner_case_table}_copy
+        ROW FORMAT SERDE
+        'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+        STORED AS
+        INPUTFORMAT
+        'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
+        OUTPUTFORMAT
+        'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
+        LOCATION
+        '{cc_cleaned_path_current}'
+        TBLPROPERTIES ('avro.schema.url'='{schema_path}')
+        """.format(corner_case_table=corner_case_table, 
+                   schema_path=self._schema_path(),
+                   cc_cleaned_path_current=cc_cleaned_path_current)
+
+        _log.info('creat table external {sql}'.format(sql=sql))
+        self.hive.execute(sql)
+
         imload_group = """
         row_number() over (partition by 
         thumbnail_id,
@@ -633,16 +652,18 @@ class ImpalaTable(object):
             _log.info('Done corner cases: {sql}'.format(sql=sql))
 
             sql="""
-            INSERT OVERWRITE DIRECTORY '{cc_cleaned_path_current}'
+            INSERT OVERWRITE TABLE {corner_case_table}_temp
             select {columns} from avro_cc_cleaned_{dt}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       dt=execution_date.strftime("%Y%m%d%H"),
-                       cc_cleaned_path_current=cc_cleaned_path_current)
+                       dt=execution_date.strftime("%Y%m%d%H"))
 
             _log.info('Done moving data to S3: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
             corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+            self.drop_avro_table(execution_date, corner_case_table)
+
+            corner_case_table = 'avro_cc_cleaned_{dt}_temp'.format(dt=execution_date.strftime("%Y%m%d%H"))
             self.drop_avro_table(execution_date, corner_case_table)
 
         except:
