@@ -465,21 +465,23 @@ class ImpalaTable(object):
         corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_table)
 
-        sql = """
-            CREATE TABLE IF NOT EXISTS %s
-            ROW FORMAT SERDE
-            'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
-            STORED AS
-            INPUTFORMAT
-            'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
-            OUTPUTFORMAT
-            'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
-            TBLPROPERTIES (
-            'avro.schema.url'='%s'
-        )""" % (corner_case_table, self._schema_path())
+        self._upload_schema()
 
-        self.execute(sql)
+        sql = """
+        CREATE TABLE IF NOT EXISTS {corner_case_table}
+        ROW FORMAT SERDE
+        'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+        STORED AS
+        INPUTFORMAT
+        'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
+        OUTPUTFORMAT
+        'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
+        TBLPROPERTIES ('avro.schema.url'='{schema_path}')
+        """.format(corner_case_table=corner_case_table, 
+                   schema_path=self._schema_path())
+
         _log.info('creat table {sql}'.format(sql=sql))
+        self.execute(sql)
 
         imload_group = """
         row_number() over (partition by 
