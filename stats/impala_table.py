@@ -640,7 +640,7 @@ class ImpalaTable(object):
             _log.info('Corner cases SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
-            _log.info('Done corner cases: {sql}'.format(sql=sql))
+            _log.info('Done corner cases')
 
             sql="""
             INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}_copy

@@ -32,6 +32,7 @@ statemon.define('cluster_is_alive', int)
 statemon.define('cluster_deaths', int)
 statemon.define('tasks_cleared', int, default=1)
 statemon.define('dag_pause_error', int)
+statemon.define('scheduler_restart', int)
 
 def main():
 
@@ -82,6 +83,7 @@ def main():
                     statemon.state.tasks_cleared = 0
             
             # Restart the airflow scheduler service
+            statemon.state.scheduler_restart = 0
             try:
                 _log.info('Restarting the airflow scheduler service')
                 subprocess.check_output(['sudo', 
@@ -92,6 +94,7 @@ def main():
                     env=os.environ)
             except subprocess.CalledProcessError as e:
                     _log.error('Error restarting the scheduler: %s' % e.output)
+                    statemon.state.scheduler_restart = 1
         except Exception as e:
             _log.exception('Unexpected Error: %s' % e)
 

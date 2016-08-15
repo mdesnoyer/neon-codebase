@@ -255,7 +255,6 @@ class Cluster():
                 _log.info("Found cluster %s of type %s with id %s" %
                           (self.cluster_name, self.cluster_type,
                            self.cluster_id))
-                self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
                            output_path, map_memory_mb=None,
@@ -643,15 +642,6 @@ class Cluster():
             raise MasterMissingError("Could not find the master ip")
         _log.info("Found master ip address %s" % self.master_ip)
 
-    def _set_requested_core_instances(self):
-        '''Sets self.n_core_instances to what is currently requested.'''
-        found_group = self._get_instance_group_info('CORE')
-
-        if found_group is not None:
-            self.n_core_instances = int(found_group.requestedinstancecount) * \
-              Cluster.instance_info[found_group.instancetype][0]
-            _log.info('_set_requested_core_instances is %s' % self.n_core_instances)
-
     def _get_instance_group_info(self, group_type):
         conn = EmrConnection(self.cluster_region)
         found_group = None
@@ -823,14 +813,6 @@ class Cluster():
 
         _log.info('Choosing core instance type %s because its avg price was %f'
                   % (chosen_type, avg_spot_price))
-
-        _log.info('chosen_type is %s' % chosen_type)
-        _log.info('count is %s' % count)
-        _log.info('cpu_units is %s' % cpu_units)
-        _log.info('on_demand_price is %s' % on_demand_price)
-        _log.info('cur_spot_price is %s' % cur_spot_price)
-        _log.info('avg_spot_price is %s' % avg_spot_price)
-        _log.info('availability_zone is %s' % availability_zone)
 
         # If the best price is more than the on demand cost, just use on demand
         if (avg_spot_price > 0.80 * on_demand_price or 

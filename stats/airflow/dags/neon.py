@@ -856,9 +856,9 @@ default_args = {
     'start_date': airflow_start_date,
     'email': [options.notify_email],
     'email_on_failure': True,
-    'email_on_retry': True,
+    'email_on_retry': False,
     'retries': 3,
-    'retry_delay': timedelta(minutes=1),
+    'retry_delay': timedelta(minutes=5),
 }
 
 
@@ -978,7 +978,7 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_load_impala_table,
         provide_context=True,
-        op_kwargs=dict(output_path=options.output_path, event=event),
+        op_kwargs=dict(output_path=options.cc_cleaned_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
         priority_weight=90)
     op.set_upstream([mr_cleaning_job, s3copy, create_op])
