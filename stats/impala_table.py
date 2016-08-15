@@ -481,7 +481,7 @@ class ImpalaTable(object):
                    schema_path=self._schema_path())
 
         _log.info('creat table {sql}'.format(sql=sql))
-        self.execute(sql)
+        self.hive.execute(sql)
 
         imload_group = """
         row_number() over (partition by 
