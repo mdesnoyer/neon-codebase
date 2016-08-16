@@ -68,11 +68,18 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
         self.send_email_mock_two = self._future_wrap_mock(
             self.send_email_mocker_two.start()) 
         self.send_email_mock_two.return_value = True
+
+        # Mock out the aquila lookup
+        self.aquila_conn_patcher = patch(
+            'cmsapiv2.controllers.utils.autoscale')
+        self.aquila_conn_patcher.start()
+        
         super(TestBase, self).setUp()
 
     def tearDown(self):
         self.send_email_mocker.stop()
         self.send_email_mocker_two.stop()
+        self.aquila_conn_patcher.stop()
         self.postgresql.clear_all_tables()
         super(TestBase, self).tearDown()
 
