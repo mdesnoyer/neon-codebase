@@ -426,8 +426,8 @@ class ImpalaTable(object):
             table = self._avro_table(execution_date)
 
             # Drop table for corner cases input for current run
-            cc_input_current = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
-            self.drop_avro_table(execution_date, cc_input_current)
+            cc_input = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+            self.drop_avro_table(execution_date, cc_input)
         
             if is_initial_data_load:
                 sql = """
@@ -478,9 +478,8 @@ class ImpalaTable(object):
         For all the possible entry points for an event, define a group. This will be used by the query to 
         pick up a single row with most columns filled in case of duplicates and any non-duplicate rows. 
         """
-        # Create Avro table pointing to S3
-        corner_case_copy = 'avro_cc_cleaned_{dt}_copy'.format(dt=execution_date.strftime("%Y%m%d%H"))
-        self.drop_avro_table(execution_date, corner_case_copy)
+        # Create Avro table pointing to S3 for copy
+        corner_case_copy = "avro_cc_cleaned_{dt}_copy".format(dt=execution_date.strftime("%Y%m%d%H"))
         self.create_avro_table(execution_date, cc_table=corner_case_copy, 
                                cc_location=cc_cleaned_path_current)
 
@@ -579,6 +578,9 @@ class ImpalaTable(object):
                             options.parquet_memory)
         self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                             heap_size)
+
+        corner_case_cleaned = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_cleaned)
 
         sql = """
         CREATE TABLE avro_cc_cleaned_{dt} AS
@@ -848,7 +850,7 @@ class CornerCaseHandler(threading.Thread):
         self.table = ImpalaTable(self.cluster, self.event)
 
         # Cleanup after ourselves on a failure?
-        self._drop_avro_on_failure = True
+        self._drop_avro_on_failure = False
 
     def stop(self):
         self._stopped.set()
