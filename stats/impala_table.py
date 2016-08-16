@@ -236,10 +236,12 @@ class ImpalaTable(object):
         # External Avro table in S3
         if cc_table:
             table = cc_table
+            self.drop_avro_table(execution_date, cc_table)
         else:
             table = self._avro_table(execution_date)
             _log.info('Registering event {event} Avro table {table} with Hive'
                   .format(event=self.event, table=table))
+            self.drop_avro_table(execution_date)
 
         # Location of table in S3
         if cc_location:
@@ -248,7 +250,6 @@ class ImpalaTable(object):
             location_s3 = os.path.join(input_path, self.event_schema)
 
         try:
-            self.drop_avro_table(execution_date)
             sql = """
             CREATE EXTERNAL TABLE %s
             ROW FORMAT SERDE
@@ -449,7 +450,6 @@ class ImpalaTable(object):
                                          strftime("%Y%m%d%H"))
 
                 # Create the table pointing to previous corner case run output
-                self.drop_avro_table(execution_date, cc_cleaned_previous)
                 self.create_avro_table(execution_date, cc_table=cc_cleaned_previous, 
                                        cc_location=cc_cleaned_path_prev)
 
