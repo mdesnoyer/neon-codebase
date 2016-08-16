@@ -3755,9 +3755,6 @@ class CDNHostingMetadata(UnsaveableStoredObject):
             [875, 500],
             [1280, 720]]
 
-        # the created and updated on these objects
-        # self.created = self.updated = str(datetime.datetime.utcnow())
-
     @classmethod
     def _create(cls, key, obj_dict):
         obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)

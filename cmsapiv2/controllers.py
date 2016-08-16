@@ -2163,6 +2163,14 @@ class VideoHelper(object):
                 # demographic_thumbnails are also required here and
                 # are handled in that section.
                 pass
+            elif field == 'demographic_clip_ids': 
+                for video_result in video.job_results: 
+                    cur_entry = { 
+                        'gender': video_result.gender, 
+                        'age': video_result.age, 
+                        'clip_ids': video_result.clip_ids 
+                    }
+                    new_video.['demographic_clip_ids'].append(cur_entry)  
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -2209,7 +2217,6 @@ class VideoHelper(object):
                     new_video['error'] = err
 
         raise tornado.gen.Return(new_video)
-
 
 '''*********************************************************************
 VideoHandler
