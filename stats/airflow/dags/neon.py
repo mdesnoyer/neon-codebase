@@ -590,12 +590,13 @@ def _load_impala_table(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_initial_data_load = check_first_run(execution_date)
 
-    if is_first_run and is_initial_data_load:
+    if (is_first_run and is_initial_data_load) or event == 'VideoPlay':
         _log.info("This is first & big run, bumping up the num of task instances to %s" %
             options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
         
-        # This is going to be the mapreduce output path
+        # This is going to be the mapreduce output path for Eventsequences Table for first run
+        # This is always going to be the path for Videoplays Table for all runs
         output_bucket, output_prefix = _get_s3_tuple(options.output_path)
         cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                                 prefix=output_prefix)
@@ -964,7 +965,7 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_create_tables,
         op_kwargs=dict(event=event))
-    create_op.set_upstream(mr_cleaning_job)
+    create_op.set_upstream([mr_cleaning_job, cc_handler])
 
     # Load the data into the impala table
     op = PythonOperator(
@@ -975,7 +976,7 @@ for event in __EVENTS:
         op_kwargs=dict(output_path=options.cc_cleaned_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
         priority_weight=90)
-    op.set_upstream([mr_cleaning_job, s3copy, create_op, cc_handler])
+    op.set_upstream(create_op)
     load_impala_tables.append(op)
 
 

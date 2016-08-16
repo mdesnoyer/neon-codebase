@@ -648,7 +648,13 @@ class ImpalaTable(object):
         UNION ALL
         select {columns} 
         from corner_cases_input_{dt}
-        where thumbnail_id is null
+        where 
+        thumbnail_id is null and
+        imloadservertime is null and
+        imvisservertime is null and
+        imclickservertime is null and
+        adplayservertime is null and
+        videoplayservertime is null
         ) 
         overall_cleaned
         """.format(columns=','.join(x.name for x in self.avro_schema.fields),
