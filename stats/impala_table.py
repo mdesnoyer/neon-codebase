@@ -680,7 +680,7 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise CornerCaseExecutionError
 
-    def cleanup_after_cc_processing(self):
+    def cleanup_after_cc_processing(self, execution_date):
         """
         Clean up all the tables we created during corner case processing
         """
@@ -876,7 +876,7 @@ class CornerCaseHandler(threading.Thread):
             self.table.resolve_corner_cases(self.execution_date,
                                             self.cc_cleaned_path_current)
 
-            self.table.cleanup_after_cc_processing()
+            self.table.cleanup_after_cc_processing(self.execution_date)
 
         except:
             _log.exception('Error processing corner cases')
