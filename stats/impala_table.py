@@ -551,11 +551,13 @@ class ImpalaTable(object):
         )
         """
 
-        self.execute_cc_query(imload_group, imvis_group, imclick_group,
+        self.execute_cc_query(execution_date, imload_group, 
+                              imvis_group, imclick_group,
                               adplay_group, videoplay_group)
 
-    def execute_cc_query(self, imload_group, imvis_group, imclick_group,
-                               adplay_group, videoplay_group):
+    def execute_cc_query(self, execution_date, imload_group, 
+                         imvis_group, imclick_group, 
+                         adplay_group, videoplay_group):
         """
         The corner case query will combine all the individual corner case cleaned events. There are also some
         rows in the table that have null thumbnail id's with all imclick,imvis,imload,adplay,videoplay being null so
