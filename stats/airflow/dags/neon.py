@@ -596,14 +596,16 @@ def _load_impala_table(**kwargs):
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
         
         # This is going to be the mapreduce output path
-        path_for_impala_build = options.output_path
-    else:
-        # This is going to be the corner cases cleaned path
-        path_for_impala_build = kwargs['output_path']
-
-        output_bucket, output_prefix = _get_s3_tuple(path_for_impala_build)
+        output_bucket, output_prefix = _get_s3_tuple(options.output_path)
         cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                                 prefix=output_prefix)
+    else:
+        # This is going to be the corner cases cleaned path
+        output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
+        cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                                prefix=output_prefix)
+
+    path_for_impala_build = os.path.join('s3://', output_bucket, cleaned_prefix)
 
     _log.info("{task}: Loading data!".format(task=task))
     
