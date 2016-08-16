@@ -772,12 +772,14 @@ class ImpalaTableLoader(threading.Thread):
     Load cleaned data to the Impala Parquet-format table
     """
 
-    def __init__(self, cluster, event, execution_date, input_path):
+    def __init__(self, cluster, event, execution_date, is_initial_data_load,
+                 input_path):
         super(ImpalaTableLoader, self).__init__()
         self.event = event
         self.cluster = cluster
         self.input_path = input_path
         self.execution_date = execution_date
+        self.is_initial_data_load = is_initial_data_load
         self.status = 'INIT'
         self._stopped = threading.Event()
         self.table = ImpalaTable(self.cluster, self.event)

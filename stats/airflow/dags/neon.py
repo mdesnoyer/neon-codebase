@@ -615,6 +615,7 @@ def _load_impala_table(**kwargs):
             cluster=cluster,
             event=event,
             execution_date=execution_date,
+            is_initial_data_load=is_initial_data_load,
             input_path=path_for_impala_build)
     
         builder.run()
