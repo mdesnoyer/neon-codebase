@@ -55,7 +55,7 @@ define("mapreduce_status_port", default=9046,
        help="Port to query the mapreduce status on")
 define("s3_jar_bucket", default="neon-emr-packages",
        help='S3 bucket where jobs will be stored')
-define("cluster_subnet_id", default="subnet-e7be7f90,subnet-abf214f2",
+define("cluster_subnet_ids", default="subnet-e7be7f90,subnet-abf214f2",
        help=('The VPC Subnet Id where the cluster should run. '
              'Default: vpc-90ad09f5 subnet Stats Cluster (10.0.128.0/17).'
              'Do not leave spaces in the list of subnets'))
@@ -160,13 +160,13 @@ class Cluster():
     
     '''Class representing the cluster'''
     def __init__(self, cluster_type=None, cluster_name=None,
-                 cluster_region=None, cluster_subnet_id=None,
+                 cluster_region=None, cluster_subnet_ids=None,
                  cluster_log_uri=None, public_ip=None,
                  n_core_instances=None):
         '''
         cluster_type - Cluster type to connect to. Uses the cluster-type tag.
         cluster_name - The Name tag to assign the Cluster
-        cluster_subnet_id - The VPC SubnetId where the cluster should run.
+        cluster_subnet_ids - The list of VPC SubnetIds where the cluster should run.
         cluster_log_uri - The S3 URI where EMR logs should be saved
         public_ip - The public ip to assign to the cluster
         n_core_instances - Number of r3.xlarge core instances. 
@@ -178,7 +178,7 @@ class Cluster():
         self.cluster_region = cluster_region or options.cluster_region
         self.public_ip = public_ip or options.public_ip
         self.cluster_log_uri = cluster_log_uri or options.cluster_log_uri
-        self.cluster_subnet_id = cluster_subnet_id or options.cluster_subnet_id
+        self.cluster_subnet_ids = cluster_subnet_ids or options.cluster_subnet_ids
         self.cluster_id = None
         self.master_ip = None
         self.master_id = None
@@ -711,7 +711,7 @@ class Cluster():
 
         subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
                           'Master Instance Group'),
             instance_group
             ]
@@ -787,7 +787,7 @@ class Cluster():
         # Map the subnet id's obtained with their availability zones
         conn_vpc = VPCConnection()
         avail_zone_to_subnet_id = {}
-        for subnet_requested in options.cluster_subnet_id.split(','):
+        for subnet_requested in options.cluster_subnet_ids.split(','):
             for subnet in conn_vpc.get_all_subnets():
                 if subnet.id == subnet_requested:
                     avail_zone_to_subnet_id[str(
@@ -795,9 +795,6 @@ class Cluster():
 
         _log.debug("Subnets & their avail zones are %s" % 
                   avail_zone_to_subnet_id)
-
-        _log.info("self.n_core_instances is %s" % self.n_core_instances)
-        _log.info("options.n_core_instances is %s" % options.n_core_instances)
 
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 

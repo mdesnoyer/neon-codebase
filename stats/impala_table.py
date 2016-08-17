@@ -886,8 +886,6 @@ class CornerCaseHandler(threading.Thread):
             self.table.resolve_corner_cases(self.execution_date,
                                             self.cc_cleaned_path_current)
 
-            self.table.cleanup_after_cc_processing(self.execution_date)
-
         except:
             _log.exception('Error processing corner cases')
             if self._drop_avro_on_failure:
@@ -895,6 +893,7 @@ class CornerCaseHandler(threading.Thread):
             raise CornerCaseExecutionError
 
         finally:
+            self.table.cleanup_after_cc_processing(self.execution_date)
             _log.debug("Closing Impala connection")
             self.table.transport.close()
 

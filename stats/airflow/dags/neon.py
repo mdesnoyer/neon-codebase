@@ -775,14 +775,15 @@ def _checkpoint_hdfs_to_s3(**kwargs):
             cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
 
-def _handle_corner_cases(**kwargs):
+def _merge_eventsequences_across_days(**kwargs):
     """
-    Handle the corner cases. Since we process the full day's file every run,
-    we will have to handle corner cases too. 
+    Merge the eventsequences that span across the day. Since we process the full 
+    day's file every run, we will have to handle these cases too. 
     """
     dag = kwargs['dag']
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
+    event = 'EventSequenceHive'
 
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
@@ -809,8 +810,16 @@ def _handle_corner_cases(**kwargs):
 
     _delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
                                      output_path=kwargs['cc_cleaned_path'])
+    
+    # Set the s3 paths
+    input_path = os.path.join('s3://', output_bucket, cleaned_prefix)
+    cc_cleaned_path_prev = os.path.join('s3://', cc_bucket, 
+                                        cc_prev_prefix, event)
+    cc_cleaned_path_current = os.path.join('s3://', cc_bucket, 
+                                        cc_curr_prefix, event)
 
-    _log.info("{task}: Handling corner cases!".format(task=task))
+    _log.info("{task}: Merging eventsequences across days!"
+              .format(task=task))
     
     try:
         _log.info("Input Path for clean up cases is %s" % 
@@ -826,9 +835,9 @@ def _handle_corner_cases(**kwargs):
             cluster=cluster,
             execution_date=execution_date,
             is_initial_data_load=is_initial_data_load,
-            input_path=os.path.join('s3://', output_bucket, cleaned_prefix),
-            cc_cleaned_path_prev=os.path.join('s3://', cc_bucket, cc_prev_prefix),
-            cc_cleaned_path_current=os.path.join('s3://', cc_bucket, cc_curr_prefix))
+            input_path=input_path,
+            cc_cleaned_path_prev=cc_cleaned_path_prev,
+            cc_cleaned_path_current=cc_cleaned_path_current)
     
         builder.run()
 
@@ -839,7 +848,7 @@ def _handle_corner_cases(**kwargs):
             _log.info("Bringing down the number of task instances to zero")
             cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
-    return "Corner Cases Cleaned"
+    return "Merge of eventsequences across days complete"
 
 
 
@@ -948,7 +957,7 @@ s3copy.set_upstream(mr_cleaning_job)
 cc_handler = PythonOperator(
     task_id='handle_corner_cases',
     dag=clicklogs,
-    python_callable=_handle_corner_cases,
+    python_callable=_merge_eventsequences_across_days,
     provide_context=True,
     depends_on_past=True,
     op_kwargs=dict(output_path=options.output_path,
