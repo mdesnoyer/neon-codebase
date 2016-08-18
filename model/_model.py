@@ -44,18 +44,31 @@ class VideoThumbnail(object):
 
     def __str__(self):
         return utils.obj.full_object_str(self, ['features', 'image'])
+
+class VideoClip(object):
+    '''Holds data about a video clip.'''
+    def __init__(self, start, end, score):
+        self.start = start # The start frame number
+        self.end = end # The end frame number
+        self.score = score # The score of this clip
+
+    def __str__(self):
+        return utils.obj.full_object_str(self)
     
 
 class Model(object):
     '''The whole model, which consists of a predictor and a filter.'''    
-    def __init__(self, predictor, filt=None, vid_searcher=None):
+    def __init__(self, predictor, filt=None, vid_searcher=None,
+                 clip_finder=None):
         self.__version__ = 3
         self.predictor = predictor
         self.filt = filt
+        self.clip_finder = clip_finder
         if video_searcher is None:
             raise ValueError('A vid_searcher is required')
         else:
             self.video_searcher = vid_searcher
+        
 
 
     def __setstate__(self, state):
@@ -75,6 +88,8 @@ class Model(object):
         except Exception, e:
             _log.error(("Video Searcher does not support different "
                         "processing strategies."))
+        if self.clip_finder:
+            self.clip_finder.update_processing_strategy(processing_strategy)
 
     def reset(self):
         self.predictor.reset()
@@ -102,9 +117,26 @@ class Model(object):
         '''Select the top n and/or bottom m thumbnails from a video.
 
         Returns:
-        List of VideoThumbnail objects sorted by score
+        List of VideoThumbnail objects sorted by score descending
         '''
         return self.video_searcher.choose_thumbnails(video, n, video_name, m)
+
+    def find_clips(self, mov, n=1, max_len=None, min_len=None):
+        '''Finds clips from a video.
+
+        If both max_len and min_len are None, then only complete scenes
+        will be returned.
+
+        Inputs:
+        mov - A OpenCV VideoCapture object
+        n - Number of clips to find
+        max_len - Max length of each clip
+        min_len - Min length of each clip
+
+        Outputs:
+        List of VideoClip objects sorted by score descending
+        '''
+        self.clip_finder.find_clips(mov, n, max_len, min_len)
 
 
     def restore_additional_data(self, filename):

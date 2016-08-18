@@ -3349,11 +3349,14 @@ class ProcessingStrategy(DefaultedStoredObject):
     more elaborate documentation.
     '''
     def __init__(self, account_id, processing_time_ratio=2.0,
+                 clip_processing_time_ratio=0.7,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
                  filter_text=True, text_filter_params=None, 
-                 filter_text_thresh=0.04, m_thumbs=6):
+                 filter_text_thresh=0.04, m_thumbs=6,
+                 clip_cross_scene_boundary=True,
+                 min_scene_piece=15):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -3362,6 +3365,7 @@ class ProcessingStrategy(DefaultedStoredObject):
         # max_processing_time = (length of video in seconds * 
         #                        processing_time_ratio)
         self.processing_time_ratio = processing_time_ratio
+        self.clip_processing_time_ratio = clip_processing_time_ratio
 
         # (this should rarely need to be changed)
         # Local search width is the size of the local search regions. If the
@@ -3484,6 +3488,12 @@ class ProcessingStrategy(DefaultedStoredObject):
         # the entire image. If the ratio is greater than this, and
         # filter_text is true, the frame will be filtered.
         self.filter_text_thresh = filter_text_thresh
+
+        # Can a clip cross a scene boundary?
+        self.clip_cross_scene_boundary = clip_cross_scene_boundary
+
+        # Minimum number of frames from a scene to grab when making clips
+        self.min_scene_piece = min_scene_piece
 
     @classmethod
     def _baseclass_name(cls):

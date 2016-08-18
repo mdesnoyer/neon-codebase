@@ -31,7 +31,9 @@ _log = logging.getLogger(__name__)
 class ClipFinder(object):
     def __init__(self, predictor, scene_detector, action_calculator,
                  valence_weight=1.0, action_weight=0.25,
-                 processing_time_ratio=0.7, startend_clip=0.1):
+                 processing_time_ratio=0.7, startend_clip=0.1,
+                 cross_scene_boundary=True,
+                 min_scene_piece=15):
         self.predictor = predictor
         self.scene_detector = scene_detector
         self.action_calculator = action_calculator
@@ -39,9 +41,23 @@ class ClipFinder(object):
                             'action' : action_weight}
         self.processing_time_ratio = processing_time_ratio
         self.startend_clip = startend_clip
+        self.cross_scene_boundary = cross_scene_boundary
+        self.min_scene_piece = min_scene_piece
 
-    def find_clips(self, mov, n, max_len, min_len):
+    def update_processing_strategy(self, processing_strategy):
+        '''
+        Changes the state of the video client based on the processing
+        strategy. See the ProcessingStrategy object in cmsdb/neondata.py
+        '''
+        self.startend_clip = processing_strategy.startend_clip
+        self.processing_time_ratio = \
+          processing_strategy.clip_processing_time_ratio
+        self.cross_scene_boundary = \
+          processing_strategy.clip_cross_scene_boundary
+        self.min_scene_piece = processing_strategy.min_scene_piece
+
+    def find_clips(self, mov, n=1, max_len=None, min_len=None):
         pass
 
-    def build_clips(self, scene_list, score_obj, max_len, min_len, cross_scene_boundary=True)
-        # TODO(have options about how to fit/select the clip from the list of scenes. Do we go in th emiddle of a scene? Only grab scenes about the correct length? etc.
+    def _build_clips(self, scene_list, score_obj, n_clips, max_len, min_len)
+        # TODO(have options about how to fit/select the clip from the list of scenes. Do we go in the middle of a scene? Only grab scenes about the correct length? etc.

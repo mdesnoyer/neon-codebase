@@ -52,6 +52,46 @@ class FeatureGenerator(object):
         '''Updates a hash object with data about the type.'''
         hashobj.update(self.__class__.__name__)
 
+class MovieMultipleFeatureGenerator(object):
+    '''
+    Class to generate features from a whole movie sequentially.
+    '''
+    def __init__(self, feature_generators, max_height=None, crop_frac=None,
+                 frame_step=1, startend_buffer=30):
+        '''Build the generator.
+
+        Inputs:
+        feature_generators - List of FeatureGenerator to run generate() on for each frame.
+        max_height - Maximum height to sample the frame to
+        crop_frac - The amount of cropping to do
+        frame_step - Step when walking through the video 
+        startend_buffer - Buffer in frames on the front and end of the 
+                          movie not to sample
+        '''
+        self.feature_generators = feature_generators
+        self.frame_step=1
+        self.startend_buffer=30
+        self.prep = utils.pycvutils.ImagePrep(
+            max_height=max_height,
+            crop_frac=crop_frac)
+
+    def reset(self):
+        for gen in self.feature_generators:
+            gen.reset()
+
+    def generate(self, mov):
+        '''Generate features for all the frames in the movie.
+
+        Inputs:
+        mov - OpenCv Video capture object
+
+        Outputs:
+        Nested dictionary of 
+        {<generator class name> : { <frame_number> : <feature vector> } }
+        '''
+        pass
+        
+
 class RegionFeatureGenerator(FeatureGenerator):
     '''
     Abstract class for a region feature generator, which
