@@ -2368,6 +2368,9 @@ class VideoHandler(ShareableContentHandler):
                 args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
+        def _modify_tag(t): 
+            t.hidden = Boolean()(args.get('hidden', t.hidden))
+
         video = yield neondata.VideoMetadata.modify(
             internal_video_id,
             _update_video,
@@ -2376,6 +2379,12 @@ class VideoHandler(ShareableContentHandler):
         if not video:
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
+
+        if video.tag_id: 
+            yield neondata.Tag.modify(
+                video.tag_id, 
+                _modify_tag, 
+                async=True) 
 
         # we may need to update the request object as well
         db2api_fields = {'testing_enabled', 'video_id'}
