@@ -34,6 +34,7 @@ from urlparse import urlparse
 from utils.options import define, options
 from utils import statemon
 from datetime import datetime, timedelta
+import calendar
 
 _log = logging.getLogger(__name__)
 
@@ -349,17 +350,23 @@ class ImpalaTable(object):
             self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                               heap_size)
 
+            _log.info('execution date is {dt}'.format(dt=execution_date))
+
             if is_initial_data_load:
                 sql = """
-                insert overwrite table %s
+                insert overwrite table {parq_table}
                 partition(tai, yr, mnth, day)
-                select %s, trackerAccountId,
+                select {columns}, trackerAccountId,
                 year(cast(serverTime as timestamp)),
                 month(cast(serverTime as timestamp)),
                 -1
-                from %s""" % (parq_table,
-                              ','.join(x.name for x in self.avro_schema.fields),
-                              avro_table)
+                from {avro_table}
+                where
+                serverTime < {epoch_of_today}
+                """.format(parq_table=parq_table,
+                        columns=','.join(x.name for x in self.avro_schema.fields),
+                        avro_table=avro_table,
+                        epoch_of_today=calendar.timegm(execution_date.timetuple()))
             else:
                 sql = """
                 insert overwrite table %s
@@ -791,7 +798,7 @@ class ImpalaTableLoader(threading.Thread):
         self.table = ImpalaTable(self.cluster, self.event)
 
         # Cleanup after ourselves on a failure?
-        self._drop_avro_on_failure = False
+        self._drop_avro_on_failure = True
 
     def stop(self):
         self._stopped.set()
