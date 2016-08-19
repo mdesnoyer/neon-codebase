@@ -10,6 +10,8 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+from collections import defaultdict
+import copy
 import cv2
 import hashlib
 import leargist
@@ -19,6 +21,7 @@ import os
 import os.path
 import utils.obj
 from utils import pycvutils
+import model.errors
 from model.colorname import ColorName
 from model.parse_faces import DetectFaces, FindAndParseFaces
 from model.score_eyes import ScoreEyes
@@ -57,7 +60,7 @@ class MovieMultipleFeatureGenerator(object):
     Class to generate features from a whole movie sequentially.
     '''
     def __init__(self, feature_generators, max_height=None, crop_frac=None,
-                 frame_step=1, startend_buffer=30):
+                 frame_step=1, startend_buffer=0.1):
         '''Build the generator.
 
         Inputs:
@@ -65,19 +68,25 @@ class MovieMultipleFeatureGenerator(object):
         max_height - Maximum height to sample the frame to
         crop_frac - The amount of cropping to do
         frame_step - Step when walking through the video 
-        startend_buffer - Buffer in frames on the front and end of the 
-                          movie not to sample
+        startend_buffer - Buffer in fraction of the video on the front and 
+                          end of the movie not to sample
         '''
         self.feature_generators = feature_generators
         self.frame_step=1
-        self.startend_buffer=30
+        self.startend_buffer=startend_buffer
         self.prep = utils.pycvutils.ImagePrep(
             max_height=max_height,
             crop_frac=crop_frac)
 
-    def reset(self):
+    def __str__(self):
+        return utils.obj.full_object_str(self)
+
+    def _reset_generators(self):
         for gen in self.feature_generators:
             gen.reset()
+
+    def reset(self):
+        self._reset_generators()
 
     def generate(self, mov):
         '''Generate features for all the frames in the movie.
@@ -87,9 +96,54 @@ class MovieMultipleFeatureGenerator(object):
 
         Outputs:
         Nested dictionary of 
-        {<generator class name> : { <frame_number> : <feature vector> } }
+        {<generator class> : { <frame_number> : <feature vector> } }
         '''
-        pass
+        self._reset_generators()
+        num_frames = int(mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        frame_buf = max(0, int(self.startend_buffer * num_frames))
+        rval = defaultdict(dict)
+
+        next_frame = frame_buf
+        seek_sucess = True
+        read_sucess = True
+        first_move = True
+        cur_frame = None
+
+        while (seek_sucess and read_sucess and 
+               next_frame < (num_frames - frame_buf)):
+            try:
+                seek_sucess, cur_frame = pycvutils.seek_video(
+                    mov,
+                    next_frame,
+                    do_log=first_move,
+                    cur_frame=cur_frame)
+                if not seek_sucess:
+                    if cur_frame is None:
+                        raise model.errors.VideoReadError(
+                            "Could not read the video")
+                    break
+                first_move = False
+                
+                # Read the frame
+                read_sucess, image = mov.read()
+                if not read_sucess:
+                    break
+                frameno = cur_frame
+
+                prepped_image = self.prep(image)
+                for gen in self.feature_generators:
+                    feats = gen.generate(prepped_image)
+                    rval[gen.__class__][frameno] = feats
+
+                cur_frame = next_frame + 1
+                next_frame += self.frame_step
+                    
+            except Exception as e:
+                _log.exception("Unexpected exception when getting features "
+                               "from a video")
+                break
+
+        return rval
         
 
 class RegionFeatureGenerator(FeatureGenerator):
@@ -223,6 +277,41 @@ class ColorNameGenerator(FeatureGenerator):
         image_resized = cv2.resize(image, image_size)
         return ColorName(image_resized)._hist
         return cn.get_colorname_histogram()
+
+class SceneCutGenerator(FeatureGenerator):
+    '''A feature generator that wraps a scenedetect.SceneDetector.'''
+    def __init__(self, detector):
+        self.unused_detector = detector
+        self.reset()
+
+    def reset(self):
+        self.detector = copy.copy(self.unused_detector)
+        self.cur_frame = 0
+        self.frame_metrics = defaultdict(dict)
+        self.scene_list = []
+
+    def generate(self, image):
+        rval = self.detector.process_frame(self.cur_frame, image,
+                                           self.frame_metrics,
+                                           self.scene_list)
+        self.cur_frame += 1
+        return rval
+
+class ObjectActionGenerator(FeatureGenerator):
+    '''Provides a measure of object's action in the image from the previous
+    image.
+    '''
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.last_frame = None
+
+    def generate(self, image):
+        # TODO(mdesnoyer): Implement this using the affine transform
+        # technique from my thesis
+        self.last_frame = image
+        return 0.0
 
 class BlurGenerator(RegionFeatureGenerator):
     '''

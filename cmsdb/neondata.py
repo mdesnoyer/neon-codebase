@@ -3349,14 +3349,14 @@ class ProcessingStrategy(DefaultedStoredObject):
     more elaborate documentation.
     '''
     def __init__(self, account_id, processing_time_ratio=2.0,
-                 clip_processing_time_ratio=0.7,
+                 clip_processing_time_ratio=1.2,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
                  filter_text=True, text_filter_params=None, 
                  filter_text_thresh=0.04, m_thumbs=6,
                  clip_cross_scene_boundary=True,
-                 min_scene_piece=15):
+                 min_scene_piece=15, scene_threshold=30.0):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -3494,6 +3494,9 @@ class ProcessingStrategy(DefaultedStoredObject):
 
         # Minimum number of frames from a scene to grab when making clips
         self.min_scene_piece = min_scene_piece
+
+        # Threshold for scene detection
+        self.scene_threshold = scene_threshold
 
     @classmethod
     def _baseclass_name(cls):

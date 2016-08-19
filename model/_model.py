@@ -130,8 +130,8 @@ class Model(object):
         Inputs:
         mov - A OpenCV VideoCapture object
         n - Number of clips to find
-        max_len - Max length of each clip
-        min_len - Min length of each clip
+        max_len - Max length of each clip (seconds)
+        min_len - Min length of each clip (seconds)
 
         Outputs:
         List of VideoClip objects sorted by score descending
