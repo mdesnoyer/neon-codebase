@@ -124,12 +124,15 @@ options.define('clicklog_period', default=3, type=int,
 options.define('max_task_instances', default=30, type=int,
                help='Maximum number of task instances to request')
 options.define('full_run_input_path', 
-               default='s3://neon-tracker-logs-v2/v2.2/*/*/*/*', type=str, 
+               default='/*/*/*/*', type=str, 
                help='input path for first run')
-options.define('airflow_start_date', default='2016, 7, 22', type=str, 
+options.define('airflow_start_date', default='2016-08-19', type=str, 
                help=('The date when first run of airflow will take '
-                    'place. Always give the current UTC date as the '
-                    'start date so that there is no large backfill'))
+                    'place'))
+options.define('airflow_rebase_date', default='2016-08-19', type=str,
+               help=('The date when airflow metadata is getting '
+                     'rebased to start from current date. The rebase'
+                     'date should be same as start date'))
 options.define('notify_email', default='ops@neon-lab.com', type=str,
                help='email address for airflow notifications')
 
@@ -160,6 +163,7 @@ PROTECTED_PREFIXES = [r'^/$', r'v[0-9].[0-9]']
 
 # Use the current UTC date whenever rebuilding Airflow from scratch
 airflow_start_date = dateutil.parser.parse(options.airflow_start_date)
+airflow_rebase_date = dateutil.parser.parse(options.airflow_rebase_date)
 
 class ClusterDown(Exception): pass
 
@@ -181,6 +185,7 @@ def _cluster_status():
         :return: True if the cluster is running
         """
     _log.info('Airflow start date is %s' % airflow_start_date)
+    _log.info('Airflow rebase date is %s' % airflow_rebase_date)
 
     cluster = ClusterGetter.get_cluster()
     if not cluster.is_alive():
@@ -422,8 +427,7 @@ def check_first_run(execution_date):
     first_run=False
     initial_data_load=False
 
-    if execution_date.strftime("%Y/%m/%d") == \
-       clicklogs.default_args['start_date'].strftime("%Y/%m/%d"):
+    if execution_date.strftime("%Y/%m/%d") == airflow_rebase_date.strftime("%Y/%m/%d"):
         first_run=True
         if execution_date.strftime("%H") == '00':
             initial_data_load=True
@@ -545,7 +549,7 @@ def _run_mr_cleaning_job(**kwargs):
         hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
         hdfs_dir = 'mnt/cleaned'
         cleaning_job_output_path = "%s/%s/%s" % (hdfs_path, hdfs_dir, execution_date.strftime("%Y/%m/%d"))
-        cleaning_job_input_path = options.full_run_input_path
+        cleaning_job_input_path = options.input_path + options.full_run_input_path
         _log.info("Increasing the number of task instances to %s" % options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
 
@@ -590,13 +594,17 @@ def _load_impala_table(**kwargs):
     # Check if this is the first run and take appropriate action
     is_first_run, is_initial_data_load = check_first_run(execution_date)
 
-    if (is_first_run and is_initial_data_load) or event == 'VideoPlay':
+    if is_first_run and is_initial_data_load:
         _log.info("This is first & big run, bumping up the num of task instances to %s" %
             options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
         
         # This is going to be the mapreduce output path for Eventsequences Table for first run
         # This is always going to be the path for Videoplays Table for all runs
+        output_bucket, output_prefix = _get_s3_tuple(options.output_path)
+        cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                                prefix=output_prefix)
+    elif event == 'VideoPlay':
         output_bucket, output_prefix = _get_s3_tuple(options.output_path)
         cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                                 prefix=output_prefix)
@@ -953,7 +961,7 @@ s3copy = PythonOperator(
 s3copy.set_upstream(mr_cleaning_job)
 
 
-# Handle Corner Cases
+# Merge eventsequences across days
 cc_handler = PythonOperator(
     task_id='handle_corner_cases',
     dag=clicklogs,
