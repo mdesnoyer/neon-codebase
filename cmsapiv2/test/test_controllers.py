@@ -3348,6 +3348,38 @@ class TestVideoHandler(TestControllersBase):
         self.assertTrue(rjson['testing_enabled'])
         self.assertEquals(response.code, 200)
 
+    @tornado.testing.gen_test(timeout=10.0)
+    def test_update_video_set_hidden(self):
+        tag = neondata.Tag('tag1') 
+        yield tag.save(async=True) 
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(
+            self.account_id_api_key,'vid1'), tag_id='tag1')
+        yield vm.save(async=True)
+        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=0' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT')
+
+        rjson = json.loads(response.body)
+        self.assertFalse(rjson['testing_enabled'])
+        self.assertEquals(response.code, 200)
+
+        url = '/api/v2/%s/videos?video_id=vid1&hidden=1' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+
+        tag = yield neondata.Tag.get(vm.tag_id, async=True)
+        self.assertTrue(tag.hidden)
+        video = yield vm.get(vm.key, async=True)
+        self.assertTrue(video.hidden) 
+
     @tornado.testing.gen_test
     def test_get_single_video_with_thumbnails_field(self):
         tids = ['testing_vtid_one', 'testing_vtid_two']

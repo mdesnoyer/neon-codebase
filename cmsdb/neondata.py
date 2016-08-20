@@ -2580,7 +2580,7 @@ class Tag(Searchable, StoredObject):
             'tag_type']
 
     def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
-                 video_id=None):
+                 video_id=None, hidden=False):
         tag_id = tag_id or uuid.uuid4().hex
 
         # Owner
@@ -2591,6 +2591,8 @@ class Tag(Searchable, StoredObject):
         self.tag_type = tag_type if tag_type in [
             TagType.VIDEO, TagType.COLLECTION] else None
         self.video_id = video_id
+
+        self.hidden = hidden
 
         super(Tag, self).__init__(tag_id)
 
