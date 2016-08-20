@@ -60,7 +60,7 @@ class Model(object):
     '''The whole model, which consists of a predictor and a filter.'''    
     def __init__(self, predictor, filt=None, vid_searcher=None,
                  clip_finder=None):
-        self.__version__ = 3
+        self.__version__ = 4
         self.predictor = predictor
         self.filt = filt
         self.clip_finder = clip_finder
@@ -90,6 +90,11 @@ class Model(object):
                         "processing strategies."))
         if self.clip_finder:
             self.clip_finder.update_processing_strategy(processing_strategy)
+
+    def set_predictor(self, predictor):
+        self.predictor = predictor
+        self.clip_finder.predictor = predictor
+        self.video_searcher.predictor = predictor
 
     def reset(self):
         self.predictor.reset()
@@ -169,24 +174,19 @@ def load_model(filename):
 
     '''
     with open(filename, 'rb') as f:
-        model = pickle.load(f)
-    model.restore_additional_data(filename)
+        mod = pickle.load(f)
+    mod.restore_additional_data(filename)
     
-    return model 
+    return mod
 
-def generate_model(ls_inp_filename, predictor):
+def generate_model(filename, predictor):
     '''
-    Given a filename pointing to an input dict for 
-    local video searcher and a functioning instance
-    of the predictor, generates a new model.
+    Given a filename pointing to a pickled model, load the model
+    and set the predictor 
 
-    ls_inp_filename: A filename that contains a pickled dictionary of the
-        inputs required for local search (the combiner, face finder, etc)
+    ls_inp_filename: Filename of the pickled model
     predictor: an instance of the predictor.
     '''
-    with open(ls_inp_filename) as f:
-        ls_in_dict = pickle.load(f)
-    loc_srch = local_video_searcher.LocalSearcher(predictor, **ls_in_dict)
-    model = Model(predictor, vid_searcher=loc_srch)
-    model.restore_additional_data(ls_inp_filename)
-    return model
+    mod = load_model(filename)
+    mod.set_predictor(predictor)
+    return mod
