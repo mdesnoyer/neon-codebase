@@ -302,17 +302,25 @@ class Cluster():
         if s3AddrMatch:
 
             # First figure out the size of the data
+            # Check if input path is relative or absolute
             bucket_name, key_name = s3AddrMatch.groups()
             s3conn = S3Connection()
-            prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
-            if prefix:
+            match_relative = re.compile('([^\*]*)\*').match(key_name)
+            match_absolute = re.compile('([^\*]*).*').match(key_name)
+            if match_relative:
+                prefix = match_relative.group(1)
                 for key in s3conn.get_bucket(bucket_name).list(prefix):
                     input_data_size += key.size
 
                 n_reducers = math.ceil(input_data_size / (1073741824. / 2))
                 extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
             else:
-                extra_ops['mapreduce.job.reduces'] = 1
+                prefix = match_absolute.group(1)
+                for key in s3conn.get_bucket(bucket_name).list(prefix):
+                    input_data_size += key.size
+
+                n_reducers = math.ceil(input_data_size / (1073741824. / 2))
+                extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
 
         # If the cluster's core has larger instances, the memory
         # allocated in the reduce can get very large. However, we max
