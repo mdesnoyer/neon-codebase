@@ -305,11 +305,14 @@ class Cluster():
             bucket_name, key_name = s3AddrMatch.groups()
             s3conn = S3Connection()
             prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
-            for key in s3conn.get_bucket(bucket_name).list(prefix):
-                input_data_size += key.size
+            if prefix:
+                for key in s3conn.get_bucket(bucket_name).list(prefix):
+                    input_data_size += key.size
 
-            n_reducers = math.ceil(input_data_size / (1073741824. / 2))
-            extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
+                n_reducers = math.ceil(input_data_size / (1073741824. / 2))
+                extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
+            else:
+                extra_ops['mapreduce.job.reduces'] = 1
 
         # If the cluster's core has larger instances, the memory
         # allocated in the reduce can get very large. However, we max
