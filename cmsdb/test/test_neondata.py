@@ -1601,21 +1601,19 @@ class TestAddingImageData(NeonDbTestCase):
 
     @tornado.testing.gen_test
     def test_add_account_default_thumb(self):
-        _log.info('here**')
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
         account = NeonUserAccount('a1')
 
-        self.smartcrop_patcher = patch('cvutils.smartcrop.SmartCrop')
-        self.mock_crop_and_resize = self.smartcrop_patcher.start()
-        self.mock_responses = MagicMock()
-        mock_image = PILImageUtils.create_random_image(540, 640)
-        self.mock_crop_and_resize().crop_and_resize.side_effect = \
-            lambda x, *kw: np.array(PILImageUtils.create_random_image(540, 640))
+        with patch('cvutils.smartcrop.SmartCrop') as mock_crop_and_resize:
+            self.mock_responses = MagicMock()
+            mock_image = PILImageUtils.create_random_image(540, 640)
+            mock_crop_and_resize().crop_and_resize.side_effect = \
+              lambda x, *kw: np.array(PILImageUtils.create_random_image(540,
+                                                                        640))
 
-        yield account.add_default_thumbnail(self.image, async=True)
-        self.assertGreater(self.mock_crop_and_resize.call_count, 0)
-        self.smartcrop_patcher.stop()
+            yield account.add_default_thumbnail(self.image, async=True)
+            self.assertGreater(mock_crop_and_resize.call_count, 0)
 
         # Make sure that the thumbnail id is put in
         self.assertIsNotNone(account.default_thumbnail_id)
@@ -1685,26 +1683,26 @@ class TestPostgresDBConnections(NeonDbTestCase):
     @tornado.testing.gen_test
     def test_retry_connection_fails(self):
         ps = 'momoko.Connection.connect'
-        exception_mocker = patch('momoko.Connection.connect')
-        exception_mock = self._future_wrap_mock(exception_mocker.start())
-        exception_mock.side_effect = psycopg2.OperationalError('blah blah')
-        pg1 = neondata.PostgresDB()
-        with options._set_bounded('cmsdb.neondata.max_connection_retries', 1):
-            with self.assertRaises(Exception):
-                yield pg1.get_connection()
-        exception_mocker.stop()
+        with patch('momoko.Connection.connect') as exception_mocker:
+            exception_mock = self._future_wrap_mock(exception_mocker)
+            exception_mock.side_effect = psycopg2.OperationalError('blah blah')
+            pg1 = neondata.PostgresDB()
+            with options._set_bounded('cmsdb.neondata.max_connection_retries',
+                                      1):
+                with self.assertRaises(Exception):
+                    yield pg1.get_connection()
 
     @tornado.testing.gen_test
     def test_retry_connection_fails_then_success(self):
-        exception_mocker = patch('momoko.Connection.connect')
-        exception_mock = self._future_wrap_mock(exception_mocker.start())
-        exception_mock.side_effect = psycopg2.OperationalError('blah blah')
+        with patch('momoko.Connection.connect') as exception_mocker:
+            exception_mock = self._future_wrap_mock(exception_mocker)
+            exception_mock.side_effect = psycopg2.OperationalError('blah blah')
 
-        pg1 = neondata.PostgresDB()
-        with options._set_bounded('cmsdb.neondata.max_connection_retries', 1): 
-            with self.assertRaises(Exception):
-                yield pg1.get_connection()
-        exception_mocker.stop()
+            pg1 = neondata.PostgresDB()
+            with options._set_bounded('cmsdb.neondata.max_connection_retries',
+                                      1): 
+                with self.assertRaises(Exception):
+                    yield pg1.get_connection()
         conn = yield pg1.get_connection()
         self.assertTrue("dbname=test" in conn.dsn)
 
@@ -2449,6 +2447,10 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
             self.http_mocker.start().send_request, require_async_kw=True)
         self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         super(TestNeonRequest, self).setUp()
+
+    def tearDown(self):
+        self.http_mocker.stop()
+        super(TestNeonRequest, self).tearDown()
 
     @classmethod
     def setUpClass(cls):

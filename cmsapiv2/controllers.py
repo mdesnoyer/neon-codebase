@@ -1087,13 +1087,16 @@ class TagResponse(object):
 
     @staticmethod
     def _get_passthrough_fields():
-        return ['name', 'account_id', 'video_id', 'tag_type', 'created', 'updated']
+        return ['name', 'account_id', 'tag_type', 'created', 'updated']
 
     @staticmethod
     @tornado.gen.coroutine
     def _convert_special_field(obj, field):
         if field == 'tag_id':
             raise tornado.gen.Return(obj.get_id())
+        if field == 'video_id':
+            raise tornado.gen.Return(
+                neondata.InternalVideoID.to_external(obj.video_id) if obj.video_id else None)
         if field == 'thumbnail_ids':
             ids = yield neondata.TagThumbnail.get(tag_id=obj.get_id(), async=True)
 
@@ -2372,6 +2375,9 @@ class VideoHandler(ShareableContentHandler):
                 args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
+        def _modify_tag(t): 
+            t.hidden = Boolean()(args.get('hidden', t.hidden))
+
         video = yield neondata.VideoMetadata.modify(
             internal_video_id,
             _update_video,
@@ -2380,6 +2386,12 @@ class VideoHandler(ShareableContentHandler):
         if not video:
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
+
+        if video.tag_id: 
+            yield neondata.Tag.modify(
+                video.tag_id, 
+                _modify_tag, 
+                async=True) 
 
         # we may need to update the request object as well
         db2api_fields = {'testing_enabled', 'video_id'}

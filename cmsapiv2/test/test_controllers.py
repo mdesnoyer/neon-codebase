@@ -68,11 +68,18 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
         self.send_email_mock_two = self._future_wrap_mock(
             self.send_email_mocker_two.start()) 
         self.send_email_mock_two.return_value = True
+
+        # Mock out the aquila lookup
+        self.aquila_conn_patcher = patch(
+            'cmsapiv2.controllers.utils.autoscale')
+        self.aquila_conn_patcher.start()
+        
         super(TestBase, self).setUp()
 
     def tearDown(self):
         self.send_email_mocker.stop()
         self.send_email_mocker_two.stop()
+        self.aquila_conn_patcher.stop()
         self.postgresql.clear_all_tables()
         super(TestBase, self).tearDown()
 
@@ -3340,6 +3347,38 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertTrue(rjson['testing_enabled'])
         self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test(timeout=10.0)
+    def test_update_video_set_hidden(self):
+        tag = neondata.Tag('tag1') 
+        yield tag.save(async=True) 
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(
+            self.account_id_api_key,'vid1'), tag_id='tag1')
+        yield vm.save(async=True)
+        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=0' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT')
+
+        rjson = json.loads(response.body)
+        self.assertFalse(rjson['testing_enabled'])
+        self.assertEquals(response.code, 200)
+
+        url = '/api/v2/%s/videos?video_id=vid1&hidden=1' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+
+        tag = yield neondata.Tag.get(vm.tag_id, async=True)
+        self.assertTrue(tag.hidden)
+        video = yield vm.get(vm.key, async=True)
+        self.assertTrue(video.hidden) 
 
     @tornado.testing.gen_test
     def test_get_single_video_with_thumbnails_field(self):
@@ -8930,6 +8969,26 @@ class TestTagHandler(TestVerifiedControllersBase):
         blue_tag = rjson[tag_2.get_id()]
         self.assertEqual('Blue', blue_tag['name'])
         self.assertEqual(None, blue_tag['tag_type'])
+
+    @tornado.testing.gen_test
+    def test_int_vs_ext_video_id(self):
+        tag = neondata.Tag(
+            account_id=self.account_id,
+            name="Red",
+            video_id=neondata.InternalVideoID.generate(self.account_id, 'a0b1c2'),
+            tag_type=neondata.TagType.VIDEO)
+        tag.save()
+
+
+        url = '%s?tag_id=%s' % (self.url, tag.get_id())
+        response = yield self.http_client.fetch(url, headers=self.headers)
+        self.assertEqual(200, response.code)
+        rjson = json.loads(response.body)
+
+        expected_external_video_id = neondata.InternalVideoID.to_external(tag.video_id)
+        self.assertEqual(expected_external_video_id, rjson[tag.get_id()]['video_id'])
+
+
 
     @tornado.testing.gen_test
     def test_put(self):

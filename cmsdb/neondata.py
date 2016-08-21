@@ -2549,7 +2549,7 @@ class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
 
     def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
-                 video_id=None, share_token=None):
+                 video_id=None, hidden=False, share_token=None):
         tag_id = tag_id or uuid.uuid4().hex
 
         # Owner
@@ -2561,6 +2561,7 @@ class Tag(Searchable, StoredObject):
             TagType.VIDEO, TagType.COLLECTION] else None
         self.video_id = video_id
         self.share_token = share_token
+        self.hidden = hidden
 
         super(Tag, self).__init__(tag_id)
 
