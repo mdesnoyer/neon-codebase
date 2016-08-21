@@ -1048,8 +1048,10 @@ class ThumbnailAuth(object):
             tids = [tids]
 
         content_id = None
+        content_type = None
         if self.share_payload:
             content_id = self.share_payload['content_id']
+            content_type = self.share_payload['content_type']
 
         for tid in tids:
             try:
@@ -1059,7 +1061,7 @@ class ThumbnailAuth(object):
                 raise ForbiddenError()
             if tid_acct_id != self.account_id:
                 raise ForbiddenError()
-            if content_id and tid_int_vid != content_id:
+            if content_id and content_type == 'VideoMetadata' and tid_int_vid != content_id:
                 raise ForbiddenError()
 
     def _authorize_thumbs_or_raise(self, thumbs):
@@ -1069,13 +1071,13 @@ class ThumbnailAuth(object):
             thumbs = [thumbs]
 
         share_video_id = None
-        if self.share_payload:
+        if self.share_payload and self.share_payload['content_type'] == 'VideoMetadata':
             share_video_id = self.share_payload['content_id']
 
         for thumb in thumbs:
             if thumb.get_account_id() != self.account_id:
                 raise ForbiddenError()
-            if self.share_payload and thumb.video_id != share_video_id:
+            if share_video_id and thumb.video_id != share_video_id:
                 raise ForbiddenError()
 
 
