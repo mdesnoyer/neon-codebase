@@ -9003,7 +9003,8 @@ class TestTagHandler(TestVerifiedControllersBase):
         thumb_ids = [t.get_id() for t in thumbnails]
         body = json.dumps({
             'tag_id': tag.get_id(),
-            'thumbnail_ids': ','.join(thumb_ids)})
+            'thumbnail_ids': ','.join(thumb_ids),
+            'hidden': True})
         response = yield self.http_client.fetch(
             self.url,
             method='PUT',
@@ -9015,12 +9016,14 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(tag.account_id, rjson['account_id'])
         self.assertEqual(set(thumb_ids), set(rjson['thumbnail_ids']))
         self.assertEqual(tag.name, rjson['name'])
+        self.assertNotIn('hidden', rjson)
         tag = neondata.Tag.get(tag.get_id())
         thumb_ids = neondata.TagThumbnail.get(tag_id=tag.get_id())
         self.assertEqual(tag.get_id(), rjson['tag_id'])
         self.assertEqual(tag.account_id, rjson['account_id'])
         self.assertEqual(set(thumb_ids), set(rjson['thumbnail_ids']))
         self.assertEqual(tag.name, rjson['name'])
+        self.assertTrue(tag.hidden)
 
     @tornado.testing.gen_test
     def test_post_tag_no_thumbnail_id(self):

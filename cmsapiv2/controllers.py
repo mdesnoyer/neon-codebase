@@ -1179,7 +1179,8 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
             Required('tag_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'thumbnail_ids': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'name': All(Coerce(unicode), Length(min=1, max=256)),
-            'type': CustomVoluptuousTypes.TagType()
+            'type': CustomVoluptuousTypes.TagType(),
+            'hidden': Boolean()
         })(self.args)
 
         # Validate.
@@ -1193,6 +1194,7 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
             if self.args.get('name'):
                 tag.name = self.args['name']
             tag.tag_type = self.args.get('type', TagType.COLLECTION)
+            tag.hidden = Boolean()(self.args.get('hidden', tag.hidden));
         tag = yield neondata.Tag.modify(
             self.args['tag_id'],
             _update,
