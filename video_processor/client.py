@@ -29,6 +29,7 @@ import cv2
 import dateutil.parser
 import ffvideo
 import hashlib
+import imageio
 import integrations
 import json
 import model
@@ -214,8 +215,10 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
         self.bad_thumbnails = []
+        self.clips = [] # List of (ClipMetadata, mp4 of clip) 
 
         self.thumb_model_version = None
+        self.clip_model_version = None
 
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
@@ -263,7 +266,7 @@ class VideoProcessor(object):
                 try:
                     yield self.process_video(self.tempfile.name,
                                              n_thumbs=n_thumbs,
-                                             m_thumbs=m_thumbs)
+                                             m_thumbs=m_thumbs) 
                 finally:
                     statemon.state.decrement('workers_cv_processing')
 
@@ -554,7 +557,7 @@ class VideoProcessor(object):
                 neondata.RequestState.ACTIVE,
                 neondata.RequestState.SERVING_AND_ACTIVE]:
             raise OtherWorkerCompleted()
-        
+       
         _log.info('Starting to search video %s' % self.video_url)
         start_process = time.time()
         try:
@@ -580,8 +583,6 @@ class VideoProcessor(object):
             statemon.state.increment('video_read_error')
             raise BadVideoError(str(e))
 
-
-        
         duration = self.video_metadata.duration or 0.0
         # grab the accoutlimits for this account (if they exist) 
         account_limits = yield neondata.AccountLimits.get( 
@@ -627,6 +628,25 @@ class VideoProcessor(object):
 
         yield self.update_video_metadata_video_info()
 
+        result_type = api_request.result_type
+        if result_type is None: 
+            result_type = neondata.ResultType.THUMBNAILS 
+        
+        if result_type == neondata.ResultType.CLIPS: 
+            n_clips = api_request.n_clips or 1 
+
+            #results = self.model.choose_clips( 
+            #    mov, 
+            #    length=api_request.clip_length, 
+            #    n_clips=n_clips
+            #)
+            # create clips  
+            for r in results: 
+               cmeta = neondata.ClipMetadata( 
+                   )
+            self.clip_model_version = r.model_version 
+            self.clips.append((meta, r.mp4))
+ 
         # Fetch the ProcessingStrategy
         account_id = self.job_params['api_key']
         
@@ -639,54 +659,77 @@ class VideoProcessor(object):
             raise DBError("Could not fetch processing strategy")
         self.model.update_processing_strategy(processing_strategy)
 
-        try:
-            top_results, bottom_results = \
-              self.model.choose_thumbnails(
-                  mov,
-                  n=n_thumbs,
-                  m=m_thumbs,
-                  video_name=self.video_url)
-            top_results = sorted(top_results, key=lambda x: x.score, reverse=True)
-            bottom_results = sorted(bottom_results, key=lambda x: x.score)
-        except model.errors.VideoReadError:
-            msg = "Error using OpenCV to read video. %s" % self.video_url
-            _log.error(msg)
-            statemon.state.increment('video_read_error')
-            raise BadVideoError(msg)
-        except model.errors.PredictionError as e:
-            raise PredictionError(e.message)
+        if result_type == neondata.ResultType.CLIPS: 
+            n_clips = api_request.n_clips or 1 
 
-        rank=0
-        for result in top_results:
-            meta = neondata.ThumbnailMetadata(
-                None,
-                internal_vid=self.video_metadata.key,
-                ttype=neondata.ThumbnailType.NEON,
-                model_score=result.score,
-                model_version=result.model_version,
-                features=result.features,
-                frameno=result.frameno,
-                rank=rank,
-                filtered=result.filtered_reason)
-            self.thumb_model_version = result.model_version
-            self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
-            rank += 1
-
-        for result in bottom_results:
-            meta = neondata.ThumbnailMetadata(
-                None,
-                internal_vid=self.video_metadata.key,
-                ttype=neondata.ThumbnailType.BAD_NEON,
-                model_score=result.score,
-                model_version=result.model_version,
-                features=result.features,
-                frameno=result.frameno,
-                filtered=result.filtered_reason)
-            self.bad_thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
-
-        # Get the baseline frames of the video
-        yield self._get_center_frame(video_file)
-        yield self._get_random_frame(video_file)
+            #results = self.model.choose_clips( 
+            #    mov, 
+            #    length=api_request.clip_length, 
+            #    n_clips=n_clips
+            #)
+            # create clips 
+            # TODO, work with model 
+            results = []  
+            for r in results: 
+               cmeta = neondata.ClipMetadata(
+                   None, 
+                   video_id=self.video_metadata.key,
+                   model_version=r.model_version, 
+                   start_frame=r.frameno, 
+                   end_frame=r.frameno,
+                   features=r.features   
+               )
+            self.clip_model_version = r.model_version 
+            self.clips.append((meta, r.mp4))
+        else: 
+            try:
+                top_results, bottom_results = \
+                  self.model.choose_thumbnails(
+                      mov,
+                      n=n_thumbs,
+                      m=m_thumbs,
+                      video_name=self.video_url)
+                top_results = sorted(top_results, key=lambda x: x.score, reverse=True)
+                bottom_results = sorted(bottom_results, key=lambda x: x.score)
+            except model.errors.VideoReadError:
+                msg = "Error using OpenCV to read video. %s" % self.video_url
+                _log.error(msg)
+                statemon.state.increment('video_read_error')
+                raise BadVideoError(msg)
+            except model.errors.PredictionError as e:
+                raise PredictionError(e.message)
+    
+            rank=0
+            for result in top_results:
+                meta = neondata.ThumbnailMetadata(
+                    None,
+                    internal_vid=self.video_metadata.key,
+                    ttype=neondata.ThumbnailType.NEON,
+                    model_score=result.score,
+                    model_version=result.model_version,
+                    features=result.features,
+                    frameno=result.frameno,
+                    rank=rank,
+                    filtered=result.filtered_reason)
+                self.thumb_model_version = result.model_version
+                self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
+                rank += 1
+    
+            for result in bottom_results:
+                meta = neondata.ThumbnailMetadata(
+                    None,
+                    internal_vid=self.video_metadata.key,
+                    ttype=neondata.ThumbnailType.BAD_NEON,
+                    model_score=result.score,
+                    model_version=result.model_version,
+                    features=result.features,
+                    frameno=result.frameno,
+                    filtered=result.filtered_reason)
+                self.bad_thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
+    
+            # Get the baseline frames of the video
+            yield self._get_center_frame(video_file)
+            yield self._get_random_frame(video_file)
 
         statemon.state.increment('processed_video')
         _log.info('Sucessfully finished searching video %s' % self.video_url)
@@ -852,6 +895,18 @@ class VideoProcessor(object):
             _log.warn("No thumbnails extracted for video %s url %s"\
                     % (self.video_metadata.key, self.video_metadata.url))
 
+        '''
+        TODO  
+        if self.clips
+            for clip, mp4 in self.clips: 
+                yield clip.add_clip_data(mp4, self.video_metadata, 
+                    cdn_metadata, 
+                    async=True) 
+                yield clip.score_clip(self.model.predictor, 
+                    clip=mp4) 
+                video_result.clip_ids.append(clip.key) 
+        elif self.thumbnails: 
+        ''' 
         for thumb_meta, image in self.thumbnails:
             # If we have a thumbnail of this type already and it's
             # scored with the same model, we do not need to keep the

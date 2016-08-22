@@ -2398,6 +2398,22 @@ class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
         self.assertEqual(1, len(videos))
 
     @tornado.testing.gen_test
+    def test_base_search_for_hidden_videos(self):
+        # this function is tested more thoroughly
+        # in the api tests, this is here as a sanity
+        # check. not going to double up the tests at this point
+        request = NeonApiRequest('r1', 'acct1')
+        request.video_title="pie ala mode"
+        yield request.save(async=True)
+        video_info = VideoMetadata('acct1_vid1', request_id='r1', hidden=True)
+        yield video_info.save(async=True)
+
+        video_ids = yield neondata.VideoMetadata.search_for_keys(async=True)
+        self.assertEqual(1, len(video_ids))
+        videos = yield neondata.VideoMetadata.search_for_objects(async=True, show_hidden=False)
+        self.assertEqual(0, len(videos))
+
+    @tornado.testing.gen_test
     def test_video_results_list(self):
         orig = neondata.VideoMetadata(
             'a1_vid1',

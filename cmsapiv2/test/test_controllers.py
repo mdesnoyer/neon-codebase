@@ -9323,8 +9323,8 @@ class TestClipHandler(TestVerifiedControllersBase):
         url = self.url + '?clip_ids=x'
         res = yield self.http_client.fetch(url, headers=self.headers)
         rj = json.loads(res.body) 
-        self.assertEquals(rj['clips'], []) 
-        self.assertEquals(rj['count'], 0) 
+        self.assertEquals(rj['clips'], [{}]) 
+        self.assertEquals(rj['count'], 1) 
  
     @tornado.testing.gen_test
     def test_get_many_clips_all_exist(self): 

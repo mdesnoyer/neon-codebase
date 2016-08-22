@@ -5612,6 +5612,11 @@ class ClipMetadata(StoredObject):
     def _additional_columns(cls):
         return [PostgresColumn('features', '%s::bytea', 'features')]
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
+        # TODO 
+        raise tornado.gen.Return(None) 
 
 class ThumbnailMetadata(StoredObject):
     '''

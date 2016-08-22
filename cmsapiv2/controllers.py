@@ -2170,7 +2170,7 @@ class VideoHelper(object):
                         'age': video_result.age, 
                         'clip_ids': video_result.clip_ids 
                     }
-                    new_video.['demographic_clip_ids'].append(cur_entry)  
+                    new_video['demographic_clip_ids'].append(cur_entry)  
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
