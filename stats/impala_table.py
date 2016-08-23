@@ -399,6 +399,8 @@ class ImpalaTable(object):
         self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
                             heap_size)
 
+        _log.info('Hive parameters set')
+
 
     def create_input_for_merge(self, execution_date, is_initial_data_load, cc_cleaned_path_prev):
         """
@@ -636,7 +638,7 @@ class ImpalaTable(object):
         ) videoplay_cleaned
         where rownum = 1
         UNION ALL
-        select {columns} 
+        select DISTINCT {columns} 
         from corner_cases_input_{dt}
         where 
         thumbnail_id is null and
@@ -684,6 +686,9 @@ class ImpalaTable(object):
         """
         # Drop the current merge event sequence cleaned table as this data 
         # has been written to s3 now
+
+        _log.info('Cleaning up after merge events processing')
+        
         corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_table)
 
@@ -843,7 +848,7 @@ class SequencesAcrossDaysHandler():
     def __init__(self, cluster, execution_date,
                  is_initial_data_load, input_path, 
                  cc_cleaned_path_prev, cc_cleaned_path_current):
-    
+
         self.event = 'EventSequence'
         self.cluster = cluster
         self.input_path = input_path
