@@ -3534,7 +3534,8 @@ class BatchHandler(APIV2Handler):
         
         client = cmsapiv2.client.Client(
             access_token=access_token,  
-            refresh_token=refresh_token)
+            refresh_token=refresh_token,
+            skip_auth=True)
 
         requests = call_info.get('requests', None)
         output = { 'results' : [] } 
