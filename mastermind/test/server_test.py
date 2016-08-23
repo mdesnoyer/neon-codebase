@@ -1888,7 +1888,7 @@ class TestPublisherStatusUpdatesInDB(ServerAsyncPostgresTest):
 
         yield self.assertWaitForEquals(
             lambda: request.callback_state == \
-            neondata.CallbackState.SUCESS,
+            neondata.CallbackState.SERVING_SENT,
             True, async=True)
 
         self.assertEquals(self.callback_mock.call_count, 1)
@@ -2128,16 +2128,15 @@ class TestPublisherStatusUpdatesInDB(ServerAsyncPostgresTest):
         request.save()
 
         yield self.publisher._publish_directives()
-        yield tornado.gen.sleep(0.1)
-
-        # Don't need to send callback
-        self.assertFalse(self.callback_mock.called)
 
         # Video is added to the list of known ones
         yield self.assertWaitForEquals( 
             lambda: 'acct1_vid1' in \
             self.publisher.last_published_videos, 
             True, async=True)
+
+        # Don't need to send callback
+        self.assertFalse(self.callback_mock.called)
 
         # Now change the video and finish it
         request.state = neondata.RequestState.FINISHED
@@ -2160,7 +2159,7 @@ class TestPublisherStatusUpdatesInDB(ServerAsyncPostgresTest):
             True, async=True)
         yield self.assertWaitForEquals(
             lambda: request.callback_state == \
-            neondata.CallbackState.SUCESS,
+            neondata.CallbackState.SERVING_SENT,
             True, async=True)
         self.assertIsNotNone(neondata.VideoMetadata.get(
             'acct1_vid1').serving_url)
@@ -2381,9 +2380,7 @@ class SmokeTesting(ServerAsyncPostgresTest):
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
         # Start all the threads
-        #import pdb; pdb.set_trace()
         self.video_watcher.start()
-        #import pdb; pdb.set_trace()
         self.video_watcher.wait_until_loaded(10.0)
         #tornado.ioloop.IOLoop.current().add_callback(lambda: 
         #    self.video_watcher._change_subscriber.subscribe_to_db_changes())
@@ -2391,7 +2388,6 @@ class SmokeTesting(ServerAsyncPostgresTest):
             yield tornado.gen.sleep(0.1)
         self.stats_watcher.start()
         self.stats_watcher.wait_until_loaded(5.0)
-        #import pdb; pdb.set_trace()
         self.directive_publisher.start()
         time.sleep(1) # Make sure that the directive publisher gets busy
         self.activity_watcher.wait_for_idle()
@@ -2407,7 +2403,8 @@ class SmokeTesting(ServerAsyncPostgresTest):
         # check the DB to ensure it has changed
         req = neondata.VideoMetadata.get_video_request('key1_vid1')
         self.assertEqual(req.state, neondata.RequestState.SERVING)
-        self.assertEqual(req.callback_state, neondata.CallbackState.SUCESS)
+        self.assertEqual(req.callback_state,
+                         neondata.CallbackState.WINNER_SENT)
 
         # Make sure a callback was sent
         self.assertEqual(self.callback_mock.call_count, 1)

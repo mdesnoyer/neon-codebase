@@ -23,6 +23,7 @@ import cmsdb.cdnhosting
 from cmsdb import neondata
 from cvutils.imageutils import PILImageUtils
 import integrations
+from itertools import chain
 import json
 import logging
 from mock import MagicMock, patch, ANY
@@ -1252,7 +1253,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(api_request.state, neondata.RequestState.FINISHED)
         self.assertEquals(api_request.callback_state,
-                          neondata.CallbackState.NOT_SENT)
+                          neondata.CallbackState.PROCESSED_SENT)
         self.assertIsInstance(api_request, neondata.NeonApiRequest)
 
         # Check the video metadata in the database
@@ -1322,6 +1323,15 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertEquals(n_thumbs[0].model_version, 'model1')
         self.assertEquals(n_thumbs[0].filtered, '')
 
+        # Check the video has a tag and all the thumbnails have that tag.
+        tag = neondata.Tag.get(video_data.tag_id)
+        self.assertIsNotNone(tag)
+        tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
+        # Validate through the thumbnailmetadata row, not just the thumb id in tag_thumbnail.
+        _non_job_thumbs = neondata.ThumbnailMetadata.get_many(video_data.non_job_thumb_ids)
+        all_thumb_ids = set([t.get_id() for t in thumbs + bad_thumbs + _non_job_thumbs])
+        self.assertEqual(tag_thumb_ids, all_thumb_ids)
+
         # Check that there are thumbnails in s3
         for thumb in thumbs:
             # Check the main archival image
@@ -1361,6 +1371,63 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         # check video object again to ensure serving_url is not set
         video_data = neondata.VideoMetadata.get(self.video_id)
         self.assertIsNone(video_data.serving_url)
+
+    @tornado.testing.gen_test
+    def test_tag_on_video(self):
+        '''A video has a tag after finalize when it starts with one'''
+
+        # Setup doesn't save a video, so make it here.
+        tag = neondata.Tag(
+            None,
+            name='Video title',
+            tag_type=neondata.TagType.VIDEO,
+            account_id=self.api_key)
+        tag.save()
+        video = neondata.VideoMetadata(
+            self.video_id,
+            tag_id=tag.get_id(),
+            request_id=self.api_request.get_id())
+        video.save()
+
+        yield self.vprocessor.finalize_response()
+
+        video = neondata.VideoMetadata.get(self.video_id)
+        self.assertEqual(tag.get_id(), video.tag_id)
+
+        tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
+        job_result = video.job_results[0]
+        all_video_thumb_ids = set(
+            video.non_job_thumb_ids +
+            job_result.thumbnail_ids +
+            job_result.bad_thumbnail_ids)
+        self.assertEqual(tag_thumb_ids, all_video_thumb_ids)
+
+    @tornado.testing.gen_test
+    def test_no_tag_on_video(self):
+        '''A video has a tag after finalize when it doesn't start with one'''
+
+        # Setup doesn't save a video, so make it here.
+        video = neondata.VideoMetadata(
+            self.video_id,
+            request_id=self.api_request.get_id())
+
+        yield self.vprocessor.finalize_response()
+
+        video = neondata.VideoMetadata.get(self.video_id)
+        tag = neondata.Tag.get(video.tag_id)
+
+        self.assertEqual(tag.video_id, video.get_id())
+        self.assertEqual(tag.account_id, video.get_account_id())
+        self.assertEqual(tag.tag_type, neondata.TagType.VIDEO)
+
+        tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
+        job_result = video.job_results[0]
+        all_video_thumb_ids = set(
+            video.non_job_thumb_ids +
+            job_result.thumbnail_ids +
+            job_result.bad_thumbnail_ids)
+        self.assertEqual(tag_thumb_ids, all_video_thumb_ids)
+
 
     @tornado.testing.gen_test
     def test_broken_default_thumb(self):
@@ -1778,7 +1845,6 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(len(video_meta.job_results), 1)
         self.assertEquals(len(video_meta.job_results[0].thumbnail_ids), 0)
-        
 
     @tornado.testing.gen_test
     def test_no_thumbnails_found_no_default_thumb(self):
@@ -2023,10 +2089,9 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         with self.assertRaises(Exception): 
             tas = yield self.vprocessor._get_email_template_args(video_data)
 
+
 class SmokeTest(test_utils.neontest.AsyncTestCase):
-    ''' 
-    Smoke test for the video processing client
-    '''
+    '''Smoke test for the video processing client'''
     def setUp(self):
         super(SmokeTest, self).setUp()
         statemon.state._reset_values()
@@ -2045,7 +2110,6 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
         cdn.save()
 
-        self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.OoyalaApiRequest(
             'job1', self.api_key,
             'int1', 'vid1',
@@ -2054,6 +2118,19 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'http://callback.com',
             'http://default_thumb.jpg')
         self.api_request.save()
+
+        self.tag = neondata.Tag(
+            None,
+            account_id=na.get_id(),
+            name='Good Images')
+        self.tag.save()
+
+        self.video_id = '%s_vid1' % self.api_key
+        self.video = neondata.VideoMetadata(
+            self.video_id,
+            request_id=self.api_request.job_id,
+            tag_id=self.tag.get_id())
+        self.video.save()
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
@@ -2074,21 +2151,22 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.job_delete_mock = self._future_wrap_mock(
             self.job_queue_mock.delete_message)
         self.job_delete_mock.return_value = True
-        
+
         self.job_read_mock = self._future_wrap_mock(
             self.job_queue_mock.read_message)
         self.job_message = Message()
         self.job_read_mock.side_effect = [self.job_message, None]
-        
+
         self.job_hide_mock = self._future_wrap_mock(
             self.job_queue_mock.hide_message)
-        
+
         # Mock out the video download
         self.client_s3_patcher = patch('video_processor.client.S3Connection')
         self.mock_conn2 = self.client_s3_patcher.start()
         self.mock_conn2.return_value = self.s3conn
-        self.test_video_file = os.path.join(os.path.dirname(__file__), 
-        "test.mp4") 
+        self.test_video_file = os.path.join(
+            os.path.dirname(__file__),
+            "test.mp4")
         self.vid_bucket = self.s3conn.create_bucket('my-videos')
         vid_key = self.vid_bucket.new_key('test.mp4')
         vid_key.set_contents_from_file(open(self.test_video_file, 'rb'))
@@ -2115,7 +2193,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                 return self.callback_mock(request)
             else:
                 return HTTPResponse(request, 200)
-                    
+
         self.http_mock.side_effect = _http_response
 
         # Mock out cloudinary
@@ -2129,7 +2207,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.model_patcher = patch(
             'video_processor.client.model.generate_model')
         self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
-        self.model_version = "test" 
+        self.model_version = "test"
         self.model = MagicMock()
         load_model_mock = self.model_patcher.start()
         load_model_mock.return_value = self.model
@@ -2160,7 +2238,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.video_client = VideoClient(
             'some/dir/my_model',
             multiprocessing.BoundedSemaphore(1))
-        
+
     def tearDown(self):
         self.aquila_conn_patcher.stop()
         self.s3_patcher.stop()
@@ -2262,6 +2340,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             len([x for x in thumbs if
                  x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
 
+        # Validate each thumb is tagged.
+        _ids = set(
+            chain(*[j.thumbnail_ids + j.bad_thumbnail_ids
+                for j in video_meta.job_results]))
+        all_thumb_ids = _ids.union(video_meta.non_job_thumb_ids)
+        tagged_thumb_ids = set(
+            neondata.TagThumbnail.get(tag_id=video_meta.tag_id))
+        self.assertEqual(all_thumb_ids, tagged_thumb_ids)
+
     @tornado.testing.gen_test
     def test_reprocessing_smoke(self):
         self.api_request.state = neondata.RequestState.REPROCESS
@@ -2337,7 +2424,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(api_request.state,
                           neondata.RequestState.CUSTOMER_ERROR)
         self.assertEquals(api_request.callback_state,
-                          neondata.CallbackState.SUCESS)
+                          neondata.CallbackState.FAILED_SENT)
 
         # Check the state variables
         self.assertEquals(
@@ -2414,7 +2501,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(api_request.state,
                           neondata.RequestState.CUSTOMER_ERROR)
         self.assertEquals(api_request.callback_state,
-                          neondata.CallbackState.SUCESS)
+                          neondata.CallbackState.FAILED_SENT)
         response = api_request.response
         self.assertEquals(response['video_id'], 'vid1')
         self.assertEquals(response['job_id'], 'job1')

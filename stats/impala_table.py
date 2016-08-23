@@ -62,7 +62,7 @@ class TimeoutException(NeonDataPipelineException): pass
 class UnexpectedInfo(NeonDataPipelineException): pass
 class SchemaUploadError(ExecutionError): pass
 class ImpalaTableLoadError(ExecutionError): pass
-class CornerCaseExecutionError(ExecutionError): pass
+class MergeEventsExecutionError(ExecutionError): pass
 
 class ImpalaTable(object):
     '''Representation of an Impala table'''
@@ -278,7 +278,7 @@ class ImpalaTable(object):
         """
         Drop the external Avro table for a given date
         :param execution_date:
-        :param corner_case_table - A table from corner cases processing
+        :param corner_case_table - A table from merge event sequences processing
         :return:
         """
         try:
@@ -332,23 +332,13 @@ class ImpalaTable(object):
 
             _log.info('Loading to Impala Parquet-format table {parq} from '
                       '{avro}'.format(parq=parq_table, avro=avro_table))
-            heap_size = int(options.parquet_memory * 0.9)
-
-            self.hive.execute('SET hive.exec.compress.output=true')
-            self.hive.execute('SET avro.output.codec=snappy')
-            self.hive.execute('SET parquet.compression=SNAPPY')
+            
+            # Set the hive parameters required for queries and creating dynamic
+            # hive partitions
+            self.set_hive_parameters()
             self.hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
             self.hive.execute('SET hive.exec.max.created.files=500000')
             self.hive.execute('SET hive.exec.max.dynamic.partitions.pernode=200')
-
-            self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
-                              options.parquet_memory)
-            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
-            self.hive.execute('SET mapreduce.map.memory.mb=%d' %
-                              options.parquet_memory)
-            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
 
             _log.info('execution date is {dt}'.format(dt=execution_date))
 
@@ -391,49 +381,55 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise ImpalaTableLoadError
 
-    def create_input_for_cc(self, execution_date, is_initial_data_load, cc_cleaned_path_prev):
+    def set_hive_parameters(self):
+        # Sets the hive parameters
+
+        heap_size = int(options.parquet_memory * 0.9)
+
+        self.hive.execute('SET hive.exec.compress.output=true')
+        self.hive.execute('SET avro.output.codec=snappy')
+        self.hive.execute('SET parquet.compression=SNAPPY')
+
+        self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
+                            options.parquet_memory)
+        self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                            heap_size)
+        self.hive.execute('SET mapreduce.map.memory.mb=%d' %
+                            options.parquet_memory)
+        self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
+                            heap_size)
+
+
+    def create_input_for_merge(self, execution_date, is_initial_data_load, cc_cleaned_path_prev):
         """
-        Create the input required for corner cases processing
+        Create the input required for merging eventsequences across day boundaries
 
         The first and big run: is always going to be clean as it is run over the entire input bucket
-        in S3. So corner cases need not be handled. However we need to carry forward the clean data 
-        for this execution date. The next run will use this as corner case cleaned data for
+        in S3. So merge event sequences need not be handled. However we need to carry forward the clean data 
+        for this execution date. The next run will use this as merge event sequence cleaned data for
         previous run.
 
-        On subsequent runs: we will take in current cleaned output from mapreduce job and previous corner cases
-        cleaned output from corner case S3 bucket. The input from previous corner case clean run is required
-        because for each run we process the data for that entire day. So we should be carrying over the corner cases
+        On subsequent runs: we will take in current cleaned output from mapreduce job and previous merge event sequences
+        cleaned output from merge event sequence S3 bucket. The input from previous merge event sequence clean run is required
+        because for each run we process the data for that entire day. So we should be carrying over the merge event sequences
         that were cleaned at the first run of this day. 
 
         Inputs:
         execution_date - The execution date of airflow task 
         is_initial_data_load - Indicates if this is the first and big run
-        cc_cleaned_path_prev - The corner cases cleaned path of previous run
+        cc_cleaned_path_prev - The merge eve nt sequences cleaned path of previous run
         """
         try:
             # Upload schema to S3
             self._upload_schema()
 
-            #Set the hive parameters
-            heap_size = int(options.parquet_memory * 0.9)
-
-            self.hive.execute('SET hive.exec.compress.output=true')
-            self.hive.execute('SET avro.output.codec=snappy')
-            self.hive.execute('SET parquet.compression=SNAPPY')
-
-            self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
-                              options.parquet_memory)
-            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
-            self.hive.execute('SET mapreduce.map.memory.mb=%d' %
-                              options.parquet_memory)
-            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                              heap_size)
+            # Set the hive parameters required for queries
+            self.set_hive_parameters()
 
             # Avro table name pointing to mapreduce cleaned ouput for current run
             table = self._avro_table(execution_date)
 
-            # Drop table for corner cases input for current run
+            # Drop table for merge event sequences input for current run
             cc_input = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
             self.drop_avro_table(execution_date, cc_input)
         
@@ -451,12 +447,12 @@ class ImpalaTable(object):
                             month=execution_date.month,
                             day=execution_date.day)
             else:
-                # Avro table pointing to s3 bucket of previous corner case run
+                # Avro table pointing to s3 bucket of previous merge event sequence run
                 cc_cleaned_previous = 'avro_cc_cleaned_{dt}'. \
                                          format(dt=(execution_date - timedelta(hours=3)). \
                                          strftime("%Y%m%d%H"))
 
-                # Create the table pointing to previous corner case run output
+                # Create the table pointing to previous merge event sequence run output
                 self.create_avro_table(execution_date, cc_table=cc_cleaned_previous, 
                                        cc_location=cc_cleaned_path_prev)
 
@@ -472,15 +468,15 @@ class ImpalaTable(object):
                            table=table,dt=execution_date.strftime("%Y%m%d%H"),
                            cc_cleaned_previous=cc_cleaned_previous)
 
-            _log.info('Corner cases input SQL: {sql}'.format(sql=sql))
+            _log.info('merge event sequences input SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
         except:
-            _log.error("Error creating input for corner cases")
+            _log.error("Error creating input for merge event sequences")
             self.status = 'ERROR'
-            raise CornerCaseExecutionError
+            raise MergeEventsExecutionError
 
-    def resolve_corner_cases(self, execution_date, cc_cleaned_path_current):
+    def merge_event_sequences(self, execution_date, cc_cleaned_path_current):
         """
         For all the possible entry points for an event, define a group. This will be used by the query to 
         pick up a single row with most columns filled in case of duplicates and any non-duplicate rows. 
@@ -557,34 +553,21 @@ class ImpalaTable(object):
         )
         """
 
-        self.execute_cc_query(execution_date, imload_group, 
+        self.execute_merge_query(execution_date, imload_group, 
                               imvis_group, imclick_group,
                               adplay_group, videoplay_group)
 
-    def execute_cc_query(self, execution_date, imload_group, 
-                         imvis_group, imclick_group, 
-                         adplay_group, videoplay_group):
+    def execute_merge_query(self, execution_date, imload_group, 
+                            imvis_group, imclick_group, 
+                            adplay_group, videoplay_group):
         """
-        The corner case query will combine all the individual corner case cleaned events. There are also some
+        The merge query will combine all the individual merge event sequence cleaned events. There are also some
         rows in the table that have null thumbnail id's with all imclick,imvis,imload,adplay,videoplay being null so
         we will also carry them forward so that we dont drop any rows (are these required?). 
         """
 
         #Set the hive parameters
-        heap_size = int(options.parquet_memory * 0.9)
-
-        self.hive.execute('SET hive.exec.compress.output=true')
-        self.hive.execute('SET avro.output.codec=snappy')
-        self.hive.execute('SET parquet.compression=SNAPPY')
-
-        self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
-                            options.parquet_memory)
-        self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                            heap_size)
-        self.hive.execute('SET mapreduce.map.memory.mb=%d' %
-                            options.parquet_memory)
-        self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm -XX:+UseConcMarkSweepGC' %
-                            heap_size)
+        self.set_hive_parameters()
 
         corner_case_cleaned = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_cleaned)
@@ -673,12 +656,12 @@ class ImpalaTable(object):
             dt=execution_date.strftime("%Y%m%d%H"))
 
         try:
-            _log.info('Corner cases SQL: {sql}'.format(sql=sql))
+            _log.info('merge event sequences SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
-            _log.info('Done corner cases')
+            _log.info('Done merge event sequences')
 
-            # Write the data to s3 corner case bucket
+            # Write the data to s3 merge event sequence bucket
             sql="""
             INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}_copy
             select {columns} from avro_cc_cleaned_{dt}
@@ -691,23 +674,30 @@ class ImpalaTable(object):
             _log.info('Done moving data to S3')
 
         except:
-            _log.error("Error resolving corner cases")
+            _log.error("Error resolving merge event sequences")
             self.status = 'ERROR'
-            raise CornerCaseExecutionError
+            raise MergeEventsExecutionError
 
-    def cleanup_after_cc_processing(self, execution_date):
+    def cleanup_after_merge_processing(self, execution_date):
         """
-        Clean up all the tables we created during corner case processing
+        Clean up all the tables we created during merge event sequence processing
         """
-        # Drop the corner case cleaned table as this data has been written to s3 now
+        # Drop the current merge event sequence cleaned table as this data 
+        # has been written to s3 now
         corner_case_table = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
+        self.drop_avro_table(execution_date, corner_case_table)
+
+        # Drop the previous merge event sequence cleaned table
+        corner_case_table = 'avro_cc_cleaned_{dt}'. \
+                            format(dt=(execution_date - timedelta(hours=3)). \
+                                   strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_table)
 
         # Drop the copy table
         corner_case_table = 'avro_cc_cleaned_{dt}_copy'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_table)
 
-        # Drop table for corner cases input for current run
+        # Drop table for merge event sequences input for current run
         corner_case_table = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_table)
 
@@ -844,15 +834,16 @@ class ImpalaTableLoader(threading.Thread):
             _log.debug("Closing Impala connection")
             self.table.transport.close()
 
-class CornerCaseHandler(threading.Thread):
+class SequencesAcrossDaysHandler():
     """
-    This class handles the corner cases that happen across day boundaries
+    This class merges the eventsequences across days and retains the record with 
+    highest number of columns in the sequence. 
     """
 
     def __init__(self, cluster, execution_date,
                  is_initial_data_load, input_path, 
                  cc_cleaned_path_prev, cc_cleaned_path_current):
-        super(CornerCaseHandler, self).__init__()
+        super(SequencesAcrossDaysHandler, self).__init__()
         self.event = 'EventSequence'
         self.cluster = cluster
         self.input_path = input_path
@@ -860,20 +851,13 @@ class CornerCaseHandler(threading.Thread):
         self.is_initial_data_load = is_initial_data_load
         self.cc_cleaned_path_prev = cc_cleaned_path_prev
         self.cc_cleaned_path_current = cc_cleaned_path_current
-        self.status = 'INIT'
-        self._stopped = threading.Event()
         self.table = ImpalaTable(self.cluster, self.event)
 
         # Cleanup after ourselves on a failure?
         self._drop_avro_on_failure = False
 
-    def stop(self):
-        self._stopped.set()
-
     def run(self):
-        self._stopped.clear()
-        self.status = 'RUNNING'
-        _log.info("Event '%s' table build thread running" % self.event)
+        _log.info("Event '%s' table build" % self.event)
 
         try:
             self.table.cluster.connect()
@@ -886,21 +870,21 @@ class CornerCaseHandler(threading.Thread):
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
 
-            self.table.create_input_for_cc(self.execution_date,
-                                           self.is_initial_data_load,
-                                           self.cc_cleaned_path_prev)
+            self.table.create_input_for_merge(self.execution_date,
+                                              self.is_initial_data_load,
+                                              self.cc_cleaned_path_prev)
 
-            self.table.resolve_corner_cases(self.execution_date,
-                                            self.cc_cleaned_path_current)
+            self.table.merge_event_sequences(self.execution_date,
+                                             self.cc_cleaned_path_current)
 
         except:
-            _log.exception('Error processing corner cases')
+            _log.exception('Error merging event sequences')
             if self._drop_avro_on_failure:
                 self.table.drop_avro_table(self.execution_date)
-            raise CornerCaseExecutionError
+            raise MergeEventsExecutionError
 
         finally:
-            self.table.cleanup_after_cc_processing(self.execution_date)
+            self.table.cleanup_after_merge_processing(self.execution_date)
             _log.debug("Closing Impala connection")
             self.table.transport.close()
 

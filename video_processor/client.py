@@ -104,7 +104,7 @@ define('model_file', default=None, help='File that contains the model')
 define('model_server_port', default=9000, type=int,
        help="the port currently being used by model servers")
 define('model_autoscale_groups', default='AquilaOnDemand', type=str,
-       help="Comma separated list of autscaling group names")
+       help="Comma separated list of autoscaling group names")
 define('request_concurrency', default=22, type=int,
        help=("the maximum number of concurrent scoring requests to"
              " make at a time. Should be less than or equal to the"
@@ -208,7 +208,7 @@ class VideoProcessor(object):
             request_id=self.job_params['job_id'],
             video_url=self.job_params['video_url'],
             i_id=integration_id)
-    
+
         #Video vars
         self.model = model
         self.model_version = model_version
@@ -834,7 +834,7 @@ class VideoProcessor(object):
                 lambda x,y: x | y,
                 [set(x.thumbnail_ids) for x in known_video.job_results],
                 set())
-            known_tids |= set(known_video.thumbnail_ids)
+            known_tids |= set(known_video.thumbnail_ids + known_video.bad_thumbnail_ids)
 
             known_thumbs = yield neondata.ThumbnailMetadata.get_many(
                 known_tids, async=True)
@@ -1010,15 +1010,40 @@ class VideoProcessor(object):
                 statemon.state.increment('default_thumb_error')
                 err_msg = "Failed to download default thumbnail: %s" % e
                 raise DefaultThumbError(err_msg)
-            
 
         # Enable the video to be served if we have any thumbnails available
         def _set_serving_enabled(video_obj):
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.tag_id = new_video_metadata.tag_id
+
         new_video_metadata = yield neondata.VideoMetadata.modify(
             self.video_metadata.key,
             _set_serving_enabled,
             async=True)
+
+        # Set the association of the video tag and each thumbnail.
+        if not new_video_metadata.tag_id:
+            _log.warn(
+                'Video %s was missing tag at during thumbnail selection',
+                new_video_metadata.get_id())
+            tag = neondata.Tag(
+                None,
+                account_id=new_video_metadata.get_account_id(),
+                tag_type=neondata.TagType.VIDEO,
+                name=api_request.video_title,
+                video_id=new_video_metadata.get_id())
+            yield tag.save(async=True)
+            new_video_metadata.tag_id = tag.get_id()
+            yield new_video_metadata.save(async=True)
+
+        _tag_thumb_ids = (video_result.thumbnail_ids +
+            video_result.bad_thumbnail_ids +
+            new_video_metadata.non_job_thumb_ids)
+        ct = yield neondata.TagThumbnail.save_many(
+            tag_id=new_video_metadata.tag_id,
+            thumbnail_id=_tag_thumb_ids,
+            async=True)
+
         # Everything is fine at this point, so lets mark it finished
         api_request.state = neondata.RequestState.FINISHED
 
@@ -1031,18 +1056,27 @@ class VideoProcessor(object):
             request.publish_date = time.time() * 1000.0
             request.response = cb_response
             request.callback_state = neondata.CallbackState.NOT_SENT
+        new_request = None
         try:
-            sucess = yield neondata.NeonApiRequest.modify(
+            new_request = yield neondata.NeonApiRequest.modify(
                 api_request.job_id,
                 api_request.api_key,
                 _flag_request_done_in_db,
                 async=True)
-            if not sucess:
+            if not new_request:
                 raise DBError('Api Request finished failed. It was not there')
         except Exception, e:
             _log.error("Error writing request state to database: %s" % e)
             statemon.state.increment('modify_request_error')
             raise DBError("Error finishing api request")
+
+        try:
+            if new_request:
+                yield new_request.send_callback(async=True)
+        except Exception as e:
+            # Logging already done and we do not want this to stop the
+            # flow if there's an error
+            pass
 
         # Send the notifications
         yield self.send_notification_email(api_request, new_video_metadata)

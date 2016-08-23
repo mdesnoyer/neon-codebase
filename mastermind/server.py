@@ -1531,6 +1531,10 @@ class DirectivePublisher(threading.Thread):
                                request_keys,
                                _set_state, 
                                async=True)
+                for request in requests:
+                    tornado.ioloop.IOLoop.current().spawn_callback( 
+                        functools.partial(self._send_callback, 
+                            request))
 
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
@@ -1645,11 +1649,7 @@ class DirectivePublisher(threading.Thread):
                 async=True)
 
             # And send the callback
-            if (request is not None and 
-                request.callback_state == 
-                neondata.CallbackState.NOT_SENT and 
-                request.callback_url):
-
+            if request is not None:
                 statemon.state.increment('pending_callbacks')
                 yield self._send_callback(request)
 

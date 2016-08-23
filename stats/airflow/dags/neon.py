@@ -113,8 +113,8 @@ options.define('output_path', default='s3://neon-tracker-logs-test-hadoop/',
                      'cleaned/<YYYY>/<MM>/<DD>/<HH>/'))
 options.define('cc_cleaned_path', default='s3://neon-tracker-logs-v2/airflow/cc_cleaned',
                type=str,
-               help=('S3 URI base path where to put corner cases cleaned files from '
-                     'Map/Reduce jobs. Cleaned files, relative to this '
+               help=('S3 URI base path where to put the merged event sequences '
+                     'cleaned files from Map/Reduce jobs. Cleaned files, relative to this '
                      'setting, are prefixed '
                      'cc_cleaned/<YYYY>/<MM>/<DD>/<HH>/'))
 options.define('cleaning_mr_memory', default=2048, type=int,
@@ -609,7 +609,8 @@ def _load_impala_table(**kwargs):
         cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                                 prefix=output_prefix)
     else:
-        # This is going to be the corner cases cleaned path
+        # This is going to be the cleaned path from eventsequences merged
+        # across days
         output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
         cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                                 prefix=output_prefix)
@@ -839,7 +840,7 @@ def _merge_eventsequences_across_days(**kwargs):
         _log.info("Input Path for curr clean up cases is %s" %
             os.path.join('s3://', cc_bucket, cc_curr_prefix))
 
-        builder = stats.impala_table.CornerCaseHandler(
+        builder = stats.impala_table.SequencesAcrossDaysHandler(
             cluster=cluster,
             execution_date=execution_date,
             is_initial_data_load=is_initial_data_load,
@@ -946,7 +947,6 @@ mr_cleaning_job = PythonOperator(
                    output_path=options.output_path, timeout=60 * 600),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
     priority_weight=8,
-    depends_on_past=True,
     execution_timeout=timedelta(minutes=600))
 mr_cleaning_job.set_upstream(stage_files)
 
@@ -962,15 +962,15 @@ s3copy.set_upstream(mr_cleaning_job)
 
 
 # Merge eventsequences across days
-cc_handler = PythonOperator(
-    task_id='handle_corner_cases',
+handle_eventsequences_across_days = PythonOperator(
+    task_id='handle_eventsequences_across_days',
     dag=clicklogs,
     python_callable=_merge_eventsequences_across_days,
     provide_context=True,
     depends_on_past=True,
     op_kwargs=dict(output_path=options.output_path,
                    cc_cleaned_path=options.cc_cleaned_path))
-cc_handler.set_upstream(s3copy)
+handle_eventsequences_across_days.set_upstream(s3copy)
 
 
 # Load the cleaned files from Map/Reduce into Impala
