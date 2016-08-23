@@ -843,7 +843,7 @@ class SequencesAcrossDaysHandler():
     def __init__(self, cluster, execution_date,
                  is_initial_data_load, input_path, 
                  cc_cleaned_path_prev, cc_cleaned_path_current):
-        super(SequencesAcrossDaysHandler, self).__init__()
+    
         self.event = 'EventSequence'
         self.cluster = cluster
         self.input_path = input_path
