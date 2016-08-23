@@ -16,7 +16,7 @@ from collections import defaultdict
 from collections import Counter
 import cv2
 import logging
-import numpy as npfrom Queue import Queue
+import numpy as np
 import model.features
 import random
 from scipy import stats
@@ -24,6 +24,7 @@ import Queue
 from threading import Thread
 from threading import Lock
 from threading import Event
+import time
 from utils.options import options, define
 from utils import pycvutils
 
@@ -63,7 +64,7 @@ class ClipFinder(object):
         self.cross_scene_boundary = \
           processing_strategy.clip_cross_scene_boundary
         self.min_scene_piece = processing_strategy.min_scene_piece
-        self.detector.threshold = processing_strategy.scene_threshold
+        self.scene_detector.threshold = processing_strategy.scene_threshold
 
     def find_clips(self, mov, n=1, max_len=None, min_len=None):
         '''Finds a set of clips in the movie.
@@ -76,12 +77,14 @@ class ClipFinder(object):
         Returns:
         List of model.VideoClip objects sorted by score descending
         '''
-        num_frames = int(mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        num_frames = int(mov.get(cv2.CAP_PROP_FRAME_COUNT))
         end_scene = min(int(num_frames * (1-self.startend_clip)),
                         num_frames-1)
-        fps = vid.get(cv2.CAP_PROP_FPS) or 30.0
+        fps = mov.get(cv2.CAP_PROP_FPS) or 30.0
         duration = num_frames / fps
         analysis_budget = duration * self.processing_time_ratio
+
+        start_time = time.time()
 
         # First, do a pass through the video to find scenes and detect action
         mov_feature_generator = model.features.MovieMultipleFeatureGenerator(
@@ -93,12 +96,11 @@ class ClipFinder(object):
              )
         mov_features = mov_feature_generator.generate(mov)
 
-        start_time = time.time()
-
         # Get the list of scenes
         scene_list = [k for k,v in mov_features[
             model.features.SceneCutGenerator].iteritems() if v]
         scene_list.append(end_scene)
+        _log.debug('Found %i scenes: %s' % (len(scene_list), scene_list))
 
         # Initialize the object that keeps track of feature values
         score_obj = RegionScore(weights=self.weight_dict,
@@ -108,12 +110,16 @@ class ClipFinder(object):
 
         time_spent = (time.time() - start_time)
         _log.info('Used %3.2fs of %3.2fs (%.1f%%) finding scenes' %
-                  (time_spent, analysis_budget, time_spent/analysis_budget))
+                  (time_spent, analysis_budget,
+                   time_spent/analysis_budget*100.0))
         analysis_budget -= time_spent
         self._score_scenes(mov, scene_list, score_obj, analysis_budget)
 
-        clips = self._build_clips(scene_list, score_obj, n, int(max_len*fps),
-                                  int(min_len*fps))
+        clips = self._build_clips(
+            score_obj,
+            n, 
+            None if max_len is None else int(max_len*fps),
+            None if min_len is None else int(min_len*fps))
 
         return clips
 
@@ -138,6 +144,7 @@ class ClipFinder(object):
 
         # Run the frame scoring until we are out of time
         if not halter.wait(analysis_budget):
+            _log.info('Out of time sampling frames')
             halter.set()
 
         for t in threads:
@@ -223,8 +230,9 @@ class ClipFinder(object):
         # Now that we have the list of frames in scenes to choose
         # from, select them in passes by building a qeue
         queue = []
-        while len(scenes2frames) > 0 and len(queue) > 0:
+        while len(scenes2frames) > 0 or len(queue) > 0:
             if len(queue) == 0:
+                _log.debug('Adding new frames to yielding queue')
                 # Fill up the queue
                 for i in range(100):
                     if len(scenes2frames) == 0:
@@ -267,7 +275,7 @@ class ClipFinder(object):
                 try:
                     queue.put((frameno, image), True, 2.0)
                     enqueue_count += 1
-                    if enqueue_count % 100:
+                    if enqueue_count % 100 == 0:
                         _log.debug('Enqueued %i frames' % enqueue_count)
                     break
                 except Queue.Full:
@@ -291,7 +299,7 @@ class ClipFinder(object):
                 score, features, version = self.predictor.predict(image)
                 score_obj.update('valence', frameno, score)
 
-                if score_obj.n_scored['valence'] % 1000 == 0:
+                if score_obj.n_scored['valence'] % 100 == 0:
                     _log.debug('%i images scored so far' %
                               score_obj.n_scored['valence'])
             except model.errors.PredictionError as e:

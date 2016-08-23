@@ -99,7 +99,7 @@ class MovieMultipleFeatureGenerator(object):
         {<generator class> : { <frame_number> : <feature vector> } }
         '''
         self._reset_generators()
-        num_frames = int(mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        num_frames = int(mov.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_buf = max(0, int(self.startend_buffer * num_frames))
         rval = defaultdict(dict)
 
@@ -133,10 +133,15 @@ class MovieMultipleFeatureGenerator(object):
                 prepped_image = self.prep(image)
                 for gen in self.feature_generators:
                     feats = gen.generate(prepped_image)
-                    rval[gen.__class__][frameno] = feats
+                    rval[gen.__class__][int(frameno)] = feats
+
+                if (frameno % (self.frame_step * 1000)) == 0:
+                    _log.debug('Extracted features from %i frames' %
+                               int(frameno/self.frame_step))
 
                 cur_frame = next_frame + 1
                 next_frame += self.frame_step
+
                     
             except Exception as e:
                 _log.exception("Unexpected exception when getting features "

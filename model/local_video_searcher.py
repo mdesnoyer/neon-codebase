@@ -1580,7 +1580,7 @@ class LocalSearcher(object):
                                                     image=frame,
                                                     model_version=model_vers,
                                                     features=features))
-                best = sorted(result_objs, key=lambda x: x.score, reverse=True)
+            best = sorted(best, key=lambda x: x.score, reverse=True)
         else:
             _log.debug('%i thumbs found', len(result_objs))
             best = [model.VideoThumbnail(x.image, x.score, x.frameno,
@@ -1654,7 +1654,7 @@ class LocalSearcher(object):
                 except Exception, e:
                     start = args[0]
                     stop = args[2]
-                    _log.error('Problem local searching %i <---> %i: %s',
+                    _log.exception('Problem local searching %i <---> %i: %s',
                         start, stop, e.message)
                     statemon.state.increment('searching_problem')
 

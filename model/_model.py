@@ -141,8 +141,7 @@ class Model(object):
         Outputs:
         List of VideoClip objects sorted by score descending
         '''
-        self.clip_finder.find_clips(mov, n, max_len, min_len)
-
+        return self.clip_finder.find_clips(mov, n, max_len, min_len)
 
     def restore_additional_data(self, filename):
         '''

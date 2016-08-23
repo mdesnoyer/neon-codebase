@@ -7,7 +7,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import dlib
-import joblib
+import logging
 import model
 import model.clip_finder
 import model.features
@@ -22,7 +22,7 @@ import model.predictor
 from model.score_eyes import ScoreEyes
 from optparse import OptionParser
 import pickle
-import scenedetect
+import scenedetect.detectors
 
 if __name__ == '__main__':
     parser = OptionParser()
@@ -41,18 +41,23 @@ if __name__ == '__main__':
     eye_classifier = pickle.load(open(os.path.join(
         os.path.dirname(__file__), '..', '..', 'model_data',
         'eye_classifier.pkl'), 'rb'))
+    # The classifier was built using an older version of scikit learn
+    # and it's incompatible
+    if 'std_' in eye_classifier.scaler.__dict__:
+        print('The eye classifier is from an old version of scikit learn')
+        eye_classifier.scaler.scale_ = eye_classifier.scaler.__dict__['std_']
 
-    pix_gen = PixelVarGenerator()
-    sad_gen = SADGenerator()
-    #text_gen = TextGeneratorSlow()
-    face_gen = FaceGenerator(face_finder)
-    eye_gen = ClosedEyeGenerator(face_finder, eye_classifier)
-    vibrance_gen = VibranceGenerator()
-    blur_gen = BlurGenerator()
-    ent_gen = EntropyGenerator()
-    face_blur_gen = FacialBlurGenerator(face_finder)
-    sat_gen = SaturationGenerator()
-    bright_gent = BrightnessGenerator()
+    pix_gen = model.features.PixelVarGenerator()
+    sad_gen = model.features.SADGenerator()
+    #text_gen = model.features.TextGeneratorSlow()
+    face_gen = model.features.FaceGenerator(face_finder)
+    eye_gen = model.features.ClosedEyeGenerator(face_finder, eye_classifier)
+    vibrance_gen = model.features.VibranceGenerator()
+    blur_gen = model.features.BlurGenerator()
+    ent_gen = model.features.EntropyGenerator()
+    face_blur_gen = model.features.FacialBlurGenerator(face_finder)
+    sat_gen = model.features.SaturationGenerator()
+    bright_gent = model.features.BrightnessGenerator()
 
     filters = [
         model.filters.SceneChangeFilter(),
@@ -130,7 +135,7 @@ if __name__ == '__main__':
 
     clip_finder = model.clip_finder.ClipFinder(
         None,
-        scenedetect.ContentDetector(30.0),
+        scenedetect.detectors.ContentDetector(30.0),
         model.features.ObjectActionGenerator(),
         valence_weight=1.0,
         action_weight=0.25,
@@ -139,7 +144,7 @@ if __name__ == '__main__':
         cross_scene_boundary=True,
         min_scene_piece=15)
 
-    mod = model.Model(predictor, vid_searcher=video_searcher,
+    mod = model.Model(None, vid_searcher=video_searcher,
                       clip_finder=clip_finder)
 
     model.save_model(mod, options.output)
