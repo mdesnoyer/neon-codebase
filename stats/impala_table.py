@@ -405,19 +405,19 @@ class ImpalaTable(object):
         Create the input required for merging eventsequences across day boundaries
 
         The first and big run: is always going to be clean as it is run over the entire input bucket
-        in S3. So merge event sequences need not be handled. However we need to carry forward the clean data 
-        for this execution date. The next run will use this as merge event sequence cleaned data for
+        in S3. So merge event sequences need not be handled. However we need to carry forward the clean 
+        data for this execution date. The next run will use this as merge event sequence cleaned data for
         previous run.
 
-        On subsequent runs: we will take in current cleaned output from mapreduce job and previous merge event sequences
-        cleaned output from merge event sequence S3 bucket. The input from previous merge event sequence clean run is required
-        because for each run we process the data for that entire day. So we should be carrying over the merge event sequences
-        that were cleaned at the first run of this day. 
+        On subsequent runs: we will take in current cleaned output from mapreduce job and previous merge 
+        event sequences cleaned output from merge event sequence S3 bucket. The input from previous merge 
+        event sequence clean run is required because for each run we process the data for that entire day. 
+        So we should be carrying over the merge event sequences that were cleaned at the first run of this day. 
 
         Inputs:
         execution_date - The execution date of airflow task 
         is_initial_data_load - Indicates if this is the first and big run
-        cc_cleaned_path_prev - The merge eve nt sequences cleaned path of previous run
+        cc_cleaned_path_prev - The merge event sequences cleaned path of previous run
         """
         try:
             # Upload schema to S3

@@ -982,7 +982,7 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_create_tables,
         op_kwargs=dict(event=event))
-    create_op.set_upstream(cc_handler)
+    create_op.set_upstream(handle_eventsequences_across_days)
 
     # Load the data into the impala table
     op = PythonOperator(
