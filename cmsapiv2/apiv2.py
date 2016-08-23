@@ -125,7 +125,7 @@ class APIV2Sender(object):
         self.finish()
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
-    def initialize(self):
+    def initialize(self, **kwargs):
         # stripe stuff
         stripe.api_key = options.stripe_api_key
         self.set_header('Content-Type', 'application/json')
@@ -188,8 +188,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             else:
                 raise BadRequestError(
                     'Content-Type must be JSON or multipart/form-data')
+
         self.args = args
-        return args
+        return self.args
 
     def set_account_id(request):
         parsed_url = urlparse(request.uri)
@@ -572,6 +573,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 yield self.check_valid_subscription()
         except KeyError:
             pass
+
+        self.parse_args()
+        self.args['account_id'] = str(self.account_id)
 
     @tornado.gen.coroutine
     def on_finish(self):
@@ -1088,4 +1092,15 @@ class CustomVoluptuousTypes():
             except sre_constants.error as e:
                 raise Invalid(e.message)
             return query
+        return f
+
+    @staticmethod
+    def TagType():
+        '''Check value is valid TagType'''
+        def f(tag_type):
+            if tag_type is None:
+                return neondata.TagType.COLLECTION
+            if tag_type in [neondata.TagType.VIDEO, neondata.TagType.COLLECTION]:
+                return tag_type
+            raise Invalid('Invalid TagType %s' % tag_type)
         return f

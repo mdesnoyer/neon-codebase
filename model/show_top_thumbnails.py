@@ -102,5 +102,5 @@ if __name__ == '__main__':
     options, args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG)
-
+    logging.getLogger('boto').propagate = False
     main(options)
