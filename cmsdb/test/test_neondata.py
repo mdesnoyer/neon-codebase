@@ -94,7 +94,7 @@ class NeonDbTestCase(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.postgresql.clear_all_tables()
-        super(NeonDbTestCase, self).setUp()
+        super(NeonDbTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
