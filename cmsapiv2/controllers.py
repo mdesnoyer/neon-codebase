@@ -1193,7 +1193,8 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
                 raise ForbiddenError()
             if self.args.get('name'):
                 tag.name = self.args['name']
-            tag.tag_type = self.args.get('type', TagType.COLLECTION)
+            if self.args.get('tag_type'):
+                tag.tag_type = self.args['tag_type']
             tag.hidden = Boolean()(self.args.get('hidden', tag.hidden));
         tag = yield neondata.Tag.modify(
             self.args['tag_id'],
