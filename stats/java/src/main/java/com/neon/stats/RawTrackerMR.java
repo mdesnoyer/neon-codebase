@@ -259,7 +259,7 @@ public class RawTrackerMR extends Configured implements Tool {
             revIter.remove();
             context.getCounter("EventStats", "DuplicatesFound").increment(1);
             break;
-          } else if ((curEvent.getServerTime() - oldEvent.getServerTime()) > MAX_SEQUENCE_TIME) {
+          } else if ((curEvent.getClientTime() - oldEvent.getClientTime()) > MAX_SEQUENCE_TIME) {
             // Stop looking for duplicates that are too old
             break;
           }
