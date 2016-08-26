@@ -1035,6 +1035,11 @@ class VideoProcessor(object):
             yield tag.save(async=True)
             new_video_metadata.tag_id = tag.get_id()
             yield new_video_metadata.save(async=True)
+        # Otherwise update the name of the tag to match the video title
+        else:
+            yield tag = neondata.Tag.get(new_video_metadata.tag_id, async=True)
+            tag.name = api_request.video_title
+            yield tag.save(async=True)
 
         _tag_thumb_ids = (video_result.thumbnail_ids +
             video_result.bad_thumbnail_ids +
