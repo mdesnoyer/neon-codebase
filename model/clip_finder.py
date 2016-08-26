@@ -17,6 +17,7 @@ from collections import Counter
 import cv2
 import logging
 import numpy as np
+import matplotlib.pyplot as plt
 import model.features
 import random
 from scipy import stats
@@ -28,7 +29,7 @@ import time
 from utils.options import options, define
 from utils import pycvutils
 
-define('workers', default=4, help='Number of worker threads')
+define('workers', default=2, help='Number of worker threads')
 
 _log = logging.getLogger(__name__)
 
@@ -44,6 +45,8 @@ class ClipFinder(object):
         self.predictor = predictor
         # A scenedetect.SceneDetector object
         self.scene_detector = scene_detector
+        self.scene_cut_generator = model.features.SceneCutGenerator(
+            self.scene_detector)
         # A model.features.FeatureGenerator that estimates action 
         self.action_estimator = action_estimator
         self.weight_dict = {'valence': valence_weight,
@@ -65,6 +68,10 @@ class ClipFinder(object):
           processing_strategy.clip_cross_scene_boundary
         self.min_scene_piece = processing_strategy.min_scene_piece
         self.scene_detector.threshold = processing_strategy.scene_threshold
+
+    def reset(self):
+        self.scene_cut_generator.reset()
+        self.action_estimator.reset()
 
     def find_clips(self, mov, n=1, max_len=None, min_len=None):
         '''Finds a set of clips in the movie.
@@ -88,7 +95,7 @@ class ClipFinder(object):
 
         # First, do a pass through the video to find scenes and detect action
         mov_feature_generator = model.features.MovieMultipleFeatureGenerator(
-            [model.features.SceneCutGenerator(self.scene_detector),
+            [self.scene_cut_generator,
              self.action_estimator],
              max_height=360,
              frame_step=2,
@@ -119,7 +126,8 @@ class ClipFinder(object):
             score_obj,
             n, 
             None if max_len is None else int(max_len*fps),
-            None if min_len is None else int(min_len*fps))
+            None if min_len is None else int(min_len*fps),
+            num_frames)
 
         return clips
 
@@ -153,7 +161,7 @@ class ClipFinder(object):
         _log.info('Finished scoring scenes')
         
 
-    def _build_clips(self, score_obj, n_clips, max_len, min_len):
+    def _build_clips(self, score_obj, n_clips, max_len, min_len, vid_len):
         '''From a list of scenes and scores for scenes, put together clips.
 
         scene_list - List of scene starts (except the last one,
@@ -162,57 +170,132 @@ class ClipFinder(object):
         n_clips - Number of clips to find
         max_len - Maximum length of a clip in frames
         min_len - Maximum length of a clip in frames
+        vid_len - Length of the video in frames
 
         Returns:
         List of VideoClip objects sorted by score descending
         '''
-        # Sort the possible scenes by score
-        scenes_left = sorted(score_obj.get_results(), key=lambda x:x[4])
+        if min_len is None and max_len is None:
+            # Just grab the whole scenes in priority order
+            scenes = sorted(score_obj.get_results(), key=lambda x:x[4],
+                            reverse=True)
+            return [model.VideoClip(x[1], x[2], x[4]) 
+                    for x in scenes[0:n_clips]]
+        elif min_len is None:
+            min_len = max_len
+        elif max_len is None:
+            max_len = min_len
+
+        # Map of scene # -> (start, end, nframes, score, prop_dict
+        scenes = {x[0] : x[1:] for x in score_obj.get_results()}
+
+        # An array the length of the video where each value is the
+        # scene number for that frame
+        scene_arr = np.zeros(vid_len, np.int16)
+
+        # An array the length of the video where each value is the
+        # score of that scene for that frame.
+        scores = np.zeros(vid_len)
+
+        for scene_num, val in scenes.iteritems():
+            start, end, nframes, score, prop_dict = val
+            scene_arr[start:end] = scene_num
+            scores[start:end] = score
+
+        # Now convolve the scores with indices for the min and max
+        # video length to get an average score for a clip starting at
+        # each location.
+        clip_score_small = np.convolve(scores, np.ones(min_len)/min_len,
+                                       'valid')
+        clip_score_big = np.convolve(scores, np.ones(max_len)/max_len,
+                                     'valid')
+
+        # Estimate the action through the video
+        # TODO(mdesnoyer): Do this using something other than the scene
+        # detector because that's just HSV diffs.
+        action_samples = [(k+int(vid_len*self.startend_clip),
+                           v['delta_hsv_avg']) for k, v in 
+                          self.scene_cut_generator.frame_metrics.iteritems()]
+        action = np.zeros(vid_len)
+        last_frame, last_val = 0, 0
+        for frameno, val in sorted(action_samples, key=lambda x:x[0]):
+            action[last_frame:frameno] = last_val
+            last_frame, last_val = frameno, val
+            
+
         rv = []
-        while scenes_left and len(rv) < n_clips:
-            scene_n, start, end, nframes, score, prop_dict = scenes_left.pop()
-
-            if max_len is not None and nframes > max_len:
-                # Grab part of the scene starting in the middle.
-                # TODO(mdesnoyer) Search for the right action in the
-                # scene using motion analysis.
-                rv.append(model.VideoClip(
-                    int((start + end - max_len) / 2),
-                    int((start + end + max_len) / 2),
-                    score))
-            elif min_len is not None and nframes < min_len:
-                # The scene is too small, so we need to grab into the
-                # next scene
-                if not self.cross_scene_boundary:
-                    # Not allowed so we throw out this scene
-                    continue
-
-                # Stich together scenes until we have enough to reach min_len
-                cur_scene_end = end
-                cur_scene_idx = None
-                while (cur_scene_end - start) < min_len:
-                    next_scene = [x for x in enumerate(scenes_left) if
-                                  x[1][1] == cur_scene_end]
-                    if len(next_scene) == 0:
-                        # We're at the end and cannot use this scene
-                        continue
-                    cur_scene_idx, cur_scene = next_scene[0]
-
-                    if (max_len is not None and 
-                        (cur_scene[2] - start) > max_len):
-                        # Take a chunk of this scene
-                        cur_scene_end = start + max_len
-                    else:
-                        # Take the whole scene
-                        cur_scene_end = cur_scene[2]
-
-                    # Remove the scene from consideration
-                    del scenes_left[cur_scene_idx]
-                rv.append(model.VideoClip(start, cur_scene_end, score))
+        while np.max(clip_score_small) > 0 and len(rv) < n_clips:
+            # Pick the best clip left
+            best_small = np.nanmax(clip_score_small)
+            best_big = np.nanmax(clip_score_big)
+            if best_small > best_big:
+                target_len = min_len
+                clip_start = np.argmax(clip_score_small)
             else:
-                # Take the whole scene
-                rv.append(model.VideoClip(start, end, score))
+                target_len = max_len
+                clip_start = np.argmax(clip_score_big)
+
+            # Now, grab the scene where this clip starts
+            scene_num = scene_arr[clip_start]
+            start, end, scene_len, score, prop_dict = scenes[scene_num]
+            if scene_len > target_len:
+                # TODO(mdesnoyer) Use a better motion analysis from my thesis
+                _log.debug('Scene is bigger than clip size, so grabbing '
+                           'looking for the best action in %i frames' % 
+                           scene_len)
+                #rv.append(model.VideoClip(
+                #    int((start + end - target_len) / 2),
+                #    int((start + end + target_len) / 2),
+                #    score))
+
+                # Look for a pattern in motion that follows a plot arc
+                # (building up to a crescendo and then dropping off at
+                # the end. We do this by convolving the action
+                # measurements with a vector of the length of the
+                # desired clip that peaks 80% of the way through. The
+                # vector needs to be flipped to do the convolution
+                # properly.
+                denoumement_len = int(0.2*target_len)
+                plot_arc = np.concatenate(
+                    (np.linspace(0.8, 1.0, denoumement_len),
+                    np.linspace(1.0, 0.2, target_len-denoumement_len)))
+                plot_fit = np.convolve(action[start:end], plot_arc, 'valid')
+                clip_start = np.argmax(plot_fit)
+                rv.append(model.VideoClip(
+                    start + clip_start,
+                    start + clip_start + target_len,
+                    score))
                 
+                # Remove the scene from future consideration
+                clip_score_small[max(0,(start-target_len)):end] = 0
+                clip_score_big[max(0,(start-target_len)):end] = 0
+            else:
+                if not self.cross_scene_boundary:
+                    # This scene is too small, so remove it
+                    clip_score_small[start:end] = 0
+                    clip_score_big[start:end] = 0
+                    continue
+                # The scene is smaller than the requested size, so
+                # just keep going
+                rv.append(model.VideoClip(
+                    clip_start,
+                    clip_start + target_len,
+                    np.mean(scores[clip_start:(clip_start+target_len)])))
+                
+                # The scene is too small, so we need to grab multiple
+                # scenes and zero them out
+                scene_list = set(scene_arr[clip_start:(clip_start+target_len)])
+                _log.debug('Scene is smaller than clip size, so grabbing '
+                           'the %i scenes' % len(scene_list))
+                for scene_i in scene_list:
+                    cur_scene = scenes[scene_i]
+                    clip_score_small[cur_scene[0]:cur_scene[1]] = 0
+                    clip_score_big[cur_scene[0]:cur_scene[1]] = 0
+
+                # We don't want any clips that bleed into this scene
+                clip_score_small[max(0,(clip_start-target_len)):clip_start] = 0
+                clip_score_big[max(0, (clip_start-target_len)):clip_start] = 0
+                continue
         return sorted(rv, key=lambda x: x.score, reverse=True)
 
     def _frame_yielder(self, scene_list):

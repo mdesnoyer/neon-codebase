@@ -30,7 +30,7 @@ define('model', default=None, help='File that contains the model to use')
 define('aq_groups', default='AquilaOnDemandTest,AquilaTestSpot',
        help=('Comma separated list of autoscaling groups to talk to for '
              'aquilla'))
-define('len', default=None, help='Desired clip length in seconds')
+define('len', default=None, type=float, help='Desired clip length in seconds')
 define('n', default=1, help='Number of clips to extract')
 
 _log = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def main():
     
     _log.info('Opening model %s' % options.model)
     mod = model.generate_model(options.model, predictor)
-    mod.clip_finder.scene_detector.threshold = 12.0
+    mod.clip_finder.scene_detector.threshold = 30.0
     mod.clip_finder.scene_detector.min_scene_len = 30
 
     clips = []

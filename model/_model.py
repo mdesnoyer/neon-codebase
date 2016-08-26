@@ -98,7 +98,7 @@ class Model(object):
 
     def reset(self):
         self.predictor.reset()
-
+        self.clip_finder.reset()
 
     def score(self, image, do_filtering=True):
         '''Scores a single image. 
