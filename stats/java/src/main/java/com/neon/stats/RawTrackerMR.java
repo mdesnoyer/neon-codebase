@@ -79,6 +79,8 @@ public class RawTrackerMR extends Configured implements Tool {
       if (CheckBotEvent(curEvent.getUserAgent())) {
         context.getCounter("EventStats", "BotEvents").increment(1);
         return;
+      } else {
+        context.getCounter("EventStats", "nonBotEvents").increment(1);
       }
 
       // Build the map key prefix
