@@ -1259,12 +1259,14 @@ public class RawTrackerMR extends Configured implements Tool {
    * @return True if Googlebotevent else False
    */
   private static boolean CheckBotEvent(CharSequence useragent) {
+    if (useragent == null) {
+      return false;
+    }
     Pattern pattern = Pattern.compile(".*Googlebot.*");
     if (pattern.matcher(useragent.toString()).matches()) {
       return true;
-    } else {
-      return false;
     }
+    return false;
   }
 
   /*
