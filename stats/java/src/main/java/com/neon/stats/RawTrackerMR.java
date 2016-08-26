@@ -1257,7 +1257,7 @@ public class RawTrackerMR extends Configured implements Tool {
    * @param useragent
    * @return True if Googlebotevent else False
    */
-  private static String CheckBotEvent(CharSequence useragent) {
+  private static boolean CheckBotEvent(CharSequence useragent) {
     Pattern pattern = Pattern.compile(".*Googlebot.*");
     if (pattern.matcher(useragent.toString()).matches()) {
       return true;
