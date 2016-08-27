@@ -5140,6 +5140,18 @@ class NeonApiRequest(NamespacedStoredObject):
                 response.experiment_state = vstatus.experiment_state
                 response.winner_thumbnail = vstatus.winner_tid
                 response.set_processing_state(self.state)
+                if response.processing_state in [
+                        ExternalRequestState.PROCESSED,
+                        ExternalRequestState.SERVING]:
+                    response.error = None
+                    vidmeta = yield VideoMetadata.get(internal_vid,
+                                                      async=True)
+                    thumbs = yield ThumbnailMetadata.get_many(
+                        vidmeta.thumbnail_ids, async=True)
+                    thumbs = [x for x in thumbs 
+                              if x and x.type == ThumbnailType.NEON]
+                    response.framenos = [x.frameno for x in thumbs]
+                    response.thumbnails = [x.key for x in thumbs]
                 response.job_id = self.job_id
                 response.video_id = self.video_id
 
