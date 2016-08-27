@@ -2420,9 +2420,8 @@ class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
         self.assertEquals(found.job_results[1].gender, 'M')
         self.assertEquals(found.job_results[1].model_version, 'model_vers')
         self.assertItemsEqual(found.job_results[1].bad_thumbnail_ids, ['bad1'])
-
         self.assertEquals(orig, found)
-
+        self.assertEqual([u'tid4', u'tid1', u'bad1', u'tid3', u'tid2'], found.get_all_thumbnail_ids())
 
 class TestAccountLimits(NeonDbTestCase, BasePGNormalObject):
     @classmethod

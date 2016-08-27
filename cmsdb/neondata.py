@@ -6454,6 +6454,12 @@ class VideoMetadata(Searchable, StoredObject):
         yield VideoMetadata.delete(key, async=True)
 
 
+    def get_all_thumbnail_ids(self):
+
+        return list(set(self.thumbnail_ids + self.bad_thumbnail_ids +
+            list(itertools.chain.from_iterable(
+            [vj.thumbnail_ids + vj.bad_thumbnail_ids for vj in self.job_results]))))
+
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 
