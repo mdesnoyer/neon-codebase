@@ -243,7 +243,7 @@ ALTER TABLE tag OWNER TO pgadmin;
 
 CREATE TABLE tag_thumbnail (
     tag_id character varying(128) NOT NULL,
-    thumbnail_id character varying(128) NOT NULL
+    thumbnail_id character varying(1024) NOT NULL
 );
 
 ALTER TABLE tag_thumbnail OWNER TO pgadmin;
