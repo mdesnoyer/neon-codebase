@@ -3378,7 +3378,80 @@ class TestVideoHandler(TestControllersBase):
         tag = yield neondata.Tag.get(vm.tag_id, async=True)
         self.assertTrue(tag.hidden)
         video = yield vm.get(vm.key, async=True)
-        self.assertTrue(video.hidden) 
+        self.assertTrue(video.hidden)
+ 
+    @tornado.testing.gen_test(timeout=10.0)
+    def test_update_video_default_thumbnail_url(self):
+        self.im_download_mock.side_effect = [
+            self.random_image, 
+            self.random_image]
+        tag = neondata.Tag('tag1') 
+        yield tag.save(async=True) 
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(
+            self.account_id_api_key,'vid1'), tag_id='tag1')
+        yield vm.save(async=True)
+        url = '/api/v2/%s/videos?video_id=vid1&default_thumbnail_url=test' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT')
+
+        vid = yield vm.get(vm.key, async=True)
+        self.assertEquals(len(vid.thumbnail_ids), 1)
+        first_thumb_id = vid.thumbnail_ids[0]
+        tn = yield neondata.ThumbnailMetadata.get(
+            first_thumb_id, 
+            async=True)
+
+        self.assertEquals(tn.type, neondata.ThumbnailType.DEFAULT)
+        self.assertEquals(tn.rank, -1)
+        url = '/api/v2/%s/videos?video_id=vid1&default_thumbnail_url=test2' % (
+            self.account_id_api_key)
+
+        yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT')
+        vid = yield vm.get(vm.key, async=True)
+        self.assertEquals(len(vid.thumbnail_ids), 2)
+        second_thumb_id = vid.thumbnail_ids[1]
+        tn = yield neondata.ThumbnailMetadata.get(
+            second_thumb_id, 
+            async=True)
+        self.assertEquals(tn.type, neondata.ThumbnailType.DEFAULT)
+        self.assertEquals(tn.rank, -2)
+
+
+    @tornado.testing.gen_test
+    def test_update_video_multipart_upload(self):
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(
+            self.account_id_api_key,'vid1'))
+        yield vm.save(async=True)
+
+        url = self.get_url('/api/v2/{}/videos?video_id=vid1'.format(
+            self.account_id_api_key))
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
+        body = MultipartEncoder({
+            'video_id': 'vid1',
+            'upload': ('image1.jpg', buf.getvalue())})
+        headers = {'Content-Type': body.content_type}
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='PUT')
+        self.assertEqual(response.code, 200)
+        vid = yield vm.get(vm.key, async=True)
+        self.assertEquals(len(vid.thumbnail_ids), 1)
+        first_thumb_id = vid.thumbnail_ids[0]
+        tn = yield neondata.ThumbnailMetadata.get(
+            first_thumb_id, 
+            async=True)
+
+        self.assertEquals(tn.type, neondata.ThumbnailType.DEFAULT)
+        self.assertEquals(tn.rank, -1)
 
     @tornado.testing.gen_test
     def test_get_single_video_with_thumbnails_field(self):

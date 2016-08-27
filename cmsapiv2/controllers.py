@@ -2365,6 +2365,8 @@ class VideoHandler(ShareableContentHandler):
             'testing_enabled': Coerce(Boolean()),
             'title': Any(str, unicode, Length(min=1, max=1024)),
             'callback_email': CustomVoluptuousTypes.Email(),
+            'default_thumbnail_url': All(Any(Coerce(str), unicode),
+                Length(min=1, max=2048)),
             'hidden': Boolean()
         })
         args = self.parse_args()
@@ -2375,10 +2377,31 @@ class VideoHandler(ShareableContentHandler):
             account_id_api_key,
             args['video_id'])
 
+        @tornado.gen.coroutine
         def _update_video(v):
             v.testing_enabled =  Boolean()(
                 args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
+            dturl = args.get('default_thumbnail_url', None)
+            if dturl or len(self.request.files['upload']) > 0: 
+                min_rank = yield self._get_min_rank(internal_video_id)
+                new_thumb = neondata.ThumbnailMetadata(
+                        None,
+                        ttype=neondata.ThumbnailType.DEFAULT,
+                        rank=min_rank - 1)
+            if dturl: 
+                yield v.download_and_add_thumbnail(
+                    new_thumb, 
+                    image_url=dturl,
+                    save_objects=True) 
+                print min_rank
+            elif len(self.request.files['upload']) > 0: 
+                upload = self.request.files['upload'][0] 
+                image = PIL.Image.open(io.BytesIO(upload.body))
+                yield v.download_and_add_thumbnail(
+                    new_thumb, 
+                    image=image,
+                    save_objects=True) 
 
         def _modify_tag(t): 
             t.hidden = Boolean()(args.get('hidden', t.hidden))
@@ -2420,6 +2443,20 @@ class VideoHandler(ShareableContentHandler):
             fields=list(db2api_fields))
         self.success(output)
 
+    @tornado.gen.coroutine
+    def _get_min_rank(self, internal_video_id): 
+        min_rank = False 
+        video = yield neondata.VideoMetadata.get(
+            internal_video_id, 
+            async=True) 
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            video.thumbnail_ids, 
+            async=True)
+        for t in thumbs:
+            if t.rank < min_rank: 
+                min_rank = t.rank 
+        raise tornado.gen.Return(min_rank)
+ 
     @classmethod
     def get_access_levels(self):
         return {
