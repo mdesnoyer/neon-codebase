@@ -3356,7 +3356,9 @@ class ProcessingStrategy(DefaultedStoredObject):
                  filter_text=True, text_filter_params=None, 
                  filter_text_thresh=0.04, m_thumbs=6,
                  clip_cross_scene_boundary=True,
-                 min_scene_piece=15, scene_threshold=30.0):
+                 min_scene_piece=15, scene_threshold=30.0,
+                 custom_predictor_weight=0.5,
+                 custom_predictor=None):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -3497,6 +3499,17 @@ class ProcessingStrategy(DefaultedStoredObject):
 
         # Threshold for scene detection
         self.scene_threshold = scene_threshold
+
+        # Name of the custom predictor. This must be a file in the
+        # model_data directory. It must be an object that has a
+        # predict() function, which, if given a valence feature
+        # vector, predicts some kind of score. In other words, like a
+        # scikit-learn object.
+        self.custom_predictor = custom_predictor
+
+        # The weight to assign to a custom predictor relative to the
+        # other features
+        self.custom_predictor_weight = custom_predictor_weight
 
     @classmethod
     def _baseclass_name(cls):

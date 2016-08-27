@@ -34,10 +34,9 @@ define('workers', default=2, help='Number of worker threads')
 _log = logging.getLogger(__name__)
 
 
-
 class ClipFinder(object):
     def __init__(self, predictor, scene_detector, action_estimator,
-                 valence_weight=1.0, action_weight=0.25,
+                 valence_weight=1.0, action_weight=0.25, custom_weight=0.5,
                  processing_time_ratio=0.7, startend_clip=0.1,
                  cross_scene_boundary=True,
                  min_scene_piece=15):
@@ -50,11 +49,13 @@ class ClipFinder(object):
         # A model.features.FeatureGenerator that estimates action 
         self.action_estimator = action_estimator
         self.weight_dict = {'valence': valence_weight,
-                            'action' : action_weight}
+                            'action' : action_weight,
+                            'custom' : custom_weight}
         self.processing_time_ratio = processing_time_ratio
         self.startend_clip = startend_clip
         self.cross_scene_boundary = cross_scene_boundary
         self.min_scene_piece = min_scene_piece
+        self.custom_predictor = None
 
     def update_processing_strategy(self, processing_strategy):
         '''
@@ -68,6 +69,12 @@ class ClipFinder(object):
           processing_strategy.clip_cross_scene_boundary
         self.min_scene_piece = processing_strategy.min_scene_piece
         self.scene_detector.threshold = processing_strategy.scene_threshold
+        if processing_strategy.custom_predictor:
+            self.custom_predictor = model.load_custom_predictor(
+                processing_strategy.custom_predictor)
+        else:
+            self.custom_predictor = None
+        self.weight_dict['custom'] = self.custom_predictor_weight
 
     def reset(self):
         self.scene_cut_generator.reset()
@@ -381,6 +388,9 @@ class ClipFinder(object):
 
                 score, features, version = self.predictor.predict(image)
                 score_obj.update('valence', frameno, score)
+                if self.custom_predictor is not None and features is not None:
+                    score_obj.update('custom', frameno,
+                                     self.custom_predictor.predict(features))
 
                 if score_obj.n_scored['valence'] % 100 == 0:
                     _log.debug('%i images scored so far' %
@@ -525,6 +535,8 @@ class RegionScore(object):
         end = self._regions[region_n]
         cur_prop_dict = dict()
         for cur_prop in self.property_names:
+            if not len(self._props[cur_prop]):
+                continue
             cur_prop_sum = 0
             cur_prop_count = 0
             for i in range(start, end):
