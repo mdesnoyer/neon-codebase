@@ -1184,7 +1184,8 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
         })(self.args)
 
         # Validate.
-        thumb_ids = self.args.get('thumbnail_ids', '').split(',')
+        _thumb_ids = self.args.get('thumbnail_ids')
+        thumb_ids = _thumb_ids.split(',') if _thumb_ids else []
         self._authorize_thumb_ids_or_raise(thumb_ids)
 
         # Update the tag itself.
