@@ -2394,7 +2394,6 @@ class VideoHandler(ShareableContentHandler):
                     new_thumb, 
                     image_url=dturl,
                     save_objects=True) 
-                print min_rank
             elif len(self.request.files['upload']) > 0: 
                 upload = self.request.files['upload'][0] 
                 image = PIL.Image.open(io.BytesIO(upload.body))
