@@ -160,8 +160,7 @@ class SmartCrop(object):
         for i, face in enumerate(faces):
             face_array[i, 0:] = np.array([face.left(), face.top(),
                                           face.width(), face.height()])
-        face_array *= ratio
-        face_array = face_array.astype(int)
+        face_array = (face_array.astype(np.float64) * ratio).astype(np.int32)
 
         return face_array
 
@@ -254,8 +253,7 @@ class SmartCrop(object):
             self._text_boxes = np.array([])
             return self._text_boxes
         boxes[0:, 1] += cut_top
-        boxes *= ratio
-        boxes = boxes.astype(int)
+        boxes = (boxes.astype(np.float64) * ratio).astype(np.int32)
 
         self._text_boxes = boxes
 

@@ -1316,11 +1316,16 @@ class VideoClient(multiprocessing.Process):
                     statemon.state.increment('too_many_failures')
                     
                     def _write_failure(req):
-                        cb = neondata.VideoCallbackResponse(job_id,
-                                                            req.video_id,
-                                                            err=msg)
-                        req.response = cb.to_dict()
-                        req.state = neondata.RequestState.INT_ERROR
+                        # There's a race condition here such that when
+                        # we are trying to write this to the db,
+                        # somebody else finishes the job. If that
+                        # happens, do not overwrite that.
+                        if req.state == neondata.RequestState.PROCESSING:
+                            cb = neondata.VideoCallbackResponse(job_id,
+                                                                req.video_id,
+                                                                err=msg)
+                            req.response = cb.to_dict()
+                            req.state = neondata.RequestState.INT_ERROR
                     yield neondata.NeonApiRequest.modify(job_id, api_key,
                                                          _write_failure,
                                                          async=True)

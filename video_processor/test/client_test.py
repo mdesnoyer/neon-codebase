@@ -1327,9 +1327,12 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         tag = neondata.Tag.get(video_data.tag_id)
         self.assertIsNotNone(tag)
         tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
-        # Validate through the thumbnailmetadata row, not just the thumb id in tag_thumbnail.
-        _non_job_thumbs = neondata.ThumbnailMetadata.get_many(video_data.non_job_thumb_ids)
-        all_thumb_ids = set([t.get_id() for t in thumbs + bad_thumbs + _non_job_thumbs])
+        # Validate through the thumbnailmetadata row, not just the
+        # thumb id in tag_thumbnail.
+        _non_job_thumbs = neondata.ThumbnailMetadata.get_many(
+            video_data.non_job_thumb_ids)
+        all_thumb_ids = set([t.get_id() for t in thumbs + bad_thumbs + 
+                             _non_job_thumbs])
         self.assertEqual(tag_thumb_ids, all_thumb_ids)
 
         # Check that there are thumbnails in s3
@@ -1356,8 +1359,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         expected_response = {
             'job_id' : 'job1',
             'video_id' : 'vid1',
-            'framenos' : [6],
-            'thumbnails' : [n_thumbs[0].key],
+            'framenos' : [69, 6],
+            'thumbnails' : [n_thumbs[1].key, n_thumbs[0].key],
             'error' : None
             }
         self.assertDictContainsSubset(expected_response,
