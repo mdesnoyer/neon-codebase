@@ -2141,12 +2141,11 @@ class VideoHelper(object):
                         'gender': video_result.gender,
                         'age': video_result.age,
                         'thumbnails': cur_thumbs}
-                    if 'bad_thumbnails' in fields:
-                        cur_entry['bad_thumbnails'] = yield \
-                          VideoHelper.get_thumbnails_from_ids(
-                              video_result.bad_thumbnail_ids,
-                              age=video_result.age,
-                              gender=video_result.gender)
+                    cur_entry['bad_thumbnails'] = yield \
+                      VideoHelper.get_thumbnails_from_ids(
+                          video_result.bad_thumbnail_ids,
+                          age=video_result.age,
+                          gender=video_result.gender)
                     new_video['demographic_thumbnails'].append(cur_entry)
                 if (len(video.job_results) == 0 and
                     len(video.thumbnail_ids) > 0):
