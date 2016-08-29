@@ -126,9 +126,6 @@ options.define('max_task_instances', default=30, type=int,
 options.define('full_run_input_path', 
                default='/*/*/*/*', type=str, 
                help='input path for first run')
-options.define('airflow_start_date', default='2016-08-19', type=str, 
-               help=('The date when first run of airflow will take '
-                    'place'))
 options.define('airflow_rebase_date', default='2016-08-19', type=str,
                help=('The date when airflow metadata is getting '
                      'rebased to start from current date. The rebase'
@@ -161,8 +158,7 @@ TAI = re.compile(r'^[\w]{3,15}$')
 EPOCH = dateutils.timezone(datetime(1970, 1, 1), timezone='utc')
 PROTECTED_PREFIXES = [r'^/$', r'v[0-9].[0-9]']
 
-# Use the current UTC date whenever rebuilding Airflow from scratch
-airflow_start_date = dateutil.parser.parse(options.airflow_start_date)
+# Use the current UTC date whenever rebasing Airflow
 airflow_rebase_date = dateutil.parser.parse(options.airflow_rebase_date)
 
 class ClusterDown(Exception): pass
@@ -184,7 +180,6 @@ def _cluster_status():
         :rtype : bool
         :return: True if the cluster is running
         """
-    _log.info('Airflow start date is %s' % airflow_start_date)
     _log.info('Airflow rebase date is %s' % airflow_rebase_date)
 
     cluster = ClusterGetter.get_cluster()
@@ -593,32 +588,32 @@ def _load_impala_table(**kwargs):
 
     # Check if this is the first run and take appropriate action
     is_first_run, is_initial_data_load = check_first_run(execution_date)
-
     if is_first_run and is_initial_data_load:
         _log.info("This is first & big run, bumping up the num of task instances to %s" %
-            options.max_task_instances)
+                  options.max_task_instances)
         cluster.change_instance_group_size(group_type='TASK', new_size=options.max_task_instances)
-        
-        # This is going to be the mapreduce output path for Eventsequences Table for first run
-        # This is always going to be the path for Videoplays Table for all runs
-        output_bucket, output_prefix = _get_s3_tuple(options.output_path)
-        cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
-                                                prefix=output_prefix)
-    elif event == 'VideoPlay':
-        output_bucket, output_prefix = _get_s3_tuple(options.output_path)
-        cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
-                                                prefix=output_prefix)
+
+    if event == 'EventSequence':
+        if is_first_run and is_initial_data_load:
+            # This is going to be the mapreduce output path for Eventsequences Table for first run
+            output_bucket, output_prefix = _get_s3_tuple(options.output_path)
+            cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                                    prefix=output_prefix)
+        else:
+            # This is going to be the cleaned path from eventsequences merged across days
+            # favoritely called as corner cases clean up
+            output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
+            cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
+                                                    prefix=output_prefix)
     else:
-        # This is going to be the cleaned path from eventsequences merged
-        # across days
-        output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
+        # For all other tables, the impala build path is mapreduce output path
+        output_bucket, output_prefix = _get_s3_tuple(options.output_path)
         cleaned_prefix = _get_s3_cleaned_prefix(execution_date=execution_date,
                                                 prefix=output_prefix)
 
     path_for_impala_build = os.path.join('s3://', output_bucket, cleaned_prefix)
 
     _log.info("{task}: Loading data!".format(task=task))
-    
     
     try:
         _log.info("Path to build for impala is %s" % path_for_impala_build)
@@ -709,10 +704,14 @@ def _update_table_build_times(**kwargs):
     """
     execution_date = kwargs['execution_date']
 
-    cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    # Do not update this table during backfills to ensure mastermind does not read old stats.
+    # This table will be updated when backfill reaches the current day run or during normal processing
+    # for current day run
+    if execution_date.strftime("%Y/%m/%d") == datetime.utcnow().strftime("%Y/%m/%d"):
+        cluster = ClusterGetter.get_cluster()
+        cluster.connect()
 
-    stats.impala_table.update_table_build_times(cluster)
+        stats.impala_table.update_table_build_times(cluster)
 
 
 def _hdfs_maintenance(**kwargs):
@@ -866,7 +865,7 @@ def _merge_eventsequences_across_days(**kwargs):
 # ----------------------------------
 default_args = {
     'owner': 'Ops',
-    'start_date': airflow_start_date,
+    'start_date': airflow_rebase_date,
     'email': [options.notify_email],
     'email_on_failure': True,
     'email_on_retry': False,

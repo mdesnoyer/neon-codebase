@@ -215,7 +215,7 @@ class ImpalaTable(object):
             self.status = 'ERROR'
             raise SchemaUploadError
 
-    def _avro_table(self, execution_date):
+    def build_avro_table_name(self, execution_date):
         """
         Generate an Avro table name from an execution_date (datetime) object
         :param execution_date: a datetime.datetime object
@@ -224,7 +224,7 @@ class ImpalaTable(object):
         return '{prefix}_{dt}'.format(prefix=self.event_avro.lower(),
                                       dt=execution_date.strftime("%Y%m%d%H"))
 
-    def _parquet_table(self):
+    def build_parquet_table_name(self):
         """
         The name of the Parquet-format Impala table
         """
@@ -239,7 +239,7 @@ class ImpalaTable(object):
             table = cc_table
             self.drop_avro_table(execution_date, cc_table)
         else:
-            table = self._avro_table(execution_date)
+            table = self.build_avro_table_name(execution_date)
             _log.info('Registering event {event} Avro table {table} with Hive'
                   .format(event=self.event, table=table))
             self.drop_avro_table(execution_date)
@@ -285,7 +285,7 @@ class ImpalaTable(object):
             if corner_case_table:
                 table = corner_case_table
             else:
-                table = self._avro_table(execution_date)
+                table = self.build_avro_table_name(execution_date)
 
             _log.info('Dropping Avro table {table}'.format(table=table))
             self.hive.execute('DROP TABLE IF EXISTS {table}'.format(table=table))
@@ -299,7 +299,7 @@ class ImpalaTable(object):
     def create_parquet_table(self):
         """Create the Impala Parquet-format table"""
         try:
-            table = self._parquet_table()
+            table = self.build_parquet_table_name()
             _log.info("Creating Impala Parquet table: %s" % table)
             self.hive.execute("""
             CREATE TABLE IF NOT EXISTS %s
@@ -327,8 +327,8 @@ class ImpalaTable(object):
         # We partition by tai-year-month to allow for idempotent inserts.
         # https://cwiki.apache.org/confluence/display/Hive/DynamicPartitions
         try:
-            parq_table = self._parquet_table()
-            avro_table = self._avro_table(execution_date)
+            parq_table = self.build_parquet_table_name()
+            avro_table = self.build_avro_table_name(execution_date)
 
             _log.info('Loading to Impala Parquet-format table {parq} from '
                       '{avro}'.format(parq=parq_table, avro=avro_table))
@@ -429,7 +429,7 @@ class ImpalaTable(object):
             self.set_hive_parameters()
 
             # Avro table name pointing to mapreduce cleaned ouput for current run
-            table = self._avro_table(execution_date)
+            table = self.build_avro_table_name(execution_date)
 
             # Drop table for merge event sequences input for current run
             cc_input = 'corner_cases_input_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
@@ -571,6 +571,7 @@ class ImpalaTable(object):
         #Set the hive parameters
         self.set_hive_parameters()
 
+        # Drop the cleaned table for current processing if exists
         corner_case_cleaned = 'avro_cc_cleaned_{dt}'.format(dt=execution_date.strftime("%Y%m%d%H"))
         self.drop_avro_table(execution_date, corner_case_cleaned)
 
@@ -663,12 +664,15 @@ class ImpalaTable(object):
 
             _log.info('Done merge event sequences')
 
-            # Write the data to s3 merge event sequence bucket
+            # Write the data for the current and previous day to s3 merge event sequence bucket 
             sql="""
             INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}_copy
             select {columns} from avro_cc_cleaned_{dt}
+            where
+            serverTime > {epoch_previous_day}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       dt=execution_date.strftime("%Y%m%d%H"))
+                       dt=execution_date.strftime("%Y%m%d%H"),
+                       epoch_previous_day=calendar.timegm((execution_date - timedelta(days=1)).timetuple()))
 
             _log.info('Moving data to s3: {sql}'.format(sql=sql))
 
@@ -731,7 +735,7 @@ class ImpalaTableBuilder(threading.Thread):
         try:
             self.table.cluster.connect()
 
-            table = self.table._parquet_table()
+            table = self.table.build_parquet_table_name()
             if self.table.exists(table):
                 _log.info("Parquet table for event '%s' exists: %s" % (self.event, table))
             else:
@@ -806,7 +810,7 @@ class ImpalaTableLoader(threading.Thread):
         try:
             self.table.cluster.connect()
             self.table.transport.open()
-            avro_table = self.table._avro_table(self.execution_date)
+            avro_table = self.table.build_avro_table_name(self.execution_date)
             if self.table.exists(avro_table):
                 _log.error("Avro table for event '%s' exists: %s" % 
                            (self.event, avro_table))
@@ -814,7 +818,7 @@ class ImpalaTableLoader(threading.Thread):
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
 
-            parq_table = self.table._parquet_table()
+            parq_table = self.table.build_parquet_table_name()
             if self.table.exists(parq_table):
                 _log.info("Parquet table for event '%s' exists: %s" % 
                            (self.event, parq_table))
@@ -867,7 +871,7 @@ class SequencesAcrossDaysHandler():
         try:
             self.table.cluster.connect()
             self.table.transport.open()
-            avro_table = self.table._avro_table(self.execution_date)
+            avro_table = self.table.build_avro_table_name(self.execution_date)
             if self.table.exists(avro_table):
                 _log.info("Avro table for event '%s' exists: %s" % 
                            (self.event, avro_table))
