@@ -27,6 +27,8 @@ import utils.neon
 define('input', default=None, help='Input video file')
 define('output', default=None, help='Output video file')
 define('model', default=None, help='File that contains the model to use')
+define('custom_predictor', default=None, 
+       help='Name of the custom predictor to use')
 define('aq_groups', default='AquilaOnDemandTest,AquilaTestSpot',
        help=('Comma separated list of autoscaling groups to talk to for '
              'aquilla'))
@@ -45,8 +47,14 @@ def main():
     
     _log.info('Opening model %s' % options.model)
     mod = model.generate_model(options.model, predictor)
+    if options.custom_predictor is not None:
+        mod.clip_finder.custom_predictor = model.load_custom_predictor(
+            options.custom_predictor)
     mod.clip_finder.scene_detector.threshold = 30.0
     mod.clip_finder.scene_detector.min_scene_len = 30
+    mod.clip_finder.weight_dict['custom'] = 1.0
+    mod.clip_finder.weight_dict['valence'] = 1.0
+    
 
     clips = []
     try:

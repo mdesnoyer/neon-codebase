@@ -29,6 +29,10 @@ class GoProPredictor:
         Outputs:
         Y - numpy array n_samples long
         '''
+        if X.shape[0] == 1024 and len(X.shape) == 2:
+            X = X.T
+        elif len(X.shape) == 1:
+            X = X.reshape(1, -1)
         probs = self._gmm.predict_proba(X)
 
         return probs.max(axis=1)

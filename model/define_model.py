@@ -139,6 +139,7 @@ if __name__ == '__main__':
         model.features.ObjectActionGenerator(),
         valence_weight=1.0,
         action_weight=0.25,
+        custom_weight=0.5,
         processing_time_ratio=0.7,
         startend_clip=0.1,
         cross_scene_boundary=True,
