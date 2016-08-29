@@ -1150,14 +1150,14 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
-        Schema({
+        self.args = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('tag_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })(self.args)
 
         # Ensure tags are valid and permitted.
-        tag_ids = self.args['tag_id'].split(',')
+        tag_ids = self.args['tag_id']
 
         # Check share permission.
         self._allow_request_by_share_or_raise(tag_ids, neondata.Tag.__name__)
@@ -2322,11 +2322,8 @@ class VideoHandler(ShareableContentHandler):
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
-
+        args = schema(args)
         fields = args.get('fields', None)
-        if fields:
-            fields = set(fields.split(','))
 
         vid_dict = {}
         internal_video_ids = []
