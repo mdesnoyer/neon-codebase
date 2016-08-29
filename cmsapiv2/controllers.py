@@ -1264,9 +1264,9 @@ class TagSearchExternalHandler(TagResponse, APIV2Handler):
 
     @tornado.gen.coroutine
     def get(self, account_id):
-        Schema({
+        self.args = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            'limit': All(Coerce(int), Range(min=1, max=100)),
+            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'query': str,
             'fields': CustomVoluptuousTypes.CommaSeparatedList(),
             'since': Coerce(float),
@@ -1356,7 +1356,7 @@ class TagSearchInternalHandler(APIV2Handler):
     def get(self):
         Schema({
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            'limit': All(Coerce(int), Range(min=1, max=100)),
+            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'query': str,
             'since': All(Coerce(float)),
             'until': All(Coerce(float)),
@@ -2815,7 +2815,7 @@ class VideoSearchInternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-            'limit': All(Coerce(int), Range(min=1, max=100)),
+            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'account_id': All(Coerce(str), Length(min=1, max=256)),
             Optional('query'): str,
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
@@ -2952,7 +2952,7 @@ class VideoSearchExternalHandler(APIV2Handler):
     def get(self, account_id):
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            'limit': All(Coerce(int), Range(min=1, max=100)),
+            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'query': Any(CustomVoluptuousTypes.Regex(), str),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
