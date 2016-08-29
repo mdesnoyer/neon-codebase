@@ -1035,6 +1035,11 @@ class VideoProcessor(object):
             yield tag.save(async=True)
             new_video_metadata.tag_id = tag.get_id()
             yield new_video_metadata.save(async=True)
+        # Otherwise update the name of the tag to match the video title
+        else:
+            tag = yield neondata.Tag.get(new_video_metadata.tag_id, async=True)
+            tag.name = api_request.video_title
+            yield tag.save(async=True)
 
         _tag_thumb_ids = (video_result.thumbnail_ids +
             video_result.bad_thumbnail_ids +
@@ -1311,11 +1316,16 @@ class VideoClient(multiprocessing.Process):
                     statemon.state.increment('too_many_failures')
                     
                     def _write_failure(req):
-                        cb = neondata.VideoCallbackResponse(job_id,
-                                                            req.video_id,
-                                                            err=msg)
-                        req.response = cb.to_dict()
-                        req.state = neondata.RequestState.INT_ERROR
+                        # There's a race condition here such that when
+                        # we are trying to write this to the db,
+                        # somebody else finishes the job. If that
+                        # happens, do not overwrite that.
+                        if req.state == neondata.RequestState.PROCESSING:
+                            cb = neondata.VideoCallbackResponse(job_id,
+                                                                req.video_id,
+                                                                err=msg)
+                            req.response = cb.to_dict()
+                            req.state = neondata.RequestState.INT_ERROR
                     yield neondata.NeonApiRequest.modify(job_id, api_key,
                                                          _write_failure,
                                                          async=True)

@@ -2548,6 +2548,23 @@ class TagThumbnail(MappingObject):
 class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
 
+    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
+                 video_id=None, hidden=False, share_token=None):
+        tag_id = tag_id or uuid.uuid4().hex
+
+        # Owner
+        self.account_id = account_id
+        # User's descriptive name
+        self.name = name
+        # System's definition of how this tag is used
+        self.tag_type = tag_type if tag_type in [
+            TagType.VIDEO, TagType.COLLECTION] else None
+        self.video_id = video_id
+        self.share_token = share_token
+        self.hidden = hidden
+
+        super(Tag, self).__init__(tag_id)
+
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2579,21 +2596,6 @@ class Tag(Searchable, StoredObject):
             'until',
             'tag_type']
 
-    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
-                 video_id=None):
-        tag_id = tag_id or uuid.uuid4().hex
-
-        # Owner
-        self.account_id = account_id
-        # User's descriptive name
-        self.name = name
-        # System's definition of how this tag is used
-        self.tag_type = tag_type if tag_type in [
-            TagType.VIDEO, TagType.COLLECTION] else None
-        self.video_id = video_id
-
-        super(Tag, self).__init__(tag_id)
-
     @staticmethod
     def _get_where_part(key, args={}):
         if key == 'query':
@@ -2602,6 +2604,25 @@ class Tag(Searchable, StoredObject):
     @staticmethod
     def _baseclass_name():
         return Tag.__name__
+
+    def get_account_id(self):
+        return self.account_id
+
+
+class Clip(StoredObject):
+    '''Stub for gif clips'''
+
+    def __init__(self, clip_id, account_id=None, share_token=None):
+        super(Clip, self).__init__(clip_id)
+        self.account_id = account_id
+        self.share_token = share_token
+
+    @staticmethod
+    def _baseclass_name():
+        return Tag.__name__
+
+    def get_account_id(self):
+        return self.account_id
 
 
 class AbstractHashGenerator(object):
@@ -5164,6 +5185,18 @@ class NeonApiRequest(NamespacedStoredObject):
                 response.experiment_state = vstatus.experiment_state
                 response.winner_thumbnail = vstatus.winner_tid
                 response.set_processing_state(self.state)
+                if response.processing_state in [
+                        ExternalRequestState.PROCESSED,
+                        ExternalRequestState.SERVING]:
+                    response.error = None
+                    vidmeta = yield VideoMetadata.get(internal_vid,
+                                                      async=True)
+                    thumbs = yield ThumbnailMetadata.get_many(
+                        vidmeta.thumbnail_ids, async=True)
+                    thumbs = [x for x in thumbs 
+                              if x and x.type == ThumbnailType.NEON]
+                    response.framenos = [x.frameno for x in thumbs]
+                    response.thumbnails = [x.key for x in thumbs]
                 response.job_id = self.job_id
                 response.video_id = self.video_id
 
@@ -6112,7 +6145,6 @@ class VideoMetadata(Searchable, StoredObject):
                  job_results=None, non_job_thumb_ids=None,
                  bad_tids=None, tag_id=None):
         super(VideoMetadata, self).__init__(video_id)
-        super(VideoMetadata, self).__init__(video_id)
         # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
         # contain the thumbs from the most recent job only.
         self.thumbnail_ids = tids or []
@@ -6459,6 +6491,12 @@ class VideoMetadata(Searchable, StoredObject):
 
         yield VideoMetadata.delete(key, async=True)
 
+
+    def get_all_thumbnail_ids(self):
+
+        return list(set(self.thumbnail_ids + self.bad_thumbnail_ids +
+            list(itertools.chain.from_iterable(
+            [vj.thumbnail_ids + vj.bad_thumbnail_ids for vj in self.job_results]))))
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.

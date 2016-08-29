@@ -103,5 +103,4 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.DEBUG)
     logging.getLogger('boto').propagate = False
-
     main(options)

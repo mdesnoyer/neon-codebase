@@ -111,6 +111,7 @@ class TestVideoDBWatcher(ServerPostgresTest):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.callback_patcher.stop()
+        super(TestVideoDBWatcher, self).tearDown()
 
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_good_db_data(self, get_ivids_mock, datamock):

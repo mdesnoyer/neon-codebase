@@ -94,7 +94,7 @@ class NeonDbTestCase(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.postgresql.clear_all_tables()
-        super(NeonDbTestCase, self).setUp()
+        super(NeonDbTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1601,21 +1601,19 @@ class TestAddingImageData(NeonDbTestCase):
 
     @tornado.testing.gen_test
     def test_add_account_default_thumb(self):
-        _log.info('here**')
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
         account = NeonUserAccount('a1')
 
-        self.smartcrop_patcher = patch('cvutils.smartcrop.SmartCrop')
-        self.mock_crop_and_resize = self.smartcrop_patcher.start()
-        self.mock_responses = MagicMock()
-        mock_image = PILImageUtils.create_random_image(540, 640)
-        self.mock_crop_and_resize().crop_and_resize.side_effect = \
-            lambda x, *kw: np.array(PILImageUtils.create_random_image(540, 640))
+        with patch('cvutils.smartcrop.SmartCrop') as mock_crop_and_resize:
+            self.mock_responses = MagicMock()
+            mock_image = PILImageUtils.create_random_image(540, 640)
+            mock_crop_and_resize().crop_and_resize.side_effect = \
+              lambda x, *kw: np.array(PILImageUtils.create_random_image(540,
+                                                                        640))
 
-        yield account.add_default_thumbnail(self.image, async=True)
-        self.assertGreater(self.mock_crop_and_resize.call_count, 0)
-        self.smartcrop_patcher.stop()
+            yield account.add_default_thumbnail(self.image, async=True)
+            self.assertGreater(mock_crop_and_resize.call_count, 0)
 
         # Make sure that the thumbnail id is put in
         self.assertIsNotNone(account.default_thumbnail_id)
@@ -1685,26 +1683,26 @@ class TestPostgresDBConnections(NeonDbTestCase):
     @tornado.testing.gen_test
     def test_retry_connection_fails(self):
         ps = 'momoko.Connection.connect'
-        exception_mocker = patch('momoko.Connection.connect')
-        exception_mock = self._future_wrap_mock(exception_mocker.start())
-        exception_mock.side_effect = psycopg2.OperationalError('blah blah')
-        pg1 = neondata.PostgresDB()
-        with options._set_bounded('cmsdb.neondata.max_connection_retries', 1):
-            with self.assertRaises(Exception):
-                yield pg1.get_connection()
-        exception_mocker.stop()
+        with patch('momoko.Connection.connect') as exception_mocker:
+            exception_mock = self._future_wrap_mock(exception_mocker)
+            exception_mock.side_effect = psycopg2.OperationalError('blah blah')
+            pg1 = neondata.PostgresDB()
+            with options._set_bounded('cmsdb.neondata.max_connection_retries',
+                                      1):
+                with self.assertRaises(Exception):
+                    yield pg1.get_connection()
 
     @tornado.testing.gen_test
     def test_retry_connection_fails_then_success(self):
-        exception_mocker = patch('momoko.Connection.connect')
-        exception_mock = self._future_wrap_mock(exception_mocker.start())
-        exception_mock.side_effect = psycopg2.OperationalError('blah blah')
+        with patch('momoko.Connection.connect') as exception_mocker:
+            exception_mock = self._future_wrap_mock(exception_mocker)
+            exception_mock.side_effect = psycopg2.OperationalError('blah blah')
 
-        pg1 = neondata.PostgresDB()
-        with options._set_bounded('cmsdb.neondata.max_connection_retries', 1): 
-            with self.assertRaises(Exception):
-                yield pg1.get_connection()
-        exception_mocker.stop()
+            pg1 = neondata.PostgresDB()
+            with options._set_bounded('cmsdb.neondata.max_connection_retries',
+                                      1): 
+                with self.assertRaises(Exception):
+                    yield pg1.get_connection()
         conn = yield pg1.get_connection()
         self.assertTrue("dbname=test" in conn.dsn)
 
@@ -2422,9 +2420,8 @@ class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
         self.assertEquals(found.job_results[1].gender, 'M')
         self.assertEquals(found.job_results[1].model_version, 'model_vers')
         self.assertItemsEqual(found.job_results[1].bad_thumbnail_ids, ['bad1'])
-
         self.assertEquals(orig, found)
-
+        self.assertEqual([u'tid4', u'tid1', u'bad1', u'tid3', u'tid2'], found.get_all_thumbnail_ids())
 
 class TestAccountLimits(NeonDbTestCase, BasePGNormalObject):
     @classmethod
@@ -2449,6 +2446,10 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
             self.http_mocker.start().send_request, require_async_kw=True)
         self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         super(TestNeonRequest, self).setUp()
+
+    def tearDown(self):
+        self.http_mocker.stop()
+        super(TestNeonRequest, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2478,6 +2479,10 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
       neondata.VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
                            winner_tid='key1_vid1_t2').save()
+      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2']).save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
       yield request.send_callback(async=True)
 
@@ -2515,6 +2520,10 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.response['framenos'] = [34, 61]
         x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2']).save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
       yield request.send_callback(async=True)
 
@@ -2552,6 +2561,10 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.response['framenos'] = [34, 61]
         x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2']).save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
       yield request.send_callback(async=True)
 
@@ -2627,6 +2640,10 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.response['framenos'] = [34, 61]
         x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2']).save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
       NeonUserAccount('acct1', 'key1',
                       callback_states_ignored=[
                         neondata.CallbackState.PROCESSED_SENT]).save()
@@ -2646,6 +2663,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.response['framenos'] = [34, 61]
         x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      VideoMetadata('key1_vid1').save()
 
       self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, code=500)
 

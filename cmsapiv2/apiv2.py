@@ -804,21 +804,31 @@ class ShareableContentHandler(APIV2Handler):
         args = request.parse_args(True)
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
-            pl_account_id, pl_content_id = str(payload['content_id']).split('_', 1)
-            if (access_level_required & neondata.AccessLevels.READ and
-                pl_account_id == request.account_id):
 
-                if payload['content_type'] == 'VideoMetadata':
-                    pl_key = neondata.InternalVideoID.generate(
-                        pl_account_id,
-                        pl_content_id)
-                    video = yield neondata.VideoMetadata.get(pl_key, async=True)
-                    # Getting the video implicitly validates the account id.
-                    if video is None:
-                        raise NotAuthorizedError('Invalid token')
-                    # Keep the valid payload around for security checks.
-                    request.share_payload = payload
-                    raise tornado.gen.Return(True)
+            _type = payload['content_type']
+            _id = payload['content_id']
+
+            if access_level_required & neondata.AccessLevels.READ:
+
+                resource = None
+                if _type == neondata.VideoMetadata.__name__:
+                    resource = yield neondata.VideoMetadata.get(_id, async=True)
+                elif _type == neondata.Tag.__name__:
+                    resource = yield neondata.Tag.get(_id, async=True)
+                elif _type == neondata.Clip.__name__:
+                    resource = yield neondata.Clip.get(_id, async=True)
+
+                if resource is None:
+                    raise NotAuthorizedError('Invalid token')
+                if resource.get_account_id() != request.account_id:
+                    raise NotAuthorizedError('Invalid token')
+                if resource.share_token is None or \
+                        resource.share_token != args['share_token']:
+                    raise ForbiddenError()
+
+                # Keep the valid payload around for user-level security checks.
+                request.share_payload = payload
+                raise tornado.gen.Return(True)
 
         except (ValueError, KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.
@@ -829,6 +839,25 @@ class ShareableContentHandler(APIV2Handler):
                 account_required,
                 internal_only)
         raise tornado.gen.Return(rv)
+
+    @tornado.gen.coroutine
+    def _allow_request_by_share_or_raise(self, request_ids, request_type):
+        '''If share payload is set, check request ids against it.
+
+        Input- request_ids- list of string- requested resource ids
+        Input- request_type- string- name of class of resource
+        Outputs- None
+        Raises- Forbidden
+        '''
+
+        if self.share_payload is not None:
+            share_type = self.share_payload['content_type']
+            share_ids = self.share_payload['content_id'].split(',')
+            # Strictly check the share payload against expectations.
+            if set(share_ids) != set(request_ids):
+                raise ForbiddenError()
+            if request_type != share_type:
+                raise ForbiddenError
 
 class MandrillEmailSender(object): 
     @staticmethod
