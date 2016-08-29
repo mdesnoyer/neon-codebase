@@ -3553,27 +3553,26 @@ class TestVideoHandler(TestControllersBase):
                                                 method='GET')
         rjson = json.loads(response.body)
         self.assertEquals(len(rjson['videos'][0]['demographic_thumbnails']), 2)
-        
-        self.assertNotIn('bad_thumbnails',
+        self.assertIn('bad_thumbnails',
                          rjson['videos'][0]['demographic_thumbnails'][0])
-        self.assertNotIn('bad_thumbnails',
+        self.assertIn('bad_thumbnails',
                          rjson['videos'][0]['demographic_thumbnails'][1])
 
         # Each demographic response should include the non_job_thumb_ids list
-        demos = dict([((x['gender'], x['age']), x['thumbnails']) 
+        demos = dict([((x['gender'], x['age']), x['thumbnails'])
                       for x in rjson['videos'][0]['demographic_thumbnails']])
         self.assertItemsEqual([x['thumbnail_id'] for x in demos[(None, None)]],
                               ['testing_vtid_default', 'testing_vtid_rand',
                                'testing_vtid_one'])
-        self.assertItemsEqual([x['thumbnail_id'] for x in 
+        self.assertItemsEqual([x['thumbnail_id'] for x in
                                demos[('F', '20-29')]],
                               ['testing_vtid_default', 'testing_vtid_rand',
                                'testing_vtid_two'])
         # Make sure that the scores are different for the default
         # thumb for the different demographics
-        female_default = [x for x in demos[('F', '20-29')] 
+        female_default = [x for x in demos[('F', '20-29')]
                           if x['thumbnail_id'] == 'testing_vtid_default'][0]
-        general_default = [x for x in demos[(None, None)] 
+        general_default = [x for x in demos[(None, None)]
                           if x['thumbnail_id'] == 'testing_vtid_default'][0]
         self.assertNotEqual(female_default['neon_score'],
                             general_default['neon_score'])
@@ -3586,10 +3585,9 @@ class TestVideoHandler(TestControllersBase):
                                                 method='GET')
         rjson = json.loads(response.body)
         self.assertEquals(len(rjson['videos'][0]['demographic_thumbnails']), 2)
-        
-        thumbs = dict([((x['gender'], x['age']), x['thumbnails']) 
+        thumbs = dict([((x['gender'], x['age']), x['thumbnails'])
                        for x in rjson['videos'][0]['demographic_thumbnails']])
-        bad_thumbs = dict([((x['gender'], x['age']), x['bad_thumbnails']) 
+        bad_thumbs = dict([((x['gender'], x['age']), x['bad_thumbnails'])
                        for x in rjson['videos'][0]['demographic_thumbnails']])
         self.assertEquals(bad_thumbs[(None, None)], [])
         self.assertEquals(len(bad_thumbs[('F', '20-29')]), 1)
