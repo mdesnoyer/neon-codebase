@@ -9328,6 +9328,33 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(set(thumbs), set(thumbnail_ids))
 
 
+class TestTagSearchInternalHandler(TestVerifiedControllersBase):
+
+    @tornado.testing.gen_test
+    def test_search_with_default_limit(self):
+        pstr = 'cmsdb.neondata.Tag.search_for_objects_and_times'
+        search = patch(pstr)
+        wrapped = self._future_wrap_mock(search.start())
+        def side_effect(**kwargs):
+            return [], None, None
+        wrapped.side_effect = side_effect
+
+        # In particular we expect limit to be defaulted to 25.
+        url = self.get_url('/api/v2/tags/search/')
+        r = yield self.http_client.fetch(url)
+        self.assertEqual(r.code, 200)
+        wrapped.assert_called_with(
+            account_id=None,
+            since=0.0,
+            limit=25,
+            show_hidden=False,
+            query=None,
+            until=0.0,
+            tag_type=None)
+
+        search.stop()
+
+
 class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
     def setUp(self):
@@ -9342,8 +9369,13 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         pstr = 'cmsdb.neondata.Tag.search_for_objects_and_times'
         search = patch(pstr)
         wrapped = self._future_wrap_mock(search.start())
-        wrapped.side_effect = [([], None, None)]
-        yield self.http_client.fetch(self.url)
+
+        # Search expects a list and two times to be raised.
+        def side_effect(**kwargs):
+            return [], None, None
+        wrapped.side_effect = side_effect
+        r = yield self.http_client.fetch(self.url)
+        self.assertEqual(r.code, 200)
         # We must see a limit of 25 set.
         wrapped.assert_called_with(
             account_id=self.account_id,
@@ -9353,7 +9385,6 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
             query=None,
             until=0.0,
             tag_type=None)
-        search.stop()
 
     @tornado.testing.gen_test
     def test_search_no_item(self):

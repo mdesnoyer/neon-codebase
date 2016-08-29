@@ -195,7 +195,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def set_account_id(request):
         parsed_url = urlparse(request.uri)
         try:
-            request.account_id = parsed_url.path.split('/')[3]
+            path_part = parsed_url.path.split('/')[3]
+            # Ensure none of the non-account paths are picked up.
+            non_account_paths = ['batch', 'feature', 'tags', 'videos',
+                                 'email', 'authenticate', 'refresh_token',
+                                 'accounts', 'users', 'logout']
+            if path_part not in non_account_paths:
+                request.account_id = path_part
+            else:
+                request.account_id = None
         except IndexError:
             request.account_id = None
 
@@ -575,7 +583,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             pass
 
         self.parse_args()
-        self.args['account_id'] = str(self.account_id)
+        if self.account_id:
+            self.args['account_id'] = str(self.account_id)
 
     @tornado.gen.coroutine
     def on_finish(self):
@@ -1087,7 +1096,7 @@ class CustomVoluptuousTypes():
             if len(csl_list) > limit:
                 raise Invalid("list exceeds limit (%d)" % limit)
             else:
-                return True
+                return csl_list
         return f
 
     @staticmethod

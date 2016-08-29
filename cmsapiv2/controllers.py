@@ -1276,8 +1276,10 @@ class TagSearchExternalHandler(TagResponse, APIV2Handler):
         })(self.args)
         self.args['base_url'] = '/api/v2/%s/tags/search/' % self.account_id
         searcher = ContentSearcher(**self.args)
+
         _tags, count, prev_page, next_page = yield searcher.get()
-        fields = self.args.get('fields')
+        _fields = self.args.get('fields')
+        fields = _fields.split(',') if _fields else None
         tags = yield [self.db2api(t, fields) for t in _tags]
 
         self.success({
@@ -1354,7 +1356,7 @@ TagSearchInternalHandler : class responsible for searching tags
 class TagSearchInternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
-        Schema({
+        self.args = Schema({
             'account_id': All(Coerce(str), Length(min=1, max=256)),
             Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'query': str,
@@ -1367,16 +1369,15 @@ class TagSearchInternalHandler(APIV2Handler):
 
         self.args['base_url'] = '/api/v2/tags/search/'
         searcher = ContentSearcher(**self.args)
-        tags, count, prev_page, next_page = yield searcher.get()
 
+        _tags, count, prev_page, next_page = yield searcher.get()
         _fields = self.args.get('fields')
         fields = _fields.split(',') if _fields else None
-
-        items = yield self._items(tags, fields)
+        tags = yield [self.db2api(t, fields) for t in _tags]
 
         self.success({
-            'items': items,
-            'count': len(items),
+            'items': tags,
+            'count': count,
             'next_page': next_page,
             'prev_page': prev_page})
 
@@ -2815,15 +2816,16 @@ class VideoSearchInternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
+            Optional('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            Optional('query'): str,
+            'query': str,
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
             'until': All(Coerce(float))
         })
         args = self.parse_args()
-        schema(args)
+        args = schema(args)
+
         since = args.get('since', None)
         until = args.get('until', None)
         query = args.get('query', None)
@@ -2831,8 +2833,6 @@ class VideoSearchInternalHandler(APIV2Handler):
         account_id = args.get('account_id', None)
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
-        if fields:
-            fields = set(fields.split(','))
 
         vid_dict = yield VideoHelper.get_search_results(
                        account_id,
@@ -2962,7 +2962,7 @@ class VideoSearchExternalHandler(APIV2Handler):
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
-        schema(args)
+        args = schema(args)
         since = args.get('since')
         until = args.get('until')
         query = args.get('query')
@@ -2970,8 +2970,6 @@ class VideoSearchExternalHandler(APIV2Handler):
 
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
-        if fields:
-            fields = set(fields.split(','))
 
         base_url = '/api/v2/%s/videos/search' % account_id
         vid_dict = yield VideoHelper.get_search_results(
