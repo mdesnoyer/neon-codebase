@@ -9338,6 +9338,24 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
             '/api/v2/%s/tags/?tag_id={tag_id}' % self.account_id)
 
     @tornado.testing.gen_test
+    def test_search_with_default_limit(self):
+        pstr = 'cmsdb.neondata.Tag.search_for_objects_and_times'
+        search = patch(pstr)
+        wrapped = self._future_wrap_mock(search.start())
+        wrapped.side_effect = [([], None, None)]
+        yield self.http_client.fetch(self.url)
+        # We must see a limit of 25 set.
+        wrapped.assert_called_with(
+            account_id=self.account_id,
+            since=0.0,
+            limit=25,
+            show_hidden=False,
+            query=None,
+            until=0.0,
+            tag_type=None)
+        search.stop()
+
+    @tornado.testing.gen_test
     def test_search_no_item(self):
         response = yield self.http_client.fetch(self.url, headers=self.headers)
         self.assertEqual(ResponseCode.HTTP_OK, response.code)
