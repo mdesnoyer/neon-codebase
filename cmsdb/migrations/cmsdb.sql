@@ -560,6 +560,7 @@ CREATE INDEX neonapirequest_integration_id ON neonapirequest USING btree (((_dat
 CREATE INDEX neonapirequest_job_id ON neonapirequest USING btree (((_data ->> 'job_id'::text)));
 CREATE INDEX neonapirequest_video_id ON neonapirequest USING btree (((_data ->> 'video_id'::text)));
 CREATE INDEX neonapirequest_video_title ON neonapirequest USING btree (((_data ->> 'video_title'::text)));
+CREATE INDEX thumbnail_id_tag_id ON tag_thumbnail (thumbnail_id, tag_id);
 CREATE INDEX thumbnailmetadata_video_id ON thumbnailmetadata USING btree (((_data ->> 'video_id'::text)));
 CREATE INDEX videometadata_job_id ON videometadata USING btree (((_data ->> 'job_id'::text)));
 CREATE INDEX videometadata_integration_id ON videometadata USING btree (((_data ->> 'integration_id'::text)));
