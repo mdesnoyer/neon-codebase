@@ -664,12 +664,15 @@ class ImpalaTable(object):
 
             _log.info('Done merge event sequences')
 
-            # Write the data to s3 merge event sequence bucket
+            # Write the data for the current and previous day to s3 merge event sequence bucket 
             sql="""
             INSERT OVERWRITE TABLE avro_cc_cleaned_{dt}_copy
             select {columns} from avro_cc_cleaned_{dt}
+            where
+            serverTime > {epoch_previous_day}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
-                       dt=execution_date.strftime("%Y%m%d%H"))
+                       dt=execution_date.strftime("%Y%m%d%H"),
+                       epoch_previous_day=calendar.timegm((execution_date - timedelta(days=1)).timetuple()))
 
             _log.info('Moving data to s3: {sql}'.format(sql=sql))
 
