@@ -1162,7 +1162,7 @@ class StoredObject(object):
                   " FROM " + cls._baseclass_name().lower() +
                   " WHERE _data->>'key' IN (%s)" % query_in_part)
 
-        yield conn.execute(query, keys)
+        yield conn.execute(query, list(keys))
         for key in keys: 
             obj_map[key] = None 
 
