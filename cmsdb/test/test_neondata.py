@@ -115,6 +115,27 @@ class TestNeondataDataSpecific(NeonDbTestCase):
         self.maxDiff = 5000
         super(TestNeondataDataSpecific, self).setUp()
 
+    def test_get_many_with_pattern_for_injection(self):
+        injection = 'abcd\' ; SELECT 1;'
+        # If the method were not safe, this would raise a syntax error.
+        result = neondata.Tag.get_many_with_pattern(injection)
+        self.assertFalse(result)
+
+    def test_get_many_with_raw_keys_for_injection(self):
+        injection = ['abcd\' ; SELECT 1;']
+        result = neondata.Tag._get_many_with_raw_keys(injection)
+        self.assertFalse(result[0])
+
+    def test_get_for_injection(self):
+        injection = 'abcd\' ; SELECT 1;'
+        result = neondata.Tag.get(injection)
+        self.assertFalse(result)
+
+    def test_modify_many_for_injection(self):
+        injection = ['abcd\' ; SELECT 1;']
+        result = neondata.Tag.modify_many(injection, lambda _: _)
+        self.assertFalse(result[injection[0]])
+
     def test_default_bcplatform_settings(self):
         ''' override from base due to saving
             as abstractplatform now '''
@@ -3060,7 +3081,6 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
 
 
 class TestStoredObject(test_utils.neontest.AsyncTestCase):
-
 
     def test_to_json_utf8(self):
 
