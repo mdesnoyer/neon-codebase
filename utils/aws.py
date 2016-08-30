@@ -18,7 +18,7 @@ class InstanceMetadata(object):
     def _get_metadata(self):
         if self.meta is None:
             try:
-                self.meta = boto.utils.get_instance_metadata()
+                self.meta = boto.utils.get_instance_metadata(num_retries=2)
             except urllib2.URLError as e:
                 # We're not on AWS
                 self.meta = {}

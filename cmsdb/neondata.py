@@ -2555,6 +2555,23 @@ class TagThumbnail(MappingObject):
 class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
 
+    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
+                 video_id=None, hidden=False, share_token=None):
+        tag_id = tag_id or uuid.uuid4().hex
+
+        # Owner
+        self.account_id = account_id
+        # User's descriptive name
+        self.name = name
+        # System's definition of how this tag is used
+        self.tag_type = tag_type if tag_type in [
+            TagType.VIDEO, TagType.COLLECTION] else None
+        self.video_id = video_id
+        self.share_token = share_token
+        self.hidden = hidden
+
+        super(Tag, self).__init__(tag_id)
+
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2586,21 +2603,6 @@ class Tag(Searchable, StoredObject):
             'until',
             'tag_type']
 
-    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None,
-                 video_id=None):
-        tag_id = tag_id or uuid.uuid4().hex
-
-        # Owner
-        self.account_id = account_id
-        # User's descriptive name
-        self.name = name
-        # System's definition of how this tag is used
-        self.tag_type = tag_type if tag_type in [
-            TagType.VIDEO, TagType.COLLECTION] else None
-        self.video_id = video_id
-
-        super(Tag, self).__init__(tag_id)
-
     @staticmethod
     def _get_where_part(key, args={}):
         if key == 'query':
@@ -2609,6 +2611,25 @@ class Tag(Searchable, StoredObject):
     @staticmethod
     def _baseclass_name():
         return Tag.__name__
+
+    def get_account_id(self):
+        return self.account_id
+
+
+class Clip(StoredObject):
+    '''Stub for gif clips'''
+
+    def __init__(self, clip_id, account_id=None, share_token=None):
+        super(Clip, self).__init__(clip_id)
+        self.account_id = account_id
+        self.share_token = share_token
+
+    @staticmethod
+    def _baseclass_name():
+        return Tag.__name__
+
+    def get_account_id(self):
+        return self.account_id
 
 
 class AbstractHashGenerator(object):
@@ -5154,6 +5175,18 @@ class NeonApiRequest(NamespacedStoredObject):
                 response.experiment_state = vstatus.experiment_state
                 response.winner_thumbnail = vstatus.winner_tid
                 response.set_processing_state(self.state)
+                if response.processing_state in [
+                        ExternalRequestState.PROCESSED,
+                        ExternalRequestState.SERVING]:
+                    response.error = None
+                    vidmeta = yield VideoMetadata.get(internal_vid,
+                                                      async=True)
+                    thumbs = yield ThumbnailMetadata.get_many(
+                        vidmeta.thumbnail_ids, async=True)
+                    thumbs = [x for x in thumbs 
+                              if x and x.type == ThumbnailType.NEON]
+                    response.framenos = [x.frameno for x in thumbs]
+                    response.thumbnails = [x.key for x in thumbs]
                 response.job_id = self.job_id
                 response.video_id = self.video_id
 
@@ -5584,7 +5617,7 @@ class ClipMetadata(StoredObject):
                  refid=None, score=None,
                  serving_frac=None, ctr=None,
                  start_frame=None, end_frame=None,
-                 model_params=None):
+                 model_params=None, rendition_ids=None):
         super(ClipMetadata,self).__init__(clip_id)
        
         # video id this clip was generated from  
@@ -5599,6 +5632,10 @@ class ClipMetadata(StoredObject):
         self.start_frame = start_frame
         # what frame this clip ends at 
         self.end_frame = end_frame
+
+        # List of video rendition ids for versions of this clip that
+        # are available
+        self.rendition_ids = rendition_ids or []
         
         # The score of this clip. Higher is better
         self.score = score 
@@ -5615,15 +5652,43 @@ class ClipMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
-        # TODO 
+        # TODO, 
         raise tornado.gen.Return(None)
     
-class Rendition(StoredObject):
+class VideoRendition(StoredObject):
     '''
     Class schema for a rendition of a video 
     '''
-    def __init__(self):
-        pass
+    def __init__(self, rendition_id=None, url=None, width=None,
+                 height=None, duration=None, codec=None, container=None,
+                 encoding_rate=None):
+        rendition_id = rendition_id or uuid.uuid4().hex
+        super(VideoRendition, self).__init__(rendition_id)
+
+        # Url where the video is available
+        self.url = url
+
+        # Size of the rendition
+        self.width = width
+        self.height = height
+
+        # Duration of the video in seconds
+        self.duration = duration
+
+        # Codec used to encode the video
+        self.codec = codec
+
+        # Container type for the video (e.g. 'mp4', 'gif')
+        self.container = container
+
+        # Average encoding rate in kpbs
+        self.encoding_rate = encoding_rate
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return VideoRendition.__name__
     
 class ThumbnailMetadata(StoredObject):
     '''
@@ -6502,6 +6567,12 @@ class VideoMetadata(Searchable, StoredObject):
 
         yield VideoMetadata.delete(key, async=True)
 
+
+    def get_all_thumbnail_ids(self):
+
+        return list(set(self.thumbnail_ids + self.bad_thumbnail_ids +
+            list(itertools.chain.from_iterable(
+            [vj.thumbnail_ids + vj.bad_thumbnail_ids for vj in self.job_results]))))
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.

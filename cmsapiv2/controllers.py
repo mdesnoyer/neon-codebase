@@ -1048,8 +1048,10 @@ class ThumbnailAuth(object):
             tids = [tids]
 
         content_id = None
+        content_type = None
         if self.share_payload:
             content_id = self.share_payload['content_id']
+            content_type = self.share_payload['content_type']
 
         for tid in tids:
             try:
@@ -1059,7 +1061,7 @@ class ThumbnailAuth(object):
                 raise ForbiddenError()
             if tid_acct_id != self.account_id:
                 raise ForbiddenError()
-            if content_id and tid_int_vid != content_id:
+            if content_id and content_type == 'VideoMetadata' and tid_int_vid != content_id:
                 raise ForbiddenError()
 
     def _authorize_thumbs_or_raise(self, thumbs):
@@ -1069,13 +1071,13 @@ class ThumbnailAuth(object):
             thumbs = [thumbs]
 
         share_video_id = None
-        if self.share_payload:
+        if self.share_payload and self.share_payload['content_type'] == 'VideoMetadata':
             share_video_id = self.share_payload['content_id']
 
         for thumb in thumbs:
             if thumb.get_account_id() != self.account_id:
                 raise ForbiddenError()
-            if self.share_payload and thumb.video_id != share_video_id:
+            if share_video_id and thumb.video_id != share_video_id:
                 raise ForbiddenError()
 
 
@@ -1087,13 +1089,16 @@ class TagResponse(object):
 
     @staticmethod
     def _get_passthrough_fields():
-        return ['name', 'account_id', 'video_id', 'tag_type', 'created', 'updated']
+        return ['name', 'account_id', 'tag_type', 'created', 'updated']
 
     @staticmethod
     @tornado.gen.coroutine
     def _convert_special_field(obj, field):
         if field == 'tag_id':
             raise tornado.gen.Return(obj.get_id())
+        if field == 'video_id':
+            raise tornado.gen.Return(
+                neondata.InternalVideoID.to_external(obj.video_id) if obj.video_id else None)
         if field == 'thumbnail_ids':
             ids = yield neondata.TagThumbnail.get(tag_id=obj.get_id(), async=True)
 
@@ -1153,6 +1158,10 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
 
         # Ensure tags are valid and permitted.
         tag_ids = self.args['tag_id'].split(',')
+
+        # Check share permission.
+        self._allow_request_by_share_or_raise(tag_ids, neondata.Tag.__name__)
+
         account_id = self.args['account_id']
         _tags = yield neondata.Tag.get_many(tag_ids, async=True)
         tags = [t for t in _tags if t]
@@ -1170,11 +1179,13 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
             Required('tag_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'thumbnail_ids': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'name': All(Coerce(unicode), Length(min=1, max=256)),
-            'type': CustomVoluptuousTypes.TagType()
+            'type': CustomVoluptuousTypes.TagType(),
+            'hidden': Boolean()
         })(self.args)
 
         # Validate.
-        thumb_ids = self.args.get('thumbnail_ids', '').split(',')
+        _thumb_ids = self.args.get('thumbnail_ids')
+        thumb_ids = _thumb_ids.split(',') if _thumb_ids else []
         self._authorize_thumb_ids_or_raise(thumb_ids)
 
         # Update the tag itself.
@@ -1183,7 +1194,9 @@ class TagHandler(TagResponse, TagAuth, ThumbnailAuth, ShareableContentHandler):
                 raise ForbiddenError()
             if self.args.get('name'):
                 tag.name = self.args['name']
-            tag.tag_type = self.args.get('type', TagType.COLLECTION)
+            if self.args.get('tag_type'):
+                tag.tag_type = self.args['tag_type']
+            tag.hidden = Boolean()(self.args.get('hidden', tag.hidden));
         tag = yield neondata.Tag.modify(
             self.args['tag_id'],
             _update,
@@ -1892,7 +1905,6 @@ class VideoHelper(object):
                 'content_type': 'VideoMetadata',
                 'content_id': internal_video_id
             }
-            share_token = ShareJWTHelper.encode(share_payload)
 
             duration = args.get('duration', None)
             if duration:
@@ -1905,8 +1917,7 @@ class VideoHelper(object):
                 duration=duration,
                 custom_data=args.get('custom_data', None),
                 i_id=args.get('integration_id', '0'),
-                serving_enabled=False,
-                share_token=share_token)
+                serving_enabled=False)
 
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
@@ -2142,12 +2153,11 @@ class VideoHelper(object):
                         'gender': video_result.gender,
                         'age': video_result.age,
                         'thumbnails': cur_thumbs}
-                    if 'bad_thumbnails' in fields:
-                        cur_entry['bad_thumbnails'] = yield \
-                          VideoHelper.get_thumbnails_from_ids(
-                              video_result.bad_thumbnail_ids,
-                              age=video_result.age,
-                              gender=video_result.gender)
+                    cur_entry['bad_thumbnails'] = yield \
+                      VideoHelper.get_thumbnails_from_ids(
+                          video_result.bad_thumbnail_ids,
+                          age=video_result.age,
+                          gender=video_result.gender)
                     new_video['demographic_thumbnails'].append(cur_entry)
                 if (len(video.job_results) == 0 and
                     len(video.thumbnail_ids) > 0):
@@ -2346,6 +2356,11 @@ class VideoHandler(ShareableContentHandler):
         vid_dict = {}
         internal_video_ids = []
         video_ids = args['video_id'].split(',')
+
+        self._allow_request_by_share_or_raise(
+            video_ids,
+            neondata.VideoMetadata.__name__)
+
         for v_id in video_ids:
             internal_video_id = neondata.InternalVideoID.generate(
                 account_id_api_key,v_id)
@@ -2376,6 +2391,8 @@ class VideoHandler(ShareableContentHandler):
             'testing_enabled': Coerce(Boolean()),
             'title': Any(str, unicode, Length(min=1, max=1024)),
             'callback_email': CustomVoluptuousTypes.Email(),
+            'default_thumbnail_url': All(Any(Coerce(str), unicode),
+                Length(min=1, max=2048)),
             'hidden': Boolean()
         })
         args = self.parse_args()
@@ -2386,10 +2403,33 @@ class VideoHandler(ShareableContentHandler):
             account_id_api_key,
             args['video_id'])
 
+        @tornado.gen.coroutine
         def _update_video(v):
             v.testing_enabled =  Boolean()(
                 args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
+            dturl = args.get('default_thumbnail_url', None)
+            if dturl or len(self.request.files['upload']) > 0: 
+                min_rank = yield self._get_min_rank(internal_video_id)
+                new_thumb = neondata.ThumbnailMetadata(
+                        None,
+                        ttype=neondata.ThumbnailType.DEFAULT,
+                        rank=min_rank - 1)
+            if dturl: 
+                yield v.download_and_add_thumbnail(
+                    new_thumb, 
+                    image_url=dturl,
+                    save_objects=True) 
+            elif len(self.request.files['upload']) > 0: 
+                upload = self.request.files['upload'][0] 
+                image = PIL.Image.open(io.BytesIO(upload.body))
+                yield v.download_and_add_thumbnail(
+                    new_thumb, 
+                    image=image,
+                    save_objects=True) 
+
+        def _modify_tag(t): 
+            t.hidden = Boolean()(args.get('hidden', t.hidden))
 
         video = yield neondata.VideoMetadata.modify(
             internal_video_id,
@@ -2399,6 +2439,12 @@ class VideoHandler(ShareableContentHandler):
         if not video:
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
+
+        if video.tag_id: 
+            yield neondata.Tag.modify(
+                video.tag_id, 
+                _modify_tag, 
+                async=True) 
 
         # we may need to update the request object as well
         db2api_fields = {'testing_enabled', 'video_id'}
@@ -2422,6 +2468,20 @@ class VideoHandler(ShareableContentHandler):
             fields=list(db2api_fields))
         self.success(output)
 
+    @tornado.gen.coroutine
+    def _get_min_rank(self, internal_video_id): 
+        min_rank = False 
+        video = yield neondata.VideoMetadata.get(
+            internal_video_id, 
+            async=True) 
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            video.thumbnail_ids, 
+            async=True)
+        for t in thumbs:
+            if t.rank < min_rank: 
+                min_rank = t.rank 
+        raise tornado.gen.Return(min_rank)
+ 
     @classmethod
     def get_access_levels(self):
         return {
@@ -2823,35 +2883,83 @@ class VideoSearchInternalHandler(APIV2Handler):
                }
 
 '''*********************************************************************
-VideoShareHandler : class responsible for generating video share tokens
+ShareHandler : class responsible for generating video share tokens
    HTTP Verbs     : get
 *********************************************************************'''
-class VideoShareHandler(APIV2Handler):
+class ShareHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('video_id'): All(Coerce(str), Length(min=1, max=256))
+            Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
+            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256)),
+            Optional('clip_id'): All(Coerce(str), Length(min=1, max=256))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
 
-        # Validate video exists.
-        internal_video_id = neondata.InternalVideoID.generate(
-            account_id_api_key,
-            args['video_id'])
-        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
-        if not video:
-            raise NotFoundError('video does not exist with id: %s' %
-                (args['video_id']))
-        if not video.share_token:
-            payload = {
-                'content_type': 'VideoMetadata',
-                'content_id': video.get_id()}
-            video.share_token = ShareJWTHelper.encode(payload)
-            yield video.save(async=True)
-        self.success({'share_token':video.share_token})
+        resource = yield self._get_resource_or_raise(args)
+        token = yield self._get_share_token(resource)
+        self.success({'share_token': token})
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def _get_share_token(resource):
+        '''Get token after saving one if missing.'''
+
+        try:
+            if resource.share_token:
+                raise tornado.gen.Return(resource.share_token)
+        except AttributeError:
+            pass
+
+        resource.share_token = ShareJWTHelper.encode({
+            'content_type': type(resource).__name__,
+            'content_id': resource.get_id()
+        })
+        yield resource.save(async=True)
+
+        raise tornado.gen.Return(resource.share_token)
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def _get_resource_or_raise(args):
+        '''If one of tag_id, video_id, clip_id in args, get it; else raise.'''
+
+        _id = None
+        e = BadRequestError('Need exactly one of video_id, tag_id')
+
+        if 'video_id' in args:
+            _id = neondata.InternalVideoID.generate(
+                args['account_id'],
+                args['video_id'])
+            _class = neondata.VideoMetadata
+
+        if 'tag_id' in args:
+            if _id:
+                # Can't have more than one id in args.
+                raise e
+            _id = args['tag_id']
+            _class = neondata.Tag
+
+        if 'clip_id' in args:
+            if _id:
+                raise e
+            _id = args['clip_id']
+            _class = neondata.Clip
+
+        if not _id:
+            raise e
+
+        resource = yield _class.get(_id, async=True)
+        if resource and resource.get_account_id() != args['account_id']:
+            raise ForbiddenError()
+        if not resource:
+            raise NotFoundError('Resource not found for id')
+
+        raise tornado.gen.Return(resource)
+
 
     @classmethod
     def get_access_levels(self):
@@ -3489,7 +3597,8 @@ class BatchHandler(APIV2Handler):
         
         client = cmsapiv2.client.Client(
             access_token=access_token,  
-            refresh_token=refresh_token)
+            refresh_token=refresh_token,
+            skip_auth=True)
 
         requests = call_info.get('requests', None)
         output = { 'results' : [] } 
@@ -3952,6 +4061,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$', BillingAccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
         BillingSubscriptionHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/clips/share/?$', ShareHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/email/?$', EmailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$',
         AccountIntegrationHandler),
@@ -3974,13 +4084,14 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/tags/?$', TagHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/tags/search/?$', TagSearchExternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/tags/share/?$', ShareHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/clips/?$', ClipHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', VideoShareHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', ShareHandler),
     (r'/healthcheck/?$', HealthCheckHandler)
 ], gzip=True)
 
