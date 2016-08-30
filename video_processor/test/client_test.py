@@ -1380,12 +1380,14 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         expected_response = {
             'job_id' : 'job1',
             'video_id' : 'vid1',
-            'framenos' : [6, 69],
-            'thumbnails' : [n_thumbs[0].key, n_thumbs[1].key],
             'error' : None
             }
         self.assertDictContainsSubset(expected_response,
                                       api_request.response)
+        self.assertItemsEqual(api_request.response['framenos'],
+                              [69, 6])
+        self.assertItemsEqual(api_request.response['thumbnails'],
+                              [n_thumbs[1].key, n_thumbs[0].key])
 
         # Compare serving URL here. Ignore the i* part of serving_url; because subdomains
         # can be different from multiple get_serving_url calls
