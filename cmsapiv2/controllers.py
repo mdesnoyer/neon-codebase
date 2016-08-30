@@ -1266,7 +1266,7 @@ class TagSearchExternalHandler(TagResponse, APIV2Handler):
     def get(self, account_id):
         self.args = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
+            Optional('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'query': str,
             'fields': CustomVoluptuousTypes.CommaSeparatedList(),
             'since': Coerce(float),
@@ -1358,7 +1358,7 @@ class TagSearchInternalHandler(APIV2Handler):
     def get(self):
         self.args = Schema({
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
+            Optional('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'query': str,
             'since': All(Coerce(float)),
             'until': All(Coerce(float)),
@@ -1371,8 +1371,7 @@ class TagSearchInternalHandler(APIV2Handler):
         searcher = ContentSearcher(**self.args)
 
         _tags, count, prev_page, next_page = yield searcher.get()
-        _fields = self.args.get('fields')
-        fields = _fields.split(',') if _fields else None
+        fields = self.args.get('fields')
         tags = yield [self.db2api(t, fields) for t in _tags]
 
         self.success({
@@ -2327,7 +2326,7 @@ class VideoHandler(ShareableContentHandler):
 
         vid_dict = {}
         internal_video_ids = []
-        video_ids = args['video_id'].split(',')
+        video_ids = args['video_id']
 
         self._allow_request_by_share_or_raise(
             video_ids,
@@ -2509,10 +2508,10 @@ class VideoStatsHandler(APIV2Handler):
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
+        args = schema(args)
         internal_video_ids = []
         stats_dict = {}
-        video_ids = args['video_id'].split(',')
+        video_ids = args['video_id']
 
         for v_id in video_ids:
             internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,v_id)
@@ -2524,8 +2523,6 @@ class VideoStatsHandler(APIV2Handler):
             async=True)
 
         fields = args.get('fields', None)
-        if fields:
-            fields = set(fields.split(','))
         video_statuses = yield [self.db2api(x, fields) for x in video_statuses]
         stats_dict['statistics'] = video_statuses
         stats_dict['count'] = len(video_statuses)
@@ -2574,14 +2571,14 @@ class ThumbnailStatsHandler(APIV2Handler):
         """
 
         schema = Schema({
-          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          Optional('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          Optional('video_id'): Any(CustomVoluptuousTypes.CommaSeparatedList(20)),
-          Optional('fields'): Any(CustomVoluptuousTypes.CommaSeparatedList())
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            'thumbnail_id': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'video_id': Any(CustomVoluptuousTypes.CommaSeparatedList(20)),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
+        args = schema(args)
         thumbnail_ids = args.get('thumbnail_id', None)
         video_ids = args.get('video_id', None)
         if not video_ids and not thumbnail_ids:
@@ -2590,15 +2587,11 @@ class ThumbnailStatsHandler(APIV2Handler):
             raise Invalid('you can only have one of thumbnail_id or video_id')
 
         fields = args.get('fields', None)
-        if fields:
-            fields = set(fields.split(','))
 
         if thumbnail_ids:
-            thumbnail_ids = thumbnail_ids.split(',')
             objects = yield tornado.gen.Task(neondata.ThumbnailStatus.get_many,
                                              thumbnail_ids)
         elif video_ids:
-            video_ids = video_ids.split(',')
             internal_video_ids = []
             # first get all the internal_video_ids
             internal_video_ids = [neondata.InternalVideoID.generate(
@@ -2675,14 +2668,14 @@ class LiftStatsHandler(ThumbnailAuth, ShareableContentHandler):
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('base_id'): All(Coerce(str), Length(min=1, max=2048)),
             Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
-            Optional('gender'): In(model.predictor.VALID_GENDER),
-            Optional('age'): In(model.predictor.VALID_AGE_GROUP)})
+            'gender': In(model.predictor.VALID_GENDER),
+            'age': In(model.predictor.VALID_AGE_GROUP)})
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
+        args = schema(args)
 
         # Check that all the thumbs are keyed to the account.
-        query_tids = args['thumbnail_ids'].split(',')
+        query_tids = args['thumbnail_ids']
         self._authorize_thumb_ids_or_raise([args['base_id']] + query_tids)
 
         base_thumb = yield neondata.ThumbnailMetadata.get(
@@ -2862,9 +2855,9 @@ class ShareHandler(APIV2Handler):
     def get(self, account_id):
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('clip_id'): All(Coerce(str), Length(min=1, max=256))
+            'video_id': All(Coerce(str), Length(min=1, max=256)),
+            'tag_id': All(Coerce(str), Length(min=1, max=256)),
+            'clip_id': All(Coerce(str), Length(min=1, max=256))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -2949,7 +2942,7 @@ class VideoSearchExternalHandler(APIV2Handler):
     def get(self, account_id):
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
+            Optional('limit', default=25): All(Coerce(int), Range(min=1, max=100)),
             'query': Any(CustomVoluptuousTypes.Regex(), str),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
@@ -3700,12 +3693,9 @@ class FeatureHandler(APIV2Handler):
             raise Invalid('Exactly one of model_name or key is required')
 
         fields = args.get('fields', None)
-        if fields:
-            fields = set(fields.split(','))
         
         # if keys is set
         if keys: 
-            keys = set(keys.split(',')) 
             features = yield neondata.Feature.get_many(keys, async=True)
         else: 
             features = yield neondata.Feature.get_by_model_name(
@@ -3787,9 +3777,9 @@ class SocialImageHandler(ShareableContentHandler):
         '''
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('platform'): In(['twitter', '', None, 'facebook']),
-            Optional('video_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256))})
+            'platform': In(['twitter', '', None, 'facebook']),
+            'video_id': All(Coerce(str), Length(min=1, max=256)),
+            'tag_id': All(Coerce(str), Length(min=1, max=256))})
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)

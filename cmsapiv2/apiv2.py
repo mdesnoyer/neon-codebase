@@ -1092,7 +1092,7 @@ class CustomVoluptuousTypes():
     @staticmethod
     def CommaSeparatedList(limit=100):
         def f(v):
-            csl_list = v.split(',')
+            csl_list = list(set(v.split(',')))
             if len(csl_list) > limit:
                 raise Invalid("list exceeds limit (%d)" % limit)
             else:
