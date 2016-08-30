@@ -121,8 +121,7 @@ CREATE TABLE clipmetadata (
     _data jsonb,
     _type character varying(128) NOT NULL,
     created_time timestamp DEFAULT current_timestamp,
-    updated_time timestamp DEFAULT current_timestamp,
-    features bytea DEFAULT NULL
+    updated_time timestamp DEFAULT current_timestamp
 );
 
 ALTER TABLE clipmetadata OWNER to pgadmin;
@@ -364,6 +363,20 @@ CREATE TABLE videometadata (
 ALTER TABLE videometadata OWNER TO pgadmin;
 
 --
+-- Name: videorendition; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+--
+
+CREATE TABLE videorendition (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp,
+    updated_time timestamp DEFAULT current_timestamp
+);
+
+
+ALTER TABLE videorendition OWNER TO pgadmin;
+
+--
 -- Name: videostatus; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 
@@ -537,6 +550,7 @@ CREATE UNIQUE INDEX abstractplatform_key ON abstractplatform USING btree (((_dat
 CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX brightcoveplayer_key ON brightcoveplayer USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX cdnhostingmetadatalist_key ON cdnhostingmetadatalist USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX clipmetadata_key ON clipmetadata USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX feature_key ON feature USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX accountlimits_key ON accountlimits USING btree (((_data ->> 'key'::text)));
@@ -554,6 +568,7 @@ CREATE UNIQUE INDEX thumbnailstatus_key ON thumbnailstatus USING btree (((_data 
 CREATE UNIQUE INDEX trackeraccountidmapper_key ON trackeraccountidmapper USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX users_key ON users USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videometadata_key ON videometadata USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX videorendition_key ON videorendition USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videostatus_key ON videostatus USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX verification_key ON verification USING btree (((_data ->> 'key'::text)));
 
