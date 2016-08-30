@@ -974,13 +974,10 @@ class StoredObject(object):
         conn = yield db.get_connection()
 
         obj = None
-        query = "SELECT %s \
-                 FROM %s \
-                 WHERE _data->>'key' = '%s'" % (
-                     cls._get_gq_column_string(),
-                     cls._baseclass_name().lower(), 
-                     key)
-        cursor = yield conn.execute(query)
+        query = ( "SELECT " + cls._get_gq_column_string() +
+                  " FROM " + cls._baseclass_name().lower() +
+                  " WHERE _data->>'key' = %s")
+        cursor = yield conn.execute(query, [key])
         result = cursor.fetchone()
         if result:
             obj = cls._create(key, result)
@@ -1032,21 +1029,17 @@ class StoredObject(object):
         Outputs:
         A list of cls objects
         '''
-        retval = []
-        results = [] 
+        results = []
         db = PostgresDB()
         conn = yield db.get_connection()
-        query = "SELECT %s \
-                 FROM %s \
-                 WHERE _data->>'key' ~ '%s'" % (
-                     cls._get_gq_column_string(),
-                     cls._baseclass_name().lower(), 
-                     pattern)
+        query = ( "SELECT " + cls._get_gq_column_string() +
+                  " FROM " + cls._baseclass_name().lower() +
+                  " WHERE _data->>'key' ~ %s" )
 
-        cursor = yield conn.execute(query)
+        cursor = yield conn.execute(query, [pattern])
         for result in cursor:
             obj = cls._create(result['_data']['key'], result)
-            results.append(obj) 
+            results.append(obj)
         db.return_connection(conn)
         raise tornado.gen.Return(results)
 
@@ -1163,13 +1156,13 @@ class StoredObject(object):
         # do this manually 
         yield conn.execute("BEGIN")
  
-        query = "DECLARE get_many CURSOR FOR SELECT %s \
-                 FROM %s \
-                 WHERE _data->>'key' IN(%s)" % (
-                     cls._get_gq_column_string(),
-                     cls._baseclass_name().lower(), 
-                     ",".join("'{0}'".format(k) for k in keys))
-        yield conn.execute(query)
+        query_in_part = ','.join(['%s' for _ in range(len(keys))])
+        query = ( "DECLARE get_many CURSOR FOR SELECT " +
+                  cls._get_gq_column_string() +
+                  " FROM " + cls._baseclass_name().lower() +
+                  " WHERE _data->>'key' IN (%s)" % query_in_part)
+
+        yield conn.execute(query, list(keys))
         for key in keys: 
             obj_map[key] = None 
 
@@ -1280,14 +1273,13 @@ class StoredObject(object):
         for key in keys: 
             key_to_object[key] = None
  
-        query = "SELECT %s \
-                 FROM %s \
-                 WHERE _data->>'key' IN(%s)" % (
-                     create_class._get_gq_column_string(),  
-                     create_class._baseclass_name().lower(), 
-                     ",".join("'{0}'".format(k) for k in keys))
+        # Build a %s,%s,...,%s expression equal in length to keys.
+        query_in_part = ','.join(['%s' for _ in range(len(keys))])
+        query = ( "SELECT " + create_class._get_gq_column_string() +
+                  " FROM " + create_class._baseclass_name().lower() +
+                  " WHERE _data->>'key' IN (%s)" ) % query_in_part
 
-        cursor = yield conn.execute(query)
+        cursor = yield conn.execute(query, keys)
         items = cursor.fetchall()
         for item in items:
             current_key = item['_data']['key']
@@ -1570,6 +1562,7 @@ class StoredObject(object):
         '''
         db = PostgresDB()
         conn = yield db.get_connection()
+
         cursor = yield conn.execute(
             query, 
             wc_params, 
@@ -2702,12 +2695,11 @@ class NeonApiKey(NamespacedStoredObject):
         key = cls.format_key(a_id)
         db = PostgresDB()
         conn = yield db.get_connection()
-        
-        query = "SELECT _data \
-                 FROM %s \
-                 WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
 
-        cursor = yield conn.execute(query)
+        query = ( "SELECT _data  FROM " + cls.__name__.lower() +
+                  " WHERE _data->>'key' = %s" )
+
+        cursor = yield conn.execute(query, [key])
         result = cursor.fetchone()
         db.return_connection(conn)
         if result:  
