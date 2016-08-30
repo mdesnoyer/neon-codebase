@@ -36,7 +36,8 @@ define("account_id", default="bfxsu6vp8utmmb57hoqcu55j")
 define("working_dir", default="/mnt/neon/vids")
 define("lookback_count", default=36)
 #define("input", default='http://oracleuniversal2-lh.akamaihd.net/i/oracle_hd2@134506/master.m3u8')
-define("input", default='http://iphone-cnn.cdn.turner.com/cnn/iphone2/cnn_live/cnn_live_2_ipad.m3u8')
+#define("input", default='http://iphone-cnn.cdn.turner.com/cnn/iphone2/cnn_live/cnn_live_2_ipad.m3u8')
+define("input", default='http://oracleuniversal2-lh.akamaihd.net/i/oracle_hd2@134506/master.m3u8')
 define("title", default='oracle_20160813')
 
 from utils import statemon
@@ -49,7 +50,6 @@ def create_neon_api_request(account_id, video_id, video_title, video_url):
     '''
     Send video processing request to Neon
     '''
-    import pdb; pdb.set_trace()
     custom_data = { "feed" : options.input } 
     body = {
         'external_video_ref': video_id,
