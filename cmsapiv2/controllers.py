@@ -3991,9 +3991,10 @@ class ClipHandler(APIV2Handler):
 
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        args = schema(args)
-        clip_ids = args['clip_ids']
+        clip_ids = args['clip_ids'].split(',')
         fields = args.get('fields')
+        if fields:
+            fields = fields.split(',')
 
         _clips = yield neondata.ClipMetadata.get_many(
             clip_ids,

@@ -3688,6 +3688,7 @@ class CDNHostingMetadataList(DefaultedStoredObject):
         '''
         return CDNHostingMetadataList.__name__
 
+
 class CDNHostingMetadata(UnsaveableStoredObject):
     '''
     Specify how to host the the images with one CDN platform.
@@ -3802,10 +3803,21 @@ class CDNHostingMetadata(UnsaveableStoredObject):
         prefix_split[2] = path_split[1]
       scheme_added = urlparse.urlunparse(prefix_split)
       return scheme_added.strip('/')
-      
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def get_by_video(video):
+        cdn_key = CDNHostingMetadataList.create_key(
+            video.get_account_id(),
+            video.integration_id)
+        cdn_metadata = yield CDNHostingMetadataList.get(cdn_key, async=True)
+        # Default to hosting on the Neon CDN if we don't know about it
+        raise tornado.gen.Return(cdn_metadata or [NeonCDNHostingMetadata()])
+
+
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
-    If the images are to be uploaded to S3 bucket use this formatter  
+    If the images are to be uploaded to S3 bucket use this formatter
 
     '''
     def __init__(self, key=None, access_key=None, secret_key=None, 
@@ -5652,23 +5664,35 @@ class ClipMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
-        ## TODO,
+
+        primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
+            PrimaryNeonHostingMetadata())
+        s3_url_list = yield primary_hoster.upload_video(
+            video,
+            self.key,
+            async=True)
+        s3_url = None
+        if len(s3_url_list) == 1:
+            s3_url = s3_url_list[0][0]
+            self.urls.insert(0, s3_url)
+
+        # Host the image on the CDN
+        if video_info is None:
+            video_info = yield VideoMetadata.get(self.video_id, async=True)
+        if cdn_metadata is None:
+            cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
+
+        writer = imageio.get_writer(out_fn, 'FFMPEG', fps=30.0)
+        try:
+            for frame in pycvutils.iterate_video(clip, clip.start, clip.end):
+                writer.append_data(frame[:,:,::-1])
+        finally:
+            writer.close()
+
+        hosters = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
+        yield [h.upload_video(clip, self.key, s3_url, async=True) for h in hosters]
+
         raise tornado.gen.Return(None)
-        #
-        #clip_i = 0
-        #for clip in clips:
-        #out_splits = options.output.rpartition('.')
-        #out_fn = '%s_%i.%s' % (out_splits[0], clip_i, out_splits[2])
-        #_log.info('Output clip %i with score %f to %s' %
-        #(clip_i, clip.score, out_fn))
-        #clip_i += 1
-        #
-        #writer = imageio.get_writer(out_fn, 'FFMPEG', fps=30.0)
-        #try:
-        #for frame in pycvutils.iterate_video(mov, clip.start, clip.end):
-        #writer.append_data(frame[:,:,::-1])
-        #finally:
-        #writer.close()
 
 class VideoRendition(StoredObject):
     '''
@@ -5873,19 +5897,10 @@ class ThumbnailMetadata(StoredObject):
             self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
+        if video_info is None:
+            video_info = yield VideoMetadata.get(self.video_id, async=True)
         if cdn_metadata is None:
-            # Lookup the cdn metadata
-            if video_info is None:
-                video_info = yield tornado.gen.Task(VideoMetadata.get,
-                                                    self.video_id)
-
-            cdn_key = CDNHostingMetadataList.create_key(
-                video_info.get_account_id(), video_info.integration_id)
-            cdn_metadata = yield tornado.gen.Task(CDNHostingMetadataList.get,
-                                                  cdn_key)
-            if cdn_metadata is None:
-                # Default to hosting on the Neon CDN if we don't know about it
-                cdn_metadata = [NeonCDNHostingMetadata()]
+            cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
 
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
         yield [x.upload(image, self.key, s3_url, async=True,

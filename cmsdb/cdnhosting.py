@@ -222,6 +222,11 @@ class CDNHosting(object):
         # return the CDN URL 
         raise tornado.gen.Return(new_serving_thumbs)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def upload_video(self, video, key, url):
+        pass
+
     @tornado.gen.coroutine
     def _upload_and_check_image(self, image, tid, url, overwrite):
         '''Returns a tuple of (cdn_url, width, height).'''
