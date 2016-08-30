@@ -101,6 +101,36 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
 
     return grab_sucess, cur_frame
 
+def iterate_video(video, start=0, end=None):
+    '''Returns an iterator of the frames in a video.
+
+    Inputs:
+    video - An opencv VideoCapture object
+    start - The first frame number to grab
+    end - The frame number of the end of the sequnce.
+          This frame is not extracted (None means go to the end)
+    '''
+    num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+    end = min(end, num_frames)
+    for frameno in range(start, end):
+        seek_sucess, cur_frame = seek_video(
+            video,
+            frameno,
+            do_log=False)
+        if not seek_sucess:
+            if cur_frame is None:
+                raise model.errors.VideoReadError(
+                    "Could not read the video")
+            # end of the video
+            break
+
+        # Read the frame
+        read_sucess, image = video.read()
+        if not read_sucess:
+            break
+
+        yield image
+
 def _ensure_CV(image):
     '''
     Ensures that the image is an Numpy array

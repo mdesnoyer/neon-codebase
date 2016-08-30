@@ -3377,11 +3377,16 @@ class ProcessingStrategy(DefaultedStoredObject):
     more elaborate documentation.
     '''
     def __init__(self, account_id, processing_time_ratio=2.0,
+                 clip_processing_time_ratio=1.2,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
                  filter_text=True, text_filter_params=None, 
-                 filter_text_thresh=0.04, m_thumbs=6):
+                 filter_text_thresh=0.04, m_thumbs=6,
+                 clip_cross_scene_boundary=True,
+                 min_scene_piece=15, scene_threshold=30.0,
+                 custom_predictor_weight=0.5,
+                 custom_predictor=None):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -3390,6 +3395,7 @@ class ProcessingStrategy(DefaultedStoredObject):
         # max_processing_time = (length of video in seconds * 
         #                        processing_time_ratio)
         self.processing_time_ratio = processing_time_ratio
+        self.clip_processing_time_ratio = clip_processing_time_ratio
 
         # (this should rarely need to be changed)
         # Local search width is the size of the local search regions. If the
@@ -3512,6 +3518,26 @@ class ProcessingStrategy(DefaultedStoredObject):
         # the entire image. If the ratio is greater than this, and
         # filter_text is true, the frame will be filtered.
         self.filter_text_thresh = filter_text_thresh
+
+        # Can a clip cross a scene boundary?
+        self.clip_cross_scene_boundary = clip_cross_scene_boundary
+
+        # Minimum number of frames from a scene to grab when making clips
+        self.min_scene_piece = min_scene_piece
+
+        # Threshold for scene detection
+        self.scene_threshold = scene_threshold
+
+        # Name of the custom predictor. This must be a file in the
+        # model_data directory. It must be an object that has a
+        # predict() function, which, if given a valence feature
+        # vector, predicts some kind of score. In other words, like a
+        # scikit-learn object.
+        self.custom_predictor = custom_predictor
+
+        # The weight to assign to a custom predictor relative to the
+        # other features
+        self.custom_predictor_weight = custom_predictor_weight
 
     @classmethod
     def _baseclass_name(cls):
@@ -5624,8 +5650,8 @@ class ClipMetadata(StoredObject):
 
     Keyed by clip_id
     '''
-    def __init__(self, clip_id, video_id=None, urls=None,
-                 model_version=None, enabled=True,
+    def __init__(self, clip_id, video_id=None, thumbnail_id=None, urls=None,
+                 ttype=None, rank=0, model_version=None, enabled=True,
                  refid=None, score=None,
                  serving_frac=None, ctr=None,
                  start_frame=None, end_frame=None,
@@ -5636,6 +5662,12 @@ class ClipMetadata(StoredObject):
         self.video_id = video_id
         # url for this clip
         self.urls = urls or []
+        # The thumbnail that can be used to represent this clip
+        self.thumbnail_id = thumbnail_id
+        # the type of this thumbnail. Uses ThumbnailType
+        self.type = ttype
+        # where this clip ranks amongst the other clips of this type
+        self.rank = rank or 0
         # is this clip enabled for mastermind A/B testing
         self.enabled = enabled
         # what version of the model generated this clip
@@ -5649,11 +5681,10 @@ class ClipMetadata(StoredObject):
         # are available
         self.rendition_ids = rendition_ids or []
 
-        # The score of this clip. Higher is better
+        # The score of this clip. Higher is better. Note that this
+        # will be a score combined of a raw valence score plus some
+        # other stuff (like motion analysis)
         self.score = score
-
-        # Dictionary of parameters used to generate this score
-        self.model_params = model_params or {}
 
     @classmethod
     def _baseclass_name(cls):
