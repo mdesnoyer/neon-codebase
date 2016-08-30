@@ -75,6 +75,7 @@ statemon.define('invalid_jobs', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('modify_request_error', int)
+statemon.define('tag_write_error', int)
 statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
@@ -181,26 +182,13 @@ class VideoProcessor(object):
         vsuffix = os.path.splitext(parsed.path)[1]
         self.tempfile = tempfile.NamedTemporaryFile(
             suffix=vsuffix, delete=True, dir=options.video_temp_dir)
-        self.headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
-            (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
-            Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
-
-        self.base_filename = self.job_params['api_key'] + "/" + \
-                self.job_params['job_id']
-
-        self.n_thumbs = int(self.job_params.get('topn', None) or
-                            self.job_params.get('api_param', None) or 6)
-        self.n_thumbs = max(self.n_thumbs, 1)
-        self.m_thumbs = int(self.job_params.get('botm', None) or 6)
-        self.m_thumbs = max(self.m_thumbs, 1)
 
         # The default thumb url extracted from the video url
         self.extracted_default_thumbnail = None
 
         self.cv_semaphore = cv_semaphore
 
-        integration_id = self.job_params['integration_id'] \
-          if self.job_params.has_key('integration_id') else '0'
+        integration_id = self.job_params.get('integration_id', '0')
         self.video_metadata = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(
                 self.job_params['api_key'],
@@ -213,12 +201,6 @@ class VideoProcessor(object):
         #Video vars
         self.model = model
         self.model_version = model_version
-        self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
-        self.bad_thumbnails = []
-        self.clips = [] # List of (ClipMetadata, mp4 of clip) 
-
-        self.thumb_model_version = None
-        self.clip_model_version = None
 
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
@@ -258,15 +240,10 @@ class VideoProcessor(object):
                 statemon.state.decrement('workers_downloading')
 
             #Process the video
-            n_thumbs = max(self.n_thumbs, 6)
-            m_thumbs = max(self.m_thumbs, 6)
-
             with self.cv_semaphore:
                 statemon.state.increment('workers_cv_processing')
                 try:
-                    yield self.process_video(self.tempfile.name,
-                                             n_thumbs=n_thumbs,
-                                             m_thumbs=m_thumbs) 
+                    yield self.process_video(self.tempfile.name) 
                 finally:
                     statemon.state.decrement('workers_cv_processing')
 
@@ -543,7 +520,16 @@ class VideoProcessor(object):
             raise VideoDownloadError(msg)
 
     @tornado.gen.coroutine
-    def process_video(self, video_file, n_thumbs=1, m_thumbs=0):
+    def _process_video_impl(self, mov):
+        ''' Abstract function that analyzes the video.
+
+        Input:
+        mov - The OpenCV VideoCapture object for the video
+        '''
+        raise NotImplementedError()
+
+    @tornado.gen.coroutine
+    def process_video(self, video_file):
         ''' process all the frames from the partial video downloaded '''
         # The video might have finished by somebody else so double
         # check that we still want to process it.
@@ -627,25 +613,6 @@ class VideoProcessor(object):
             statemon.state.increment('video_duration_60m')
 
         yield self.update_video_metadata_video_info()
-
-        result_type = api_request.result_type
-        if result_type is None: 
-            result_type = neondata.ResultType.THUMBNAILS 
-        
-        if result_type == neondata.ResultType.CLIPS: 
-            n_clips = api_request.n_clips or 1 
-
-            #results = self.model.choose_clips( 
-            #    mov, 
-            #    length=api_request.clip_length, 
-            #    n_clips=n_clips
-            #)
-            # create clips  
-            for r in results: 
-               cmeta = neondata.ClipMetadata( 
-                   )
-            self.clip_model_version = r.model_version 
-            self.clips.append((meta, r.mp4))
  
         # Fetch the ProcessingStrategy
         account_id = self.job_params['api_key']
@@ -659,157 +626,22 @@ class VideoProcessor(object):
             raise DBError("Could not fetch processing strategy")
         self.model.update_processing_strategy(processing_strategy)
 
-        if result_type == neondata.ResultType.CLIPS: 
-            n_clips = api_request.n_clips or 1 
-
-            #results = self.model.choose_clips( 
-            #    mov, 
-            #    length=api_request.clip_length, 
-            #    n_clips=n_clips
-            #)
-            # create clips 
-            # TODO, work with model 
-            results = []  
-            for r in results: 
-               cmeta = neondata.ClipMetadata(
-                   None, 
-                   video_id=self.video_metadata.key,
-                   model_version=r.model_version, 
-                   start_frame=r.frameno, 
-                   end_frame=r.frameno,
-                   features=r.features   
-               )
-            self.clip_model_version = r.model_version 
-            self.clips.append((meta, r.mp4))
-        else: 
-            try:
-                top_results, bottom_results = \
-                  self.model.choose_thumbnails(
-                      mov,
-                      n=n_thumbs,
-                      m=m_thumbs,
-                      video_name=self.video_url)
-                top_results = sorted(top_results, key=lambda x: x.score, reverse=True)
-                bottom_results = sorted(bottom_results, key=lambda x: x.score)
-            except model.errors.VideoReadError:
+        try:
+            yield self._process_video_impl(mov)
+        except model.errors.VideoReadError:
                 msg = "Error using OpenCV to read video. %s" % self.video_url
                 _log.error(msg)
                 statemon.state.increment('video_read_error')
                 raise BadVideoError(msg)
-            except model.errors.PredictionError as e:
+        except model.errors.PredictionError as e:
                 raise PredictionError(e.message)
-    
-            rank=0
-            for result in top_results:
-                meta = neondata.ThumbnailMetadata(
-                    None,
-                    internal_vid=self.video_metadata.key,
-                    ttype=neondata.ThumbnailType.NEON,
-                    model_score=result.score,
-                    model_version=result.model_version,
-                    features=result.features,
-                    frameno=result.frameno,
-                    rank=rank,
-                    filtered=result.filtered_reason)
-                self.thumb_model_version = result.model_version
-                self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
-                rank += 1
-    
-            for result in bottom_results:
-                meta = neondata.ThumbnailMetadata(
-                    None,
-                    internal_vid=self.video_metadata.key,
-                    ttype=neondata.ThumbnailType.BAD_NEON,
-                    model_score=result.score,
-                    model_version=result.model_version,
-                    features=result.features,
-                    frameno=result.frameno,
-                    filtered=result.filtered_reason)
-                self.bad_thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
-    
-            # Get the baseline frames of the video
-            yield self._get_center_frame(video_file)
-            yield self._get_random_frame(video_file)
-
+        
         statemon.state.increment('processed_video')
         _log.info('Sucessfully finished searching video %s' % self.video_url)
 
     @tornado.gen.coroutine
-    def _get_center_frame(self, video_file, nframes=None):
-        '''approximation of brightcove logic 
-         #Note: Its unclear the exact nature of brighcove thumbnailing,
-         the images are close but this is not the exact frame
-        '''
-        
-        try:
-            mov = cv2.VideoCapture(video_file)
-            if nframes is None:
-                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
-
-            cv_image = self._get_specific_frame(mov, int(nframes / 2))
-            meta = neondata.ThumbnailMetadata(
-                None,
-                internal_vid=self.video_metadata.key,
-                ttype=neondata.ThumbnailType.CENTERFRAME,
-                frameno=int(nframes / 2),
-                rank=0)
-            self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
-        except Exception, e:
-            _log.error("Unexpected error extracting center frame from %s:"
-                       " %s" % (self.video_url, e))
-            statemon.state.increment('centerframe_extraction_error')
-            raise
-
-    @tornado.gen.coroutine
-    def _get_random_frame(self, video_file, nframes=None):
-        '''Gets a random frame from the video.
-        '''
-        try:
-            mov = cv2.VideoCapture(video_file)
-            if nframes is None:
-                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
-
-            frameno = random.randint(0, nframes-1)
-
-            cv_image = self._get_specific_frame(mov, frameno)
-            meta = neondata.ThumbnailMetadata(
-                None,
-                internal_vid=self.video_metadata.key,
-                ttype=neondata.ThumbnailType.RANDOM,
-                frameno=frameno,
-                rank=0)
-            self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
-        except Exception, e:
-            _log.error("Unexpected error extracting random frame from %s:"
-                           " %s" % (self.video_url, e))
-            statemon.state.increment('randomframe_extraction_error')
-            raise
-
-    def _get_specific_frame(self, mov, frameno):
-        ''' Grab a specific frame from the video.
-
-        mov - The cv2 VideoCapture object
-        frameno - The frame number to read
-        '''
-        _log.debug('Extracting frame %i from video %s' %
-                   (frameno, self.video_url))
-        try:            
-            seek_sucess, image = pycvutils.seek_video(mov, frameno)
-            if seek_sucess:
-                #Now grab the frame
-                read_sucess, image = mov.read()
-                if read_sucess:
-                    return image      
-        except Exception, e:
-            _log.exception("Unexpected error extracting frame %i from %s: %s" 
-                           % (frameno, self.video_url, e))
-            statemon.state.increment('extract_frame_error')
-            raise
-
-        _log.error('Error reading frame %i of video %s'
-                    % (frameno, self.video_url))
-        statemon.state.increment('extract_frame_error')
-        raise BadVideoError('Error reading frame %i of video' % frameno)
+    def _finalize_response_impl(self, api_request, cdn_metadata):
+        raise NotImplementedError()
 
     @tornado.gen.coroutine
     def finalize_response(self):
@@ -868,241 +700,7 @@ class VideoProcessor(object):
                         % (api_key, self.video_metadata.integration_id), 10)
             cdn_metadata = [neondata.NeonCDNHostingMetadata()]
 
-        # Get any known thumbs for the video
-        known_thumbs = []
-        known_video = yield neondata.VideoMetadata.get(self.video_metadata.key,
-                                                       async=True)
-        if known_video:
-            known_tids = reduce(
-                lambda x,y: x | y,
-                [set(x.thumbnail_ids) for x in known_video.job_results],
-                set())
-            known_tids |= set(known_video.thumbnail_ids + known_video.bad_thumbnail_ids)
-
-            known_thumbs = yield neondata.ThumbnailMetadata.get_many(
-                known_tids, async=True)
-
-        # Attach the thumbnails to the video. This will upload the
-        # thumbnails to the appropriate CDNs.
-        video_result = neondata.VideoJobThumbnailList(
-            age=self.job_params.get('age'),
-            gender=self.job_params.get('gender'),
-            model_version=self.model_version)
-        if len(filter(lambda x: x[0].type == neondata.ThumbnailType.NEON,
-                      self.thumbnails)) < 1:
-            # TODO (Sunil): Video to be marked as failed or int err ? 
-            statemon.state.increment('no_thumbs')
-            _log.warn("No thumbnails extracted for video %s url %s"\
-                    % (self.video_metadata.key, self.video_metadata.url))
-
-        '''
-        TODO  
-        if self.clips
-            for clip, mp4 in self.clips: 
-                yield clip.add_clip_data(mp4, self.video_metadata, 
-                    cdn_metadata, 
-                    async=True) 
-                yield clip.score_clip(self.model.predictor, 
-                    clip=mp4) 
-                video_result.clip_ids.append(clip.key) 
-        elif self.thumbnails: 
-        ''' 
-        for thumb_meta, image in self.thumbnails:
-            # If we have a thumbnail of this type already and it's
-            # scored with the same model, we do not need to keep the
-            # new one around
-            same_thumbs = [x for x in known_thumbs if 
-                           x.type == thumb_meta.type and 
-                           x.model_version == self.thumb_model_version]
-            if (thumb_meta.type != neondata.ThumbnailType.NEON and 
-                len(same_thumbs) > 0):
-                same_thumbs = sorted(same_thumbs, key=lambda x: x.rank)
-                video_result.thumbnail_ids.append(same_thumbs[0].key)
-            else:
-                # Fill out the data on this thumb and add it to the results
-                yield thumb_meta.add_image_data(image, self.video_metadata,
-                                                cdn_metadata,
-                                                async=True)
-                yield thumb_meta.score_image(self.model.predictor,
-                                             image=PILImageUtils.to_cv(image))
-                video_result.thumbnail_ids.append(thumb_meta.key)
-
-        for thumb_meta, image in self.bad_thumbnails:
-            yield thumb_meta.add_image_data(image, self.video_metadata,
-                                            cdn_metadata,
-                                            async=True)
-            try:
-                yield thumb_meta.score_image(self.model.predictor,
-                                             image=PILImageUtils.to_cv(image))
-            except model.errors.PredictionError as e:
-                _log.warn('Error scoring image: %s' % e)
-                # It's ok if it's not scored, so continue
-            video_result.bad_thumbnail_ids.append(thumb_meta.key)
-
-        # Save the thumbnail and video data into the database
-        # TODO(mdesnoyer): do this as a single transaction
-        def _merge_thumbnails(t_objs):
-            for new_thumb, _ in self.thumbnails + self.bad_thumbnails:
-                old_thumb = t_objs[new_thumb.key]
-                # There was already an entry for this thumb, so update
-                urlset = set(new_thumb.urls + old_thumb.urls)
-                old_thumb.urls = [x for x in urlset]
-                old_thumb.video_id = new_thumb.video_id
-                old_thumb.width = new_thumb.width
-                old_thumb.height = new_thumb.height
-                old_thumb.type = new_thumb.type
-                old_thumb.model_score = new_thumb.model_score
-                old_thumb.model_version = new_thumb.model_version
-                old_thumb.features = new_thumb.features
-                old_thumb.rank = new_thumb.rank
-                old_thumb.phash = new_thumb.phash
-                old_thumb.frameno = new_thumb.frameno
-                old_thumb.filtered = new_thumb.filtered
-                old_thumb.features = new_thumb.features
-        try:
-            new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
-                [x[0].key for x in self.thumbnails + self.bad_thumbnails],
-                _merge_thumbnails,
-                create_missing=True,\
-                async=True)
-            if len(self.thumbnails) + len(self.bad_thumbnails) > 0 and len(new_thumb_dict) == 0:
-                raise DBError("Couldn't change some thumbs")
-        except Exception, e:
-            _log.error("Error writing thumbnail data to database: %s" % e)
-            statemon.state.increment('save_tmdata_error')
-            raise DBError("Error writing thumbnail data to database")
-
-        @tornado.gen.coroutine
-        def _merge_video_data(video_obj):
-            # Don't keep the random centerframe or neon thumbnails
-            thumbs = yield neondata.ThumbnailMetadata.get_many(
-                video_obj.thumbnail_ids, async=True)
-            keep_thumbs = [x.key for x in thumbs if x.type not in [
-                neondata.ThumbnailType.NEON,
-                neondata.ThumbnailType.CENTERFRAME,
-                neondata.ThumbnailType.RANDOM]]
-            tidset = set(keep_thumbs +
-                         video_result.thumbnail_ids)
-            video_obj.thumbnail_ids = [x for x in tidset]
-
-            # If there isn't a job result from before, but something
-            # is there, then create the job result object from the
-            # previous run
-            if self.reprocess:
-                prev_thumbs = [x.key for x in thumbs if x.type in [
-                    neondata.ThumbnailType.NEON,
-                    neondata.ThumbnailType.CENTERFRAME,
-                    neondata.ThumbnailType.RANDOM]]
-                if len(prev_thumbs) > 0 and len(video_obj.job_results) == 0:
-                    video_obj.job_results.append(
-                        neondata.VideoJobThumbnailList(
-                            thumbnail_ids = prev_thumbs,
-                            bad_thumbnail_ids = video_obj.bad_thumbnail_ids,
-                            model_version=video_obj.model_version))
-                    video_obj.non_job_thumb_ids = keep_thumbs
-            
-            # Update the job results
-            found_result = False
-            for result in video_obj.job_results:
-                if (result.age == video_result.age and 
-                    result.gender == video_result.gender):
-                    # Replace the last run with these parameters
-                    result.thumbnail_ids = video_result.thumbnail_ids
-                    result.bad_thumbnail_ids = video_result.bad_thumbnail_ids
-                    result.model_version = video_result.model_version
-                    found_result = True
-            if not found_result:
-                video_obj.job_results.append(video_result)
-            
-            video_obj.url = self.video_metadata.url
-            video_obj.duration = self.video_metadata.duration
-            video_obj.video_valence = self.video_metadata.video_valence
-            video_obj.model_version = self.video_metadata.model_version
-            video_obj.job_id = self.video_metadata.job_id
-            video_obj.integration_id = self.video_metadata.integration_id
-            video_obj.frame_size = self.video_metadata.frame_size
-            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            video_obj.publish_date = (video_obj.publish_date or 
-                                      self.video_metadata.publish_date)
-        try:
-            new_video_metadata = yield neondata.VideoMetadata.modify(
-                self.video_metadata.key,
-                _merge_video_data,
-                create_missing=True,
-                async=True)
-            if not new_video_metadata:
-                raise DBError('This should not ever happen')
-        except Exception, e:
-            _log.error("Error writing video data to database: %s" % e)
-            statemon.state.increment('save_vmdata_error')
-            raise DBError("Error writing video data to database")
-        self.video_metadata = new_video_metadata
-        is_user_default_thumb = api_request.default_thumbnail is not None
-        try:
-            # A second attempt to save the default thumb
-            api_request.default_thumbnail = (api_request.default_thumbnail or 
-                                             self.extracted_default_thumbnail)
-            thumb = yield api_request.save_default_thumbnail(cdn_metadata,
-                                                             async=True)
-
-            # Score the default thumb
-            if thumb is not None:
-                # TODO(mdesnoyer): This will potentially download the
-                # image twice. It would be better to avoid that, but
-                # the code flow makes it annoying. Given this is a
-                # long process, not a big deal, but we might want to
-                # fix that
-                yield thumb.score_image(self.model.predictor,
-                                        save_object=True)
-
-        except (neondata.ThumbDownloadError,
-                model.errors.PredictionError) as e:
-            # If we extracted the default thumb from the url, then
-            # don't error out if we cannot get thumb
-            if is_user_default_thumb:
-                _log.warn("Default thumbnail download failed for vid %s" %
-                          video_id)
-                statemon.state.increment('default_thumb_error')
-                err_msg = "Failed to download default thumbnail: %s" % e
-                raise DefaultThumbError(err_msg)
-
-        # Enable the video to be served if we have any thumbnails available
-        def _set_serving_enabled(video_obj):
-            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            video_obj.tag_id = new_video_metadata.tag_id
-
-        new_video_metadata = yield neondata.VideoMetadata.modify(
-            self.video_metadata.key,
-            _set_serving_enabled,
-            async=True)
-
-        # Set the association of the video tag and each thumbnail.
-        if not new_video_metadata.tag_id:
-            _log.warn(
-                'Video %s was missing tag at during thumbnail selection',
-                new_video_metadata.get_id())
-            tag = neondata.Tag(
-                None,
-                account_id=new_video_metadata.get_account_id(),
-                tag_type=neondata.TagType.VIDEO,
-                name=api_request.video_title,
-                video_id=new_video_metadata.get_id())
-            yield tag.save(async=True)
-            new_video_metadata.tag_id = tag.get_id()
-            yield new_video_metadata.save(async=True)
-        # Otherwise update the name of the tag to match the video title
-        else:
-            tag = yield neondata.Tag.get(new_video_metadata.tag_id, async=True)
-            tag.name = api_request.video_title
-            yield tag.save(async=True)
-
-        _tag_thumb_ids = (video_result.thumbnail_ids +
-            video_result.bad_thumbnail_ids +
-            new_video_metadata.non_job_thumb_ids)
-        ct = yield neondata.TagThumbnail.save_many(
-            tag_id=new_video_metadata.tag_id,
-            thumbnail_id=_tag_thumb_ids,
-            async=True)
+        yield self._finalize_response_impl(api_request, cdn_metadata)
 
         # Everything is fine at this point, so lets mark it finished
         api_request.state = neondata.RequestState.FINISHED
@@ -1139,7 +737,7 @@ class VideoProcessor(object):
             pass
 
         # Send the notifications
-        yield self.send_notification_email(api_request, new_video_metadata)
+        yield self.send_notification_email(api_request, self.video_metadata)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
@@ -1292,6 +890,456 @@ class VideoProcessor(object):
                                               int(duration * time_factor))
         except boto.exception.SQSError as e:
             _log.warn('Error extending job time: %s' % e)
+
+    @tornado.gen.coroutine
+    def _get_default_thumb(self, api_request, cdn_metadata):
+        is_user_default_thumb = api_request.default_thumbnail is not None
+        try:
+            # A second attempt to save the default thumb
+            api_request.default_thumbnail = (api_request.default_thumbnail or 
+                                             self.extracted_default_thumbnail)
+            thumb = yield api_request.save_default_thumbnail(cdn_metadata,
+                                                             async=True)
+
+            # Score the default thumb
+            if thumb is not None:
+                # TODO(mdesnoyer): This will potentially download the
+                # image twice. It would be better to avoid that, but
+                # the code flow makes it annoying. Given this is a
+                # long process, not a big deal, but we might want to
+                # fix that
+                yield thumb.score_image(self.model.predictor,
+                                        save_object=True)
+
+        except (neondata.ThumbDownloadError,
+                model.errors.PredictionError) as e:
+            # If we extracted the default thumb from the url, then
+            # don't error out if we cannot get thumb
+            if is_user_default_thumb:
+                _log.warn("Default thumbnail download failed for vid %s" %
+                          video_id)
+                statemon.state.increment('default_thumb_error')
+                err_msg = "Failed to download default thumbnail: %s" % e
+                raise DefaultThumbError(err_msg)
+
+class ThumbnailProcessor(VideoProcessor):
+    '''Processor that extracts thumbnails from a video.'''
+    def __init__(self, params, model, model_version, cv_semaphore,
+                 job_queue, job_message, reprocess=False):
+        super(ThumbnailProcessor, self).__init__(
+            params, model, model_version, cv_semaphore,
+            job_queue, job_message, reprocess)
+
+        self.n_thumbs = int(self.job_params.get('topn', None) or
+                            self.job_params.get('api_param', None) or 6)
+        self.n_thumbs = max(self.n_thumbs, 1)
+        self.m_thumbs = int(self.job_params.get('botm', None) or 6)
+        self.m_thumbs = max(self.m_thumbs, 1)
+
+        self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
+        self.bad_thumbnails = []
+        self.thumb_model_version = None
+
+    @tornado.gen.coroutine
+    def _process_video_impl(self, mov):
+        ''' Abstract function that analyzes the video.
+
+        Input:
+        mov - The OpenCV VideoCapture object for the video
+        '''
+        top_results, bottom_results = \
+          self.model.choose_thumbnails(
+              mov,
+              n=self.n_thumbs,
+              m=self.m_thumbs,
+              video_name=self.video_url)
+        top_results = sorted(top_results, key=lambda x: x.score, reverse=True)
+        bottom_results = sorted(bottom_results, key=lambda x: x.score)
+
+        rank=0
+        for result in top_results:
+            meta = neondata.ThumbnailMetadata(
+                None,
+                internal_vid=self.video_metadata.key,
+                ttype=neondata.ThumbnailType.NEON,
+                model_score=result.score,
+                model_version=result.model_version,
+                features=result.features,
+                frameno=result.frameno,
+                rank=rank,
+                filtered=result.filtered_reason)
+            self.thumb_model_version = result.model_version
+            self.thumbnails.append((meta, PILImageUtils.from_cv(result.image)))
+            rank += 1
+    
+        for result in bottom_results:
+            meta = neondata.ThumbnailMetadata(
+                None,
+                internal_vid=self.video_metadata.key,
+                ttype=neondata.ThumbnailType.BAD_NEON,
+                model_score=result.score,
+                model_version=result.model_version,
+                features=result.features,
+                frameno=result.frameno,
+                filtered=result.filtered_reason)
+            self.bad_thumbnails.append((meta,
+                                        PILImageUtils.from_cv(result.image)))
+
+        # Get the baseline frames of the video
+        yield self._get_center_frame(mov)
+        yield self._get_random_frame(mov)
+
+    @tornado.gen.coroutine
+    def _finalize_response_impl(self, api_request, cdn_metadata):
+        # Get any known thumbs for the video
+        known_thumbs = []
+        known_video = yield neondata.VideoMetadata.get(self.video_metadata.key,
+                                                       async=True)
+        if known_video:
+            known_tids = reduce(
+                lambda x,y: x | y,
+                [set(x.thumbnail_ids) for x in known_video.job_results],
+                set())
+            known_tids |= set(known_video.thumbnail_ids + 
+                              known_video.bad_thumbnail_ids)
+
+            known_thumbs = yield neondata.ThumbnailMetadata.get_many(
+                known_tids, async=True)
+
+        # Attach the thumbnails to the video. This will upload the
+        # thumbnails to the appropriate CDNs.
+        video_result = neondata.VideoJobThumbnailList(
+            age=self.job_params.get('age'),
+            gender=self.job_params.get('gender'),
+            model_version=self.model_version)
+        if len(filter(lambda x: x[0].type == neondata.ThumbnailType.NEON,
+                      self.thumbnails)) < 1:
+            # TODO (Sunil): Video to be marked as failed or int err ? 
+            statemon.state.increment('no_thumbs')
+            _log.warn("No thumbnails extracted for video %s url %s"\
+                    % (self.video_metadata.key, self.video_metadata.url))
+        for thumb_meta, image in self.thumbnails:
+            # If we have a thumbnail of this type already and it's
+            # scored with the same model, we do not need to keep the
+            # new one around
+            same_thumbs = [x for x in known_thumbs if 
+                           x.type == thumb_meta.type and 
+                           x.model_version == self.thumb_model_version]
+            if (thumb_meta.type != neondata.ThumbnailType.NEON and 
+                len(same_thumbs) > 0):
+                same_thumbs = sorted(same_thumbs, key=lambda x: x.rank)
+                video_result.thumbnail_ids.append(same_thumbs[0].key)
+            else:
+                # Fill out the data on this thumb and add it to the results
+                yield thumb_meta.add_image_data(image, self.video_metadata,
+                                                cdn_metadata,
+                                                async=True)
+                yield thumb_meta.score_image(self.model.predictor,
+                                             image=PILImageUtils.to_cv(image))
+                video_result.thumbnail_ids.append(thumb_meta.key)
+                
+        for thumb_meta, image in self.bad_thumbnails:
+            yield thumb_meta.add_image_data(image, self.video_metadata,
+                                            cdn_metadata,
+                                            async=True)
+            try:
+                yield thumb_meta.score_image(self.model.predictor,
+                                             image=PILImageUtils.to_cv(image))
+            except model.errors.PredictionError as e:
+                _log.warn('Error scoring image: %s' % e)
+                # It's ok if it's not scored, so continue
+            video_result.bad_thumbnail_ids.append(thumb_meta.key)
+
+        # Save the thumbnail and video data into the database
+        # TODO(mdesnoyer): do this as a single transaction
+        def _merge_thumbnails(t_objs):
+            for new_thumb, _ in self.thumbnails + self.bad_thumbnails:
+                old_thumb = t_objs[new_thumb.key]
+                # There was already an entry for this thumb, so update
+                urlset = set(new_thumb.urls + old_thumb.urls)
+                old_thumb.urls = [x for x in urlset]
+                old_thumb.video_id = new_thumb.video_id
+                old_thumb.width = new_thumb.width
+                old_thumb.height = new_thumb.height
+                old_thumb.type = new_thumb.type
+                old_thumb.model_score = new_thumb.model_score
+                old_thumb.model_version = new_thumb.model_version
+                old_thumb.features = new_thumb.features
+                old_thumb.rank = new_thumb.rank
+                old_thumb.phash = new_thumb.phash
+                old_thumb.frameno = new_thumb.frameno
+                old_thumb.filtered = new_thumb.filtered
+                old_thumb.features = new_thumb.features
+        try:
+            new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
+                [x[0].key for x in self.thumbnails + self.bad_thumbnails],
+                _merge_thumbnails,
+                create_missing=True,\
+                async=True)
+            if len(self.thumbnails) + len(self.bad_thumbnails) > 0 and 
+                len(new_thumb_dict) == 0:
+                raise DBError("Couldn't change some thumbs")
+        except Exception, e:
+            _log.error("Error writing thumbnail data to database: %s" % e)
+            statemon.state.increment('save_tmdata_error')
+            raise DBError("Error writing thumbnail data to database")
+
+        @tornado.gen.coroutine
+        def _merge_video_data(video_obj):
+            # Don't keep the random centerframe or neon thumbnails
+            thumbs = yield neondata.ThumbnailMetadata.get_many(
+                video_obj.thumbnail_ids, async=True)
+            keep_thumbs = [x.key for x in thumbs if x.type not in [
+                neondata.ThumbnailType.NEON,
+                neondata.ThumbnailType.CENTERFRAME,
+                neondata.ThumbnailType.RANDOM]]
+            tidset = set(keep_thumbs +
+                         video_result.thumbnail_ids)
+            video_obj.thumbnail_ids = [x for x in tidset]
+
+            # If there isn't a job result from before, but something
+            # is there, then create the job result object from the
+            # previous run
+            if self.reprocess:
+                prev_thumbs = [x.key for x in thumbs if x.type in [
+                    neondata.ThumbnailType.NEON,
+                    neondata.ThumbnailType.CENTERFRAME,
+                    neondata.ThumbnailType.RANDOM]]
+                if len(prev_thumbs) > 0 and len(video_obj.job_results) == 0:
+                    video_obj.job_results.append(
+                        neondata.VideoJobThumbnailList(
+                            thumbnail_ids = prev_thumbs,
+                            bad_thumbnail_ids = video_obj.bad_thumbnail_ids,
+                            model_version=video_obj.model_version))
+                    video_obj.non_job_thumb_ids = keep_thumbs
+            
+            # Update the job results
+            found_result = False
+            for result in video_obj.job_results:
+                if (result.age == video_result.age and 
+                    result.gender == video_result.gender):
+                    # Replace the last run with these parameters
+                    result.thumbnail_ids = video_result.thumbnail_ids
+                    result.bad_thumbnail_ids = video_result.bad_thumbnail_ids
+                    result.model_version = video_result.model_version
+                    found_result = True
+            if not found_result:
+                video_obj.job_results.append(video_result)
+            
+            video_obj.url = self.video_metadata.url
+            video_obj.duration = self.video_metadata.duration
+            video_obj.video_valence = self.video_metadata.video_valence
+            video_obj.model_version = self.video_metadata.model_version
+            video_obj.job_id = self.video_metadata.job_id
+            video_obj.integration_id = self.video_metadata.integration_id
+            video_obj.frame_size = self.video_metadata.frame_size
+            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.publish_date = (video_obj.publish_date or 
+                                      self.video_metadata.publish_date)
+        try:
+            self.video_metadata = yield neondata.VideoMetadata.modify(
+                self.video_metadata.key,
+                _merge_video_data,
+                create_missing=True,
+                async=True)
+            if not self.video_metadata:
+                raise DBError('This should not ever happen')
+        except Exception, e:
+            _log.error("Error writing video data to database: %s" % e)
+            statemon.state.increment('save_vmdata_error')
+            raise DBError("Error writing video data to database")
+
+        yield self._get_default_thumb(api_request, cdn_metadata)
+
+        # Set the association of the video tag and each thumbnail.
+        if not self.video_metadata.tag_id:
+            _log.warn(
+                'Video %s was missing tag at during thumbnail selection',
+                self.video_metadata.get_id())
+            tag = neondata.Tag(
+                None,
+                account_id=self.video_metadata.get_account_id(),
+                tag_type=neondata.TagType.VIDEO,
+                name=api_request.video_title,
+                video_id=self.video_metadata.get_id())
+            try:
+                success = yield tag.save(async=True)
+                if not success:
+                    raise DBError('Could not write tag')
+            except Exception as e:
+                msg = "Error saving the tag to database: %s" % e
+                _log.error(msg)
+                statemon.state.increment('tag_write_error')
+                raise DBError(msg)
+        # Otherwise update the name of the tag to match the video title
+        else:
+            def _set_tag_name(obj):
+                tag.name = api_request.video_title
+            try:
+                tag = yield neondata.Tag.modify(self.video_metadata.tag_id,
+                                                _set_tag_name,
+                                                async=True)
+                if not tag:
+                    raise DBError('Could not modify tag. It was not there')
+            except Exception as e:
+                msg = "Error saving the tag to database: %s" % e
+                _log.error(msg)
+                statemon.state.increment('tag_write_error')
+                raise DBError(msg)
+
+        _tag_thumb_ids = (video_result.thumbnail_ids +
+            video_result.bad_thumbnail_ids +
+            self.video_metadata.non_job_thumb_ids)
+        try:
+            ct = yield neondata.TagThumbnail.save_many(
+                tag_id=tag.get_id(),
+                thumbnail_id=_tag_thumb_ids,
+                async=True)
+            if not ct:
+                raise DBError('Could not save tag thumbnail mappings')
+        except Exception as e:
+            msg = "Error mapping thumbs to tags: %s" % e
+                _log.error(msg)
+                statemon.state.increment('tag_write_error')
+                raise DBError(msg)
+
+        # Enable the video to be served if we have any thumbnails available
+        def _set_serving_enabled_and_tag(video_obj):
+            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.tag_id = tag.get_id()
+
+        try:
+            self.video_metadata = yield neondata.VideoMetadata.modify(
+                self.video_metadata.key,
+                _set_serving_enabled,
+                async=True)
+            if not self.video_metadata:
+                raise DBError('Video modification error. It was not there.')
+        except Exception as e:
+            msg = "Error writing video data to database: %s" % e
+            _log.error(msg)
+            statemon.state.increment('save_vmdata_error')
+            raise DBError(msg)
+
+        
+
+    @tornado.gen.coroutine
+    def _get_center_frame(self, mov, nframes=None):
+        '''approximation of brightcove logic 
+         #Note: Its unclear the exact nature of brighcove thumbnailing,
+         the images are close but this is not the exact frame
+        '''
+        
+        try:
+            if nframes is None:
+                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
+
+            cv_image = self._get_specific_frame(mov, int(nframes / 2))
+            meta = neondata.ThumbnailMetadata(
+                None,
+                internal_vid=self.video_metadata.key,
+                ttype=neondata.ThumbnailType.CENTERFRAME,
+                frameno=int(nframes / 2),
+                rank=0)
+            self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
+        except Exception, e:
+            _log.error("Unexpected error extracting center frame from %s:"
+                       " %s" % (self.video_url, e))
+            statemon.state.increment('centerframe_extraction_error')
+            raise
+
+    @tornado.gen.coroutine
+    def _get_random_frame(self, mov, nframes=None):
+        '''Gets a random frame from the video.
+        '''
+        try:
+            if nframes is None:
+                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
+
+            frameno = random.randint(0, nframes-1)
+
+            cv_image = self._get_specific_frame(mov, frameno)
+            meta = neondata.ThumbnailMetadata(
+                None,
+                internal_vid=self.video_metadata.key,
+                ttype=neondata.ThumbnailType.RANDOM,
+                frameno=frameno,
+                rank=0)
+            self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
+        except Exception, e:
+            _log.error("Unexpected error extracting random frame from %s:"
+                           " %s" % (self.video_url, e))
+            statemon.state.increment('randomframe_extraction_error')
+            raise
+
+    def _get_specific_frame(self, mov, frameno):
+        ''' Grab a specific frame from the video.
+
+        mov - The cv2 VideoCapture object
+        frameno - The frame number to read
+        '''
+        _log.debug('Extracting frame %i from video %s' %
+                   (frameno, self.video_url))
+        try:            
+            seek_sucess, image = pycvutils.seek_video(mov, frameno)
+            if seek_sucess:
+                #Now grab the frame
+                read_sucess, image = mov.read()
+                if read_sucess:
+                    return image      
+        except Exception, e:
+            _log.exception("Unexpected error extracting frame %i from %s: %s" 
+                           % (frameno, self.video_url, e))
+            statemon.state.increment('extract_frame_error')
+            raise
+
+        _log.error('Error reading frame %i of video %s'
+                    % (frameno, self.video_url))
+        statemon.state.increment('extract_frame_error')
+        raise BadVideoError('Error reading frame %i of video' % frameno)
+        
+
+class ClipProcessor(VideoProcessor):
+    '''Processor that extracts clips from a video.'''
+    def __init__(self, params, model, model_version, cv_semaphore,
+                 job_queue, job_message, reprocess=False):
+        super(ThumbnailProcessor, self).__init__(
+            params, model, model_version, cv_semaphore,
+            job_queue, job_message, reprocess)
+
+        self.n_clips = int(self.job_params.get('n_clips', 1))
+        self.clip_length = self.job_params.get('clip_length', None)
+        if self.clip_length is not None:
+            self.clip_length = float(self.clip_length)
+        self.clips = [] # List of (ClipMetadata, mp4 of clip) 
+
+    @tornado.gen.coroutine
+    def _process_video_impl(self, mov):
+        ''' Abstract function that analyzes the video.
+
+        Input:
+        mov - The OpenCV VideoCapture object for the video
+        '''
+        results = self.model.find_clips( 
+            mov, 
+            n=self.n_clips,
+            max_len=self.clip_length,
+            min_len=self.clip_length)
+
+        rank = 0
+        for r in results: 
+            cmeta = neondata.ClipMetadata(
+                None, 
+                video_id=self.video_metadata.key,
+                ttype=neondata.ThumbnailType.NEON,
+                rank=rank,
+                model_version=self.model_version,
+                start_frame=r.start, 
+                end_frame=r.end,
+                score=r.score
+            )
+            self.clips.append(cmeta)
+            rank += 1
 
 class VideoClient(multiprocessing.Process):
    
@@ -1456,12 +1504,25 @@ class VideoClient(multiprocessing.Process):
             # there's a memory problem so we load the model for every
             # job.
             self.load_model(job)
-            vprocessor = VideoProcessor(job, self.model,
-                                        self.model_version,
-                                        self.cv_semaphore,
-                                        self.job_queue,
-                                        self.cur_message,
-                                        job['reprocess'])
+            result_type = job.get('result_type',
+                                  neondata.ResultType.THUMBNAILS)
+            if result_type == neondata.ResultType.THUMBNAILS:
+                vprocessor = ThumbnailProcessor(job, self.model,
+                                                self.model_version,
+                                                self.cv_semaphore,
+                                                self.job_queue,
+                                                self.cur_message,
+                                                job['reprocess'])
+            elif result_type == neondata.ResultType.CLIPS:
+                vprocessor = ClipProcessor(job, self.model,
+                                           self.model_version,
+                                           self.cv_semaphore,
+                                           self.job_queue,
+                                           self.cur_message,
+                                           job['reprocess'])
+            else:
+                raise UninterestingJob('We do not know how to process a job '
+                                       'for %s' % result_type)
             statemon.state.increment('workers_processing')
 
             try:

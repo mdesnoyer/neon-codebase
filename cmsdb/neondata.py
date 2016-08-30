@@ -5612,8 +5612,8 @@ class ClipMetadata(StoredObject):
 
     Keyed by clip_id
     '''
-    def __init__(self, clip_id, video_id=None, urls=None,
-                 model_version=None, enabled=True,
+    def __init__(self, clip_id, video_id=None, thumbnail_id=None, urls=None,
+                 ttype=None, rank=0, model_version=None, enabled=True,
                  refid=None, score=None,
                  serving_frac=None, ctr=None,
                  start_frame=None, end_frame=None,
@@ -5623,7 +5623,13 @@ class ClipMetadata(StoredObject):
         # video id this clip was generated from  
         self.video_id = video_id
         # url for this clip
-        self.urls = urls or [] 
+        self.urls = urls or []
+        # The thumbnail that can be used to represent this clip
+        self.thumbnail_id = thumbnail_id
+        # the type of this thumbnail. Uses ThumbnailType
+        self.type = ttype
+        # where this clip ranks amongst the other clips of this type
+        self.rank = rank or 0
         # is this clip enabled for mastermind A/B testing 
         self.enabled = enabled
         # what version of the model generated this clip
@@ -5637,11 +5643,10 @@ class ClipMetadata(StoredObject):
         # are available
         self.rendition_ids = rendition_ids or []
         
-        # The score of this clip. Higher is better
-        self.score = score 
-
-        # Dictionary of parameters used to generate this score
-        self.model_params = model_params or {}
+        # The score of this clip. Higher is better. Note that this
+        # will be a score combined of a raw valence score plus some
+        # other stuff (like motion analysis)
+        self.score = score
          
     @classmethod
     def _baseclass_name(cls):
