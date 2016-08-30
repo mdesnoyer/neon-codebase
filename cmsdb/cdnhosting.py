@@ -224,7 +224,7 @@ class CDNHosting(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload_video(self, video, key, url):
+    def upload_video(self, video, key, url=None):
         pass
 
     @tornado.gen.coroutine

@@ -5699,13 +5699,12 @@ class ClipMetadata(StoredObject):
             s3_url = s3_url_list[0][0]
             self.urls.insert(0, s3_url)
 
-        # Host the image on the CDN
         if video_info is None:
             video_info = yield VideoMetadata.get(self.video_id, async=True)
         if cdn_metadata is None:
             cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
 
-        writer = imageio.get_writer(out_fn, 'FFMPEG', fps=30.0)
+        writer = imageio.get_writer(imageio.RETURN_BYTES, 'FFMPEG', fps=30.0)
         try:
             for frame in pycvutils.iterate_video(clip, clip.start, clip.end):
                 writer.append_data(frame[:,:,::-1])
