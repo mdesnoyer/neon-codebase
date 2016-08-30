@@ -77,6 +77,13 @@ CTestResults.xml
 #### git stuff ###
 *.orig
 
+#### PyCharm ####
+.idea
+
+#### AirFlow ####
+airflow.cfg
+airflow/logs/*
+
 #### swap files ### 
 *.swo
 *.swn

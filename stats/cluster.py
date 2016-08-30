@@ -1,6 +1,5 @@
 ''''
 Utilities to deal with the cluster
-
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright Neon Labs 2014
 '''
@@ -16,6 +15,7 @@ from boto.emr.bootstrap_action import BootstrapAction
 from boto.emr.instance_group import InstanceGroup
 import boto.emr.step
 from boto.s3.connection import S3Connection
+from boto.vpc import VPCConnection
 import datetime
 import dateutil.parser
 import json
@@ -36,10 +36,13 @@ import logging
 _log = logging.getLogger(__name__)
 
 from utils.options import define, options
+define("cluster_type", default="testing_cluster",
+       help="Value of the cluster-type tag")
 define("cluster_name", default="Neon Cluster",
        help="Name of any cluster that is created")
 define("cluster_region", default='us-east-1',
        help='Amazon region where the cluster resides')
+define("public_ip", default='', help='Public elastic ip to assign to cluster')
 define("use_public_ip", default=0,
        help="If set, uses the public ip to talk to the cluster.")
 define("ssh_key", default="s3://neon-keys/emr-runner.pem",
@@ -52,10 +55,24 @@ define("mapreduce_status_port", default=9046,
        help="Port to query the mapreduce status on")
 define("s3_jar_bucket", default="neon-emr-packages",
        help='S3 bucket where jobs will be stored')
+define("cluster_subnet_ids", default="subnet-e7be7f90,subnet-abf214f2",
+       help=('The VPC Subnet Id where the cluster should run. '
+             'Default: vpc-90ad09f5 subnet Stats Cluster (10.0.128.0/17).'
+             'Do not leave spaces in the list of subnets'))
+define("cluster_log_uri",default="s3://neon-cluster-logs/",
+       help='Where to store EMR Job flow cluster logs.')
+define("master_instance_type", default="r3.xlarge",
+       help='The instance type/size of the EMR MASTER node.')
+define("yarn_max_memory_allocation", default=16000,
+       help='Max memory allocation (MB) for containers in YARN')
+define("n_core_instances", default=10, type=int,
+       help='Number of core instances requested')
 
 from utils import statemon
 statemon.define("master_connection_error", int)
 statemon.define("cluster_creation_error", int)
+
+s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
@@ -65,19 +82,15 @@ class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
 class MapReduceError(ExecutionError): pass
 
-s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
-
 def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
     '''Function that iterates through the responses to list_* functions
        including handing the paginatioin
-
     Inputs:
     conn - Connection object
     obj_type - String of the end of the list_<obj_type> function
                (e.g. 'clusters')
     cluster_id - The cluster id for any list function that's not list_clusters
     kwargs - Any specific keyworkd args for the list_* function
-
     Returns:
     The iterator through the objects
     '''
@@ -108,11 +121,11 @@ def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
         for item in cur_page.__dict__[obj_map[obj_type]]:
             yield item
 
-def EmrConnection(**kwargs):
-    return boto.emr.connect_to_region(options.cluster_region, **kwargs)
+def EmrConnection(cluster_region, **kwargs):
+    return boto.emr.connect_to_region(cluster_region, **kwargs)
 
-def EC2Connection(**kwargs):
-    return boto.ec2.connect_to_region(options.cluster_region, **kwargs)
+def EC2Connection(cluster_region, **kwargs):
+    return boto.ec2.connect_to_region(cluster_region, **kwargs)
 
 class Cluster():
     # The possible instance and their multiplier of processing
@@ -146,21 +159,30 @@ class Cluster():
     ROLE_TESTING = 'testing'
     
     '''Class representing the cluster'''
-    def __init__(self, cluster_type, n_core_instances=None,
-                 public_ip=None):
+    def __init__(self, cluster_type=None, cluster_name=None,
+                 cluster_region=None, cluster_subnet_ids=None,
+                 cluster_log_uri=None, public_ip=None,
+                 n_core_instances=None):
         '''
         cluster_type - Cluster type to connect to. Uses the cluster-type tag.
+        cluster_name - The Name tag to assign the Cluster
+        cluster_subnet_ids - The list of VPC SubnetIds where the cluster should run.
+        cluster_log_uri - The S3 URI where EMR logs should be saved
+        public_ip - The public ip to assign to the cluster
         n_core_instances - Number of r3.xlarge core instances. 
                            We will use the cheapest type of r3 instances 
                            that are equivalent to this number of r3.xlarge.
-        public_ip - The public ip to assign to the cluster
         '''
-        self.cluster_type = cluster_type
-        self.public_ip = public_ip
-        self.n_core_instances = n_core_instances
+        self.cluster_type = cluster_type or options.cluster_type
+        self.cluster_name = cluster_name or options.cluster_name
+        self.cluster_region = cluster_region or options.cluster_region
+        self.public_ip = public_ip or options.public_ip
+        self.cluster_log_uri = cluster_log_uri or options.cluster_log_uri
+        self.cluster_subnet_ids = cluster_subnet_ids or options.cluster_subnet_ids
         self.cluster_id = None
         self.master_ip = None
         self.master_id = None
+        self.n_core_instances = n_core_instances or options.n_core_instances
 
         self._lock = threading.RLock()
 
@@ -182,7 +204,7 @@ class Cluster():
         with self._lock:
             _log.info('Grabbing elastic ip %s and assigning it to cluster %s' 
                       % (new_ip, self.cluster_id))
-            conn = EC2Connection()
+            conn = EC2Connection(self.cluster_region)
 
             elastic_addr = None
             for addr in conn.get_all_addresses():
@@ -212,26 +234,32 @@ class Cluster():
                                            (new_ip, self.master_id))
             self.public_ip = new_ip
 
-    def connect(self):
+    def connect(self, cluster_manager_create_cluster=False):
         '''Connects to the cluster.
-
         If it's up, connect to it, otherwise create it
         '''
         with self._lock:
             if not self.is_alive():
-                _log.warn("Could not find cluster %s. "
+                _log.warn("Could not find cluster %s of type %s. "
                           "Starting a new one instead"
-                          % self.cluster_type)
-                self._create()
+                          % (self.cluster_name, self.cluster_type))
+
+                # Below condition is to prevent an airflow task accidentally creating
+                if cluster_manager_create_cluster:
+                    _log.info("creating the cluster as the request came from cluster manager")
+                    self._create()
+                else:
+                    raise ClusterCreationError("cluster wont be created as the request, "
+                                               "for create was not from cluster manager")
             else:
-                _log.info("Found cluster type %s with id %s" %
-                          (self.cluster_type, self.cluster_id))
-                self._set_requested_core_instances()
+                _log.info("Found cluster %s of type %s with id %s" %
+                          (self.cluster_name, self.cluster_type,
+                           self.cluster_id))
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path, extra_ops, timeout=None, name='Raw Tracker Data Cleaning'):
+                           output_path, map_memory_mb=None,
+                           timeout=None, name='Raw Tracker Data Cleaning'):
         '''Runs a mapreduce job.
-
         Inputs:
         jar - Path to the jar to run. It should be a jar that packs in all the
               dependencies.
@@ -242,14 +270,72 @@ class Cluster():
                         simple and doesn't have a lookup, this can be low,
                         which increases the number of maps each machine can
                         run.
-
         Returns:
         Returns once the job is done. If the job fails, an exception will be thrown.
         '''
         if timeout is not None:
             budget_time = datetime.datetime.now() + \
-              datetime.timedelta(seconds=timeout)
-        
+                          datetime.timedelta(seconds=timeout)
+
+        # Define extra options for the job
+        extra_ops = {
+            'mapreduce.output.fileoutputformat.compress' : 'true',
+            'avro.output.codec' : 'snappy',
+            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
+            'mapreduce.task.timeout' : 1800000,
+            'mapreduce.map.speculative': 'false',
+            'mapreduce.reduce.speculative': 'false',
+            'io.file.buffer.size': 65536
+        }
+
+        # If the requested map memory is different, set it
+        if map_memory_mb is not None:
+            extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
+            extra_ops['mapreduce.map.java.opts'] = (
+                '-Xmx%im' % int(map_memory_mb * 0.8))
+
+
+        # Figure out the number of reducers to use by aiming for files
+        # that are 1GB on average.
+        input_data_size = 0
+        s3AddrMatch = s3AddressRe.match(input_path)
+        if s3AddrMatch:
+
+            # First figure out the size of the data
+            # Check if input path is relative or absolute
+            bucket_name, key_name = s3AddrMatch.groups()
+            s3conn = S3Connection()
+            match_relative = re.compile('([^\*]*)\*').match(key_name)
+            match_absolute = re.compile('([^\*]*).*').match(key_name)
+            if match_relative:
+                prefix = match_relative.group(1)
+                for key in s3conn.get_bucket(bucket_name).list(prefix):
+                    input_data_size += key.size
+
+                n_reducers = math.ceil(input_data_size / (1073741824. / 2))
+                extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
+            else:
+                prefix = match_absolute.group(1)
+                for key in s3conn.get_bucket(bucket_name).list(prefix):
+                    input_data_size += key.size
+
+                n_reducers = math.ceil(input_data_size / (1073741824. / 2))
+                extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
+
+        # If the cluster's core has larger instances, the memory
+        # allocated in the reduce can get very large. However, we max
+        # out the reduce to 1GB, so limit the reducer to use at most
+        # 5GB of memory.
+        core_group = self._get_instance_group_info('CORE')
+        if core_group is None:
+            raise ClusterInfoError('Could not find the CORE instance group')
+        if (output_path.startswith("s3") and
+                    core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
+                                                'r3.8xlarge', 'i2.8xlarge',
+                                                'i2.4xlarge', 'cr1.8xlarge']):
+            extra_ops['mapreduce.reduce.memory.mb'] = 5000
+            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
+
         self.connect()
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
                                           input_path, output_path)
@@ -263,14 +349,12 @@ class Cluster():
     def send_job_to_cluster(self, jar, main_class, extra_ops, input_path,
                             output_path):
         '''Sends a job to the cluster and returns a string of the stdout.
-
         Inputs:
         jar - Local path to the jar to run
         main_class - Main java class to execute
         extra_ops - Dictionary of extra parameters for the job
         input_path - Input path for the job to use. Probably hdfs or s3 path
         output_path - Output path for the job to use
-
         returns - String of the stdout for starting the job
         '''
         # First upload the jar to s3
@@ -297,7 +381,7 @@ class Cluster():
 
         # Now send the job to emr
         _log.info('Sending job to EMR')
-        emrconn = EmrConnection()
+        emrconn = EmrConnection(options.cluster_region)
         step_args = ' '.join(('-D %s=%s' % x 
                               for x in extra_ops.iteritems()))
         step_args = step_args.split()
@@ -319,6 +403,7 @@ class Cluster():
 
         # Get the stdout from the job being loaded up
         return self.get_emr_logfile(ssh_conn, step_id, 'stdout')
+
 
     def get_emr_logfile(self, ssh_conn, step_id, logtype='stdout', retry=True):
         '''Grabs the logfile from the master and returns it as a string'''
@@ -368,15 +453,12 @@ class Cluster():
     def change_instance_group_size(self, group_type, incr_amount=None,
                                    new_size=None):
         '''Change a instance group size.
-
         Only one of incr_amount or new_size can be set
-
         Inputs:
         group_type - Type of group: 'MASTER', 'CORE' or 'TASK'
         incr_amount - Size to increate the group by. 
                       Can be negative for TASK group
         new_size - New size of the group.
-
         Outputs:
         InstanceGroup - Instance group status
         '''
@@ -393,7 +475,7 @@ class Cluster():
             self.connect()
             
             # First find the instance group
-            conn = EmrConnection()
+            conn = EmrConnection(self.cluster_region)
             found_group = None
             for group in emr_iterator(conn,'instance_groups',self.cluster_id):
                 if group.instancegrouptype == group_type:
@@ -430,10 +512,8 @@ class Cluster():
 
     def query_resource_manager(self, query, tries=5):
         '''Query the resource manager for information from Hadoop.
-
         Inputs:
         query - The query to send. This will be a relative REST API endpoint
-
         Returns:
         A dictionary of the parsed json response
         '''
@@ -446,10 +526,8 @@ class Cluster():
 
     def query_history_manager(self, query, tries=5):
         '''Query the history manager for information from Hadoop.
-
         Inputs:
         query - The query to send. This will be a relative REST API endpoint
-
         Returns:
         A dictionary of the parsed json response
         '''
@@ -477,7 +555,6 @@ class Cluster():
 
     def _check_cluster_state(self):
         '''Returns the state of the cluster.
-
         The state could be strings of 
         STARTING | BOOTSTRAPPING | RUNNING | WAITING | 
         TERMINATING | TERMINATED | TERMINATED_WITH_ERRORS
@@ -486,16 +563,15 @@ class Cluster():
             cluster_info = self.find_cluster()
             return cluster_info.status.state
 
-        conn = EmrConnection()
+        conn = EmrConnection(self.cluster_region)
         return conn.describe_cluster(self.cluster_id).status.state
 
     def find_cluster(self):
         '''Finds the cluster if it exists and fills the
         self.cluster_id, self.master_id and self.master_ip
-
         Returns the ClusterInfo object if the cluster was found.
         '''
-        conn = EmrConnection()
+        conn = EmrConnection(self.cluster_region)
         most_recent = None
         cluster_found = None
         for cluster in emr_iterator(conn, 'clusters',
@@ -503,27 +579,28 @@ class Cluster():
                                                     'BOOTSTRAPPING',
                                                     'RUNNING',
                                                     'WAITING']):
-            if cluster.name != options.cluster_name:
+
+            if cluster.name != self.cluster_name:
                 # The cluster has to have the right name to be a possible match
                 continue
-            cluster_info = conn.describe_cluster(cluster.id)
             create_time = dateutil.parser.parse(
-                cluster_info.status.timeline.creationdatetime)
-            if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
-                self.cluster_type and
-                self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
-                Cluster.ROLE_PRIMARY and (
-                    most_recent is None or create_time > most_recent)):
-                self.cluster_id = cluster.id
-                most_recent = create_time
-                cluster_found = cluster_info
-            time.sleep(1) # Avoid AWS throttling
+                cluster.status.timeline.creationdatetime)
+            if (most_recent is None or create_time > most_recent):
+                cluster_info = conn.describe_cluster(cluster.id)
+                if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
+                    self.cluster_type and
+                    self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
+                    Cluster.ROLE_PRIMARY):
+                    self.cluster_id = cluster.id
+                    most_recent = create_time
+                    cluster_found = cluster_info
+                time.sleep(1) # Avoid AWS throttling
         
         if cluster_found is None:
             raise ClusterInfoError('Could not find a cluster of type %s'
                                    ' with name %s'
                                    % (self.cluster_type,
-                                      options.cluster_name))
+                                      self.cluster_name))
         self._find_master_info()
         
         return cluster_found
@@ -547,8 +624,8 @@ class Cluster():
 
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
-        conn = EmrConnection()
-        ec2conn = EC2Connection()
+        conn = EmrConnection(self.cluster_region)
+        ec2conn = EC2Connection(self.cluster_region)
         
         self.master_ip = None
 
@@ -576,16 +653,8 @@ class Cluster():
             raise MasterMissingError("Could not find the master ip")
         _log.info("Found master ip address %s" % self.master_ip)
 
-    def _set_requested_core_instances(self):
-        '''Sets self.n_core_instances to what is currently requested.'''
-        found_group = self._get_instance_group_info('CORE')
-
-        if found_group is not None:
-            self.n_core_instances = int(found_group.requestedinstancecount) * \
-              Cluster.instance_info[found_group.instancetype][0]
-
     def _get_instance_group_info(self, group_type):
-        conn = EmrConnection()
+        conn = EmrConnection(self.cluster_region)
         found_group = None
         for group in emr_iterator(conn, 'instance_groups', self.cluster_id):
             if group.instancegrouptype == group_type:
@@ -596,7 +665,6 @@ class Cluster():
 
     def _create(self):
         '''Creates a new cluster.
-
         Blocks until the cluster is ready.
         '''
         #TODO(mdesnoyer): Parameterize this. For now, we just put the
@@ -646,25 +714,25 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.log-aggregation-enable=true',
                  '--yarn-key-value',
-                 'yarn.scheduler.maximum-allocation-mb=24000'])]
+                 ('yarn.scheduler.maximum-allocation-mb=%d' % 
+                  options.yarn_max_memory_allocation)])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]
 
-            
         subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'r3.2xlarge', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', options.master_instance_type, 'ON_DEMAND',
                           'Master Instance Group'),
             instance_group
             ]
         
-        conn = EmrConnection()
-        _log.info('Creating cluster %s' % options.cluster_name)
+        conn = EmrConnection(self.cluster_region)
+        _log.info('Creating cluster: %s' % self.cluster_name)
         try:
             self.cluster_id = conn.run_jobflow(
-                options.cluster_name,
-                log_uri='s3://neon-cluster-logs/',
+                self.cluster_name,
+                log_uri=self.cluster_log_uri,
                 ec2_keyname=os.path.basename(options.ssh_key).split('.')[0],
                 ami_version='3.1.4',
                 job_flow_role='EMR_EC2_DefaultRole',
@@ -691,26 +759,30 @@ class Cluster():
                        'cluster-role' : Cluster.ROLE_BOOTING})
 
         _log.info('Waiting until cluster %s is ready' % self.cluster_id)
-        cur_cluster = conn.describe_cluster(self.cluster_id)
-        while cur_cluster.status.state != 'WAITING':
-            if cur_cluster.status.state in ['TERMINATING', 'TERMINATED',
-                                            'TERMINATED_WITH_ERRORS',
-                                            'FAILED']:
+        cur_state = conn.describe_cluster(self.cluster_id)
+        while cur_state.status.state != 'WAITING':
+            if cur_state.status.state in ['TERMINATING', 'TERMINATED',
+                             'TERMINATED_WITH_ERRORS', 'FAILED']:
                 msg = ('Cluster could not start because: %s',
-                        cur_cluster.status.laststatechangereason)
+                           cur_state.status.statechangereason.message)
                 _log.error(msg)
                 raise ClusterCreationError(msg)
 
-            _log.info('Cluster is booting. State: %s' % 
-                      cur_cluster.status.state)
+            _log.info('Cluster is booting. State: %s' % cur_state.status.state)
             time.sleep(30.0)
-            cur_cluster = conn.describe_cluster(self.cluster_id)
+            cur_state = conn.describe_cluster(self.cluster_id)
 
         _log.info('Making the new cluster primary')
-        for cluster in emr_iterator(conn, 'clusters'):
+        for cluster in emr_iterator(conn, 'clusters',
+                                    cluster_states=['STARTING',
+                                                    'BOOTSTRAPPING',
+                                                    'RUNNING',
+                                                    'WAITING']):
+            cluster_info = conn.describe_cluster(cluster.id)
             try:
-                self._get_cluster_tag(cluster, 'cluster-role')
-                conn.remove_tags(cluster.id, ['cluster-role'])
+                if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
+                    self.cluster_type):
+                    conn.remove_tags(cluster.id, ['cluster-role'])
             except KeyError:
                 pass
         conn.add_tags(self.cluster_id, {
@@ -719,15 +791,22 @@ class Cluster():
         cluster_ip = self.public_ip
         self.public_ip = None
         self.set_public_ip(cluster_ip)
-
+                             
     def _get_subnet_id_and_core_instance_group(self):   
         # Calculate the expected costs for each of the instance type options
-        #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
-        #    'us-east-1d' : 'subnet-53fa1901' 
-        #}
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'}
- 
+
+        # Map the subnet id's obtained with their availability zones
+        conn_vpc = VPCConnection()
+        avail_zone_to_subnet_id = {}
+        for subnet_requested in options.cluster_subnet_ids.split(','):
+            for subnet in conn_vpc.get_all_subnets():
+                if subnet.id == subnet_requested:
+                    avail_zone_to_subnet_id[str(
+                        subnet.availability_zone)] = subnet_requested
+
+        _log.debug("Subnets & their avail zones are %s" % 
+                  avail_zone_to_subnet_id)
+
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
                  x[1], cur_price, avg_price, availability_zone)
@@ -760,13 +839,11 @@ class Cluster():
                              'Core instance group',
                              '%.3f' % (1.03 * on_demand_price))
 
-    def _get_spot_prices(self, 
-                         instance_type, 
-                         availability_zone,
+    def _get_spot_prices(self, instance_type, availability_zone,
                          tdiff=datetime.timedelta(days=1)):
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
-        conn = EC2Connection()
+        conn = EC2Connection(self.cluster_region)
         data = [(dateutil.parser.parse(x.timestamp), x.price) for x in 
                 conn.get_spot_price_history(
                     start_time=(datetime.datetime.utcnow()-tdiff).isoformat(),
@@ -785,7 +862,7 @@ class Cluster():
         avg_price = total_cost / (timestamps[-1] - timestamps[0]) * 3600.0
         cur_price = prices[-1]
         return cur_price, avg_price
-
+    
     def checkpoint_hdfs_to_s3(self, jar_path, hdfs_path_to_copy, s3_path, timeout=None):
         #Does checkpoint of hdfs data from mapreduce output to S3.
 
@@ -830,7 +907,6 @@ class Cluster():
             
             time.sleep(60)
 
-
         _log.info("Syslog from s3distcp step is : %s" % syslog)
 
         timeout_step = 9000
@@ -841,7 +917,7 @@ class Cluster():
                                          timeout,
                                          main_class='S3DistCp',
                                          name='S3DistCp')
-    
+
     def monitor_job_progress_hadoop(self, stdout, budget_time, timeout, main_class, name):
 
         trackURLRe = re.compile(
@@ -992,7 +1068,6 @@ class Cluster():
             raise MapReduceError('Error loading job into Hadoop. '
                                  'See earlier logs for job logs')
 
-
 class ClusterSSHConnection:
     '''Class that allows an ssh connection to the master cluster node.'''
     def __init__(self, cluster_info):
@@ -1025,7 +1100,6 @@ class ClusterSSHConnection:
 
     def put_file(self, local_path, remote_path):
         '''Copies a file from the local path to the cluster.
-
         '''
         
         _log.info("Copying %s to %s" % (local_path,
@@ -1049,7 +1123,6 @@ class ClusterSSHConnection:
 
     def execute_remote_command(self, cmd):
         '''Executes a command on the master node.
-
         Returns stdout of the process, or raises an Exception if the
         process failed.
         '''
