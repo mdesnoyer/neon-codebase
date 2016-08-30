@@ -21,6 +21,7 @@ from boto.sqs.message import Message
 import boto.exception
 import cmsdb.cdnhosting
 from cmsdb import neondata
+import cv2
 from cvutils.imageutils import PILImageUtils
 import integrations
 from itertools import chain
@@ -68,7 +69,7 @@ import utils.ps
 from utils import statemon
 import video_processor.client
 import video_processor.video_processing_queue
-from video_processor.client import VideoClient, VideoProcessor
+from video_processor.client import VideoClient
 import youtube_dl
 
 _log = logging.getLogger(__name__)
@@ -279,7 +280,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.api_request.api_method = 'topn'
         self.api_request.api_param = 1 
         self.api_request.save()
-        vprocessor = VideoProcessor(
+        vprocessor = video_processor.client.ThumbnailProcessor(
             job,
             self.model,
             self.model_version,
@@ -663,7 +664,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         '''Verify execution of the process_all call in ProcessVideo'''
 
         vprocessor = self.setup_video_processor("neon", url='http://video.com')
-        yield vprocessor.process_video(self.test_video_file, n_thumbs=6, m_thumbs=6)
+        vprocessor.n_thumbs = 6
+        vprocessor.m_thumbs = 6
+        yield vprocessor.process_video(self.test_video_file)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
@@ -718,7 +721,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.api_request.state = state
             self.api_request.save()
             with self.assertRaises(video_processor.client.OtherWorkerCompleted):
-                yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+                yield vprocessor.process_video(self.test_video_file)
 
         # Try when the current run should continue
         for state in [neondata.RequestState.SUBMIT,
@@ -730,7 +733,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             vprocessor = self.setup_video_processor('neon')
             self.api_request.state = state
             self.api_request.save()
-            yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+            yield vprocessor.process_video(self.test_video_file)
             self.assertGreater(len(vprocessor.thumbnails), 0)
 
     @tornado.testing.gen_test
@@ -751,7 +754,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield al.save(async=True) 
         yield vprocessor.video_metadata.save(async=True)
         with self.assertRaises(video_processor.client.BadVideoError) as e:
-            yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+            yield vprocessor.process_video(self.test_video_file)
 
         api_request = yield neondata.NeonApiRequest.get(
             vprocessor.job_params['job_id'],
@@ -771,7 +774,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                  float('-inf'), 600,
                                  filtered_reason='black')], []
         vprocessor = self.setup_video_processor("neon")
-        yield vprocessor.process_video(self.test_video_file2, n_thumbs=2)
+        vprocessor.n_thumbs = 2
+        yield vprocessor.process_video(self.test_video_file2)
 
         # Verify that all the frames were added to the data maps
         neon_thumbs = [x[0] for x in vprocessor.thumbnails if
@@ -806,13 +810,17 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(
+        vprocessor = video_processor.client.ThumbnailProcessor(
             job,
             self.model,
             self.model_version, multiprocessing.BoundedSemaphore(1),
             self.job_queue_mock,
             self.job_message)
-        yield vprocessor._get_center_frame(self.test_video_file)
+        mov = cv2.VideoCapture(self.test_video_file)
+        try:
+            yield vprocessor._get_center_frame(mov)
+        finally:
+            mov.release()
         meta, img = vprocessor.thumbnails[0]
         self.assertIsNotNone(img)
         self.assertTrue(isinstance(img, Image.Image))
@@ -829,7 +837,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(
+        vprocessor = video_processor.client.ThumbnailProcessor(
             job,
             self.model,
             self.model_version,
@@ -837,16 +845,20 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.job_queue_mock,
             self.job_message
             )
-        yield vprocessor._get_random_frame(self.test_video_file)
-        meta1, img1 = vprocessor.thumbnails[0]
-        self.assertIsNotNone(img1)
-        self.assertTrue(isinstance(img1, Image.Image))
-        self.assertEqual(meta1.type, neondata.ThumbnailType.RANDOM)
-        self.assertEqual(meta1.rank, 0)
+        mov = cv2.VideoCapture(self.test_video_file)
+        try:
+            yield vprocessor._get_random_frame(mov)
+            meta1, img1 = vprocessor.thumbnails[0]
+            self.assertIsNotNone(img1)
+            self.assertTrue(isinstance(img1, Image.Image))
+            self.assertEqual(meta1.type, neondata.ThumbnailType.RANDOM)
+            self.assertEqual(meta1.rank, 0)
 
-        yield vprocessor._get_random_frame(self.test_video_file)
-        meta2, img2 = vprocessor.thumbnails[1]
-        self.assertNotEqual(meta2.frameno, meta1.frameno)
+            yield vprocessor._get_random_frame(mov)
+            meta2, img2 = vprocessor.thumbnails[1]
+            self.assertNotEqual(meta2.frameno, meta1.frameno)
+        finally:
+            mov.release()
 
     @tornado.testing.gen_test
     def test_dequeue_job(self):
@@ -998,32 +1010,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         statemon.state._reset_values()
 
         random.seed(984695198)
-
-        # populate some data
-        na = neondata.NeonUserAccount('acct1')
-        self.api_key = na.neon_api_key
-        na.save()
-        neondata.NeonPlatform.modify(self.api_key, '0',
-                                     lambda x: x, create_missing=True)
-
-        cdn = neondata.CDNHostingMetadataList(
-            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
-            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
-        cdn.save()
-
-        self.video_id = '%s_vid1' % self.api_key
-        self.api_request = neondata.NeonApiRequest(
-            'job1', self.api_key,
-            'vid1',
-            'some fun video',
-            'http://video.mp4',
-            http_callback='http://callback.com',
-            default_thumbnail='http://default_thumb.jpg')
-        self.api_request.api_param = '1'
-        self.api_request.api_method = 'topn'
-        self.api_request.state = neondata.RequestState.PROCESSING
-        self.api_request.save()
-
+        
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
         self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
@@ -1074,9 +1061,58 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 200)
 
+
+    def tearDown(self):
+        self.s3_patcher.stop()
+        self.http_mocker.stop()
+        self.im_download_mocker.stop()
+        self.cloudinary_patcher.stop()
+        self.smart_crop_patcher.stop()
+        self.submit_mocker.stop()
+        self.postgresql.clear_all_tables() 
+        super(TestFinalizeResponse, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.postgresql.stop()
+
+class TestFinalizeThumbnailResponse(TestFinalizeResponse):
+    def setUp(self):
+        super(TestFinalizeThumbnailResponse, self).setUp()
+
+        # populate some data
+        na = neondata.NeonUserAccount('acct1')
+        self.api_key = na.neon_api_key
+        na.save()
+        neondata.NeonPlatform.modify(self.api_key, '0',
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
+
+        self.video_id = '%s_vid1' % self.api_key
+        self.api_request = neondata.NeonApiRequest(
+            'job1', self.api_key,
+            'vid1',
+            'some fun video',
+            'http://video.mp4',
+            http_callback='http://callback.com',
+            default_thumbnail='http://default_thumb.jpg')
+        self.api_request.api_param = '1'
+        self.api_request.api_method = 'topn'
+        self.api_request.state = neondata.RequestState.PROCESSING
+        self.api_request.save()
+
         # Setup the processor object
         job = self.api_request.__dict__
-        self.vprocessor = video_processor.client.VideoProcessor(
+        self.vprocessor = video_processor.client.ThumbnailProcessor(
             job,
             self.model_mock,
             'test_version',
@@ -1128,25 +1164,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
                                          frameno=44),
              imageutils.PILImageUtils.create_random_image(480, 640))]
 
-
     def tearDown(self):
-        self.s3_patcher.stop()
-        self.http_mocker.stop()
-        self.im_download_mocker.stop()
-        self.cloudinary_patcher.stop()
-        self.smart_crop_patcher.stop()
-        self.submit_mocker.stop()
-        self.postgresql.clear_all_tables() 
-        super(TestFinalizeResponse, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.postgresql.stop()
+        super(TestFinalizeThumbnailResponse, self).tearDown()
 
     @tornado.testing.gen_test
     def test_send_email_notification_base(self): 
@@ -1207,10 +1226,12 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 400, error=Exception('blah'))
 
-        self.vprocessor._get_email_template_args = MagicMock()
-        self.vprocessor._get_email_template_args.side_effect = iter([{}])
+        self.vprocessor._get_email_params = MagicMock()
+        self.vprocessor._get_email_params.side_effect = iter([{}])
         with self.assertLogExists(logging.ERROR, 'Failed to send'):
-            rv = yield self.vprocessor.send_notification_email(api_request, None)
+            rv = yield self.vprocessor.send_notification_email(
+                api_request,
+                None)
             self.assertTrue(self.submit_mock.called)
             self.assertEquals(rv, False)
             self.assertEquals(
@@ -1242,8 +1263,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     def test_default_process(self):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         api_request.callback_email = 'test@invalid.xxx' 
-        self.vprocessor._get_email_template_args = MagicMock()
-        self.vprocessor._get_email_template_args.side_effect = iter([{}])
+        self.vprocessor._get_email_params = MagicMock()
+        self.vprocessor._get_email_params.side_effect = iter([{}])
 
         yield api_request.save(async=True)
         yield self.vprocessor.finalize_response()
@@ -1359,12 +1380,14 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         expected_response = {
             'job_id' : 'job1',
             'video_id' : 'vid1',
-            'framenos' : [69, 6],
-            'thumbnails' : [n_thumbs[1].key, n_thumbs[0].key],
             'error' : None
             }
         self.assertDictContainsSubset(expected_response,
                                       api_request.response)
+        self.assertItemsEqual(api_request.response['framenos'],
+                              [69, 6])
+        self.assertItemsEqual(api_request.response['thumbnails'],
+                              [n_thumbs[1].key, n_thumbs[0].key])
 
         # Compare serving URL here. Ignore the i* part of serving_url; because subdomains
         # can be different from multiple get_serving_url calls
@@ -2054,7 +2077,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
             'testing_vtid_three','testing_vtid_four','testing_vtid_five']
  
         yield video_data.save(async=True) 
-        tas = yield self.vprocessor._get_email_template_args(video_data)
+        params = yield self.vprocessor._get_email_params(video_data)
+        tas = params['template_args']
         self.assertEquals(tas['top_thumbnail'], 'best')  
         self.assertEquals(tas['thumbnail_one'], 'second_best')  
         self.assertEquals(tas['thumbnail_two'], 'third_best')  
@@ -2068,7 +2092,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
             self.video_id, 
             async=True)
         with self.assertRaises(Exception): 
-            tas = yield self.vprocessor._get_email_template_args(video_data)
+            tas = yield self.vprocessor._get_email_params(video_data)
 
     @tornado.testing.gen_test
     def test_get_template_args_no_dtn_exception(self):
@@ -2090,7 +2114,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
             'testing_vtid_four',
             urls=['fourth_best']).save(async=True) 
         with self.assertRaises(Exception): 
-            tas = yield self.vprocessor._get_email_template_args(video_data)
+            tas = yield self.vprocessor._get_email_params(video_data)
 
 
 class SmokeTest(test_utils.neontest.AsyncTestCase):

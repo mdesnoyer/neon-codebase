@@ -150,6 +150,8 @@ class TimeoutError(Exception): pass
 class DequeueError(Exception): pass
 class UninterestingJob(Exception): pass
 
+class DoNotEmail(Exception): pass
+
 ###########################################################################
 # Process Video File
 ###########################################################################
@@ -197,6 +199,7 @@ class VideoProcessor(object):
             request_id=self.job_params['job_id'],
             video_url=self.job_params['video_url'],
             i_id=integration_id)
+        self.video_result = None # A VideoJobThumbnailList
 
         #Video vars
         self.model = model
@@ -204,9 +207,23 @@ class VideoProcessor(object):
 
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
+        self._mov = None
+
     def __del__(self):
         # Clean up the executor
         self.executor.shutdown(False)
+
+        self.mov = None
+
+    @property
+    def mov(self):
+        return self._mov
+    
+    @mov.setter
+    def mov(self, value):
+        if self._mov:
+            self._mov.release()
+        self._mov = value
 
     @tornado.gen.coroutine
     def update_video_metadata_video_info(self):
@@ -325,6 +342,9 @@ class VideoProcessor(object):
         finally:
             #Delete the temp video file which was downloaded
             self.tempfile.close()
+
+            # Close the video capture object
+            self.mov = None
 
     @tornado.gen.coroutine
     def download_video_file(self):
@@ -562,7 +582,7 @@ class VideoProcessor(object):
 
         #Try to open the video file using openCV
         try:
-            mov = cv2.VideoCapture(video_file)
+            self.mov = cv2.VideoCapture(video_file)
         except Exception, e:
             _log.error("Error opening video file %s: %s"  % 
                        (self.video_url, e))
@@ -627,7 +647,7 @@ class VideoProcessor(object):
         self.model.update_processing_strategy(processing_strategy)
 
         try:
-            yield self._process_video_impl(mov)
+            yield self._process_video_impl(self.mov)
         except model.errors.VideoReadError:
                 msg = "Error using OpenCV to read video. %s" % self.video_url
                 _log.error(msg)
@@ -706,7 +726,7 @@ class VideoProcessor(object):
         api_request.state = neondata.RequestState.FINISHED
 
         # Build the callback response
-        cb_response = self.build_callback_response()
+        cb_response = self._build_callback_response()
 
         # Update the database that the request is done with the processing 
         def _flag_request_done_in_db(request):
@@ -741,27 +761,6 @@ class VideoProcessor(object):
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
-        
-    def build_callback_response(self):
-        '''
-        build the dict that defines the callback response
-
-        '''
-
-        frames = [x[0].frameno for x in self.thumbnails
-            if x[0].type == neondata.ThumbnailType.NEON]
-        fnos = frames[:self.n_thumbs]
-        thumbs = [x[0].key for x in self.thumbnails 
-            if x[0].type == neondata.ThumbnailType.NEON]
-        thumbs = thumbs[:self.n_thumbs]
-
-        cresp = neondata.VideoCallbackResponse(
-            self.video_metadata.job_id,
-            neondata.InternalVideoID.to_external(self.video_metadata.key),
-            fnos,
-            thumbs,
-            self.video_metadata.get_serving_url(save=False))
-        return cresp.to_dict()
 
     @tornado.gen.coroutine 
     def send_notification_email(self, api_request, video): 
@@ -778,7 +777,7 @@ class VideoProcessor(object):
             # check for user that created the request 
             to_email = api_request.callback_email
             if not to_email: 
-                raise tornado.gen.Return(True)  
+                raise DoNotEmail()  
                      
             user = yield neondata.User.get(
                 to_email,
@@ -788,22 +787,16 @@ class VideoProcessor(object):
             # if we have a user, check if they are subscribed
             if user: 
                 if not user.send_emails: 
-                    raise tornado.gen.Return(True)  
+                    raise DoNotEmail() 
             # create a new apiv2 client
             client = cmsapiv2.client.Client(
                 options.cmsapi_user,
                 options.cmsapi_pass)
+
+            # build up the body of the request 
+            body_params = yield self._get_email_params(video)
+            body_params['to_email_address'] = to_email
             
-            template_args = yield self._get_email_template_args(video)
-               
-            # build up the body of the request
-            body_params = { 
-                'template_slug' : 'video-results',
-                'template_args' : template_args,  
-                'subject' : 'Your Neon Images Are Here!', 
-                'from_name' : 'Neon Video Results', 
-                'to_email_address' : to_email 
-            }     
             # make the call to post email
             relative_url = '/api/v2/%s/email' % api_request.api_key
             http_req = tornado.httpclient.HTTPRequest(
@@ -819,52 +812,22 @@ class VideoProcessor(object):
                     (to_email, response.error))
                 rv = False
              
-        except AttributeError: 
+        except AttributeError as e: 
             pass
-        except tornado.gen.Return:
-            raise
+        except DoNotEmail:
+            # We do not want to send an e-mail, so return True
+            rv = True
         except Exception as e:
             rv = False  
             statemon.state.increment('unable_to_send_email')
             _log.exception('Unexpected error %s when sending email' % e)  
         finally: 
-            raise tornado.gen.Return(rv) 
+            raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine    
-    def _get_email_template_args(self, video):
-        tas = {}  
-        thumbs = yield neondata.ThumbnailMetadata.get_many(
-            video.thumbnail_ids,
-            async=True)
-
-        dt = filter(lambda t: t.type == neondata.ThumbnailType.DEFAULT,
-            thumbs)
-        rt = filter(lambda t: t.type != neondata.ThumbnailType.DEFAULT, 
-            thumbs)
-
-        if len(dt) == 0 or len(rt) < 4:
-            raise Exception('Not enough thumbnails to process.')
-         
-        tas['collection_url'] = \
-           "{base_url}/share/video/{vid}/account/{aid}/token/{token}/".format(
-               base_url=options.frontend_base_url, 
-               vid=neondata.InternalVideoID.to_external(video.key), 
-               aid=video.get_account_id(), 
-               token=video.share_token) 
-        
-        th_info = sorted(
-            [(t.urls[0], t.get_estimated_lift(dt[0])) for t in rt], 
-            key=lambda x: x[1], 
-            reverse=True)
-
-        tas['top_thumbnail'] = th_info[0][0]
-        tas['lift'] = "{0:.0f}%".format(float(th_info[0][1] * 100)) 
-  
-        tas['thumbnail_one'] = th_info[1][0]
-        tas['thumbnail_two'] = th_info[2][0] 
-        tas['thumbnail_three'] = th_info[3][0]
-
-        raise tornado.gen.Return(tas)
+    def _get_email_params(self, video):
+        '''Return a dictionary of parameters that will be sent to the email handler.'''
+        raise NotImplementedError()
 
     @tornado.gen.coroutine
     def _set_job_timeout(self, duration=None, size=None,
@@ -910,6 +873,13 @@ class VideoProcessor(object):
                 # fix that
                 yield thumb.score_image(self.model.predictor,
                                         save_object=True)
+                # We might have added a default thumb so get the
+                # newest VideoMetadata object.
+                # TODO(mdesnoyer): Refactor this with the above issue
+                # so that this call is not necessary.
+                self.video_metadata = yield neondata.VideoMetadata.get(
+                    self.video_metadata.key,
+                    async=True)
 
         except (neondata.ThumbDownloadError,
                 model.errors.PredictionError) as e:
@@ -917,7 +887,7 @@ class VideoProcessor(object):
             # don't error out if we cannot get thumb
             if is_user_default_thumb:
                 _log.warn("Default thumbnail download failed for vid %s" %
-                          video_id)
+                          api_request.video_id)
                 statemon.state.increment('default_thumb_error')
                 err_msg = "Failed to download default thumbnail: %s" % e
                 raise DefaultThumbError(err_msg)
@@ -1008,7 +978,7 @@ class ThumbnailProcessor(VideoProcessor):
 
         # Attach the thumbnails to the video. This will upload the
         # thumbnails to the appropriate CDNs.
-        video_result = neondata.VideoJobThumbnailList(
+        self.video_result = neondata.VideoJobThumbnailList(
             age=self.job_params.get('age'),
             gender=self.job_params.get('gender'),
             model_version=self.model_version)
@@ -1028,7 +998,7 @@ class ThumbnailProcessor(VideoProcessor):
             if (thumb_meta.type != neondata.ThumbnailType.NEON and 
                 len(same_thumbs) > 0):
                 same_thumbs = sorted(same_thumbs, key=lambda x: x.rank)
-                video_result.thumbnail_ids.append(same_thumbs[0].key)
+                self.video_result.thumbnail_ids.append(same_thumbs[0].key)
             else:
                 # Fill out the data on this thumb and add it to the results
                 yield thumb_meta.add_image_data(image, self.video_metadata,
@@ -1036,7 +1006,7 @@ class ThumbnailProcessor(VideoProcessor):
                                                 async=True)
                 yield thumb_meta.score_image(self.model.predictor,
                                              image=PILImageUtils.to_cv(image))
-                video_result.thumbnail_ids.append(thumb_meta.key)
+                self.video_result.thumbnail_ids.append(thumb_meta.key)
                 
         for thumb_meta, image in self.bad_thumbnails:
             yield thumb_meta.add_image_data(image, self.video_metadata,
@@ -1048,7 +1018,7 @@ class ThumbnailProcessor(VideoProcessor):
             except model.errors.PredictionError as e:
                 _log.warn('Error scoring image: %s' % e)
                 # It's ok if it's not scored, so continue
-            video_result.bad_thumbnail_ids.append(thumb_meta.key)
+            self.video_result.bad_thumbnail_ids.append(thumb_meta.key)
 
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
@@ -1076,8 +1046,8 @@ class ThumbnailProcessor(VideoProcessor):
                 _merge_thumbnails,
                 create_missing=True,\
                 async=True)
-            if len(self.thumbnails) + len(self.bad_thumbnails) > 0 and 
-                len(new_thumb_dict) == 0:
+            if (len(self.thumbnails) + len(self.bad_thumbnails) > 0 and 
+                len(new_thumb_dict) == 0):
                 raise DBError("Couldn't change some thumbs")
         except Exception, e:
             _log.error("Error writing thumbnail data to database: %s" % e)
@@ -1094,7 +1064,7 @@ class ThumbnailProcessor(VideoProcessor):
                 neondata.ThumbnailType.CENTERFRAME,
                 neondata.ThumbnailType.RANDOM]]
             tidset = set(keep_thumbs +
-                         video_result.thumbnail_ids)
+                         self.video_result.thumbnail_ids)
             video_obj.thumbnail_ids = [x for x in tidset]
 
             # If there isn't a job result from before, but something
@@ -1116,15 +1086,16 @@ class ThumbnailProcessor(VideoProcessor):
             # Update the job results
             found_result = False
             for result in video_obj.job_results:
-                if (result.age == video_result.age and 
-                    result.gender == video_result.gender):
+                if (result.age == self.video_result.age and 
+                    result.gender == self.video_result.gender):
                     # Replace the last run with these parameters
-                    result.thumbnail_ids = video_result.thumbnail_ids
-                    result.bad_thumbnail_ids = video_result.bad_thumbnail_ids
-                    result.model_version = video_result.model_version
+                    result.thumbnail_ids = self.video_result.thumbnail_ids
+                    result.bad_thumbnail_ids = \
+                      self.video_result.bad_thumbnail_ids
+                    result.model_version = self.video_result.model_version
                     found_result = True
             if not found_result:
-                video_obj.job_results.append(video_result)
+                video_obj.job_results.append(self.video_result)
             
             video_obj.url = self.video_metadata.url
             video_obj.duration = self.video_metadata.duration
@@ -1173,8 +1144,8 @@ class ThumbnailProcessor(VideoProcessor):
                 raise DBError(msg)
         # Otherwise update the name of the tag to match the video title
         else:
-            def _set_tag_name(obj):
-                tag.name = api_request.video_title
+            def _set_tag_name(tag_obj):
+                tag_obj.name = api_request.video_title
             try:
                 tag = yield neondata.Tag.modify(self.video_metadata.tag_id,
                                                 _set_tag_name,
@@ -1187,21 +1158,19 @@ class ThumbnailProcessor(VideoProcessor):
                 statemon.state.increment('tag_write_error')
                 raise DBError(msg)
 
-        _tag_thumb_ids = (video_result.thumbnail_ids +
-            video_result.bad_thumbnail_ids +
+        _tag_thumb_ids = (self.video_result.thumbnail_ids +
+            self.video_result.bad_thumbnail_ids +
             self.video_metadata.non_job_thumb_ids)
         try:
             ct = yield neondata.TagThumbnail.save_many(
                 tag_id=tag.get_id(),
                 thumbnail_id=_tag_thumb_ids,
                 async=True)
-            if not ct:
-                raise DBError('Could not save tag thumbnail mappings')
         except Exception as e:
             msg = "Error mapping thumbs to tags: %s" % e
-                _log.error(msg)
-                statemon.state.increment('tag_write_error')
-                raise DBError(msg)
+            _log.error(msg)
+            statemon.state.increment('tag_write_error')
+            raise DBError(msg)
 
         # Enable the video to be served if we have any thumbnails available
         def _set_serving_enabled_and_tag(video_obj):
@@ -1211,7 +1180,7 @@ class ThumbnailProcessor(VideoProcessor):
         try:
             self.video_metadata = yield neondata.VideoMetadata.modify(
                 self.video_metadata.key,
-                _set_serving_enabled,
+                _set_serving_enabled_and_tag,
                 async=True)
             if not self.video_metadata:
                 raise DBError('Video modification error. It was not there.')
@@ -1221,6 +1190,21 @@ class ThumbnailProcessor(VideoProcessor):
             statemon.state.increment('save_vmdata_error')
             raise DBError(msg)
 
+    def _build_callback_response(self):
+        frames = [x[0].frameno for x in self.thumbnails
+            if x[0].type == neondata.ThumbnailType.NEON]
+        fnos = frames[:self.n_thumbs]
+        thumbs = [x[0].key for x in self.thumbnails 
+            if x[0].type == neondata.ThumbnailType.NEON]
+        thumbs = thumbs[:self.n_thumbs]
+
+        cresp = neondata.VideoCallbackResponse(
+            self.video_metadata.job_id,
+            vid=neondata.InternalVideoID.to_external(self.video_metadata.key),
+            fnos=fnos,
+            thumbs=thumbs,
+            s_url=self.video_metadata.get_serving_url(save=False))
+        return cresp.to_dict()
         
 
     @tornado.gen.coroutine
@@ -1297,6 +1281,47 @@ class ThumbnailProcessor(VideoProcessor):
                     % (frameno, self.video_url))
         statemon.state.increment('extract_frame_error')
         raise BadVideoError('Error reading frame %i of video' % frameno)
+
+    @tornado.gen.coroutine    
+    def _get_email_params(self, video):
+        tas = {}  
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            video.thumbnail_ids,
+            async=True)
+
+        dt = filter(lambda t: t.type == neondata.ThumbnailType.DEFAULT,
+            thumbs)
+        rt = filter(lambda t: t.type != neondata.ThumbnailType.DEFAULT, 
+            thumbs)
+
+        if len(dt) == 0 or len(rt) < 4:
+            raise Exception('Not enough thumbnails to process.')
+         
+        tas['collection_url'] = \
+           "{base_url}/share/video/{vid}/account/{aid}/token/{token}/".format(
+               base_url=options.frontend_base_url, 
+               vid=neondata.InternalVideoID.to_external(video.key), 
+               aid=video.get_account_id(), 
+               token=video.share_token) 
+        
+        th_info = sorted(
+            [(t.urls[0], t.get_estimated_lift(dt[0])) for t in rt], 
+            key=lambda x: x[1], 
+            reverse=True)
+
+        tas['top_thumbnail'] = th_info[0][0]
+        tas['lift'] = "{0:.0f}%".format(float(th_info[0][1] * 100)) 
+  
+        tas['thumbnail_one'] = th_info[1][0]
+        tas['thumbnail_two'] = th_info[2][0] 
+        tas['thumbnail_three'] = th_info[3][0]
+
+        raise tornado.gen.Return({
+            'template_slug' : 'video-results',
+            'template_args' : tas,  
+            'subject' : 'Your Neon Images Are Here!', 
+            'from_name' : 'Neon Video Results'}
+            )
         
 
 class ClipProcessor(VideoProcessor):
@@ -1311,7 +1336,7 @@ class ClipProcessor(VideoProcessor):
         self.clip_length = self.job_params.get('clip_length', None)
         if self.clip_length is not None:
             self.clip_length = float(self.clip_length)
-        self.clips = [] # List of (ClipMetadata, mp4 of clip) 
+        self.clips = [] # List of ClipMetadata objects
 
     @tornado.gen.coroutine
     def _process_video_impl(self, mov):
@@ -1340,6 +1365,22 @@ class ClipProcessor(VideoProcessor):
             )
             self.clips.append(cmeta)
             rank += 1
+
+    def _build_callback_response(self):
+        clip_ids = [x[0].get_id() for x in self.clips 
+                    if x[0].type == neondata.ThumbnailType.NEON]
+
+        cresp = neondata.VideoCallbackResponse(
+            self.video_metadata.job_id,
+            vid=neondata.InternalVideoID.to_external(self.video_metadata.key),
+            s_url=self.video_metadata.get_serving_url(save=False),
+            clip_ids=clip_ids)
+        return cresp.to_dict()
+
+    @tornado.gen.coroutine    
+    def _get_email_params(self, video):
+        '''Return a dictionary of parameters that will be sent to the email handler.'''
+        raise DoNotEmail()
 
 class VideoClient(multiprocessing.Process):
    
