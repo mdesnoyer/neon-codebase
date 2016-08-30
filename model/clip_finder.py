@@ -421,15 +421,9 @@ class RegionScore(object):
 
         Both of these may be set after the fact.
         """
-        self._weights = None
-        self._regions = regions
-        self._filters = []
-        if weights:
-            self.set_weights(weights)
-        if regions:
-            self.set_regions(regions)
-        if filters:
-            self.set_filters(filters)
+        self.set_weights(weights)
+        self.set_regions(regions)
+        self.set_filters(filters)
         # self._props is a dict of dicts as:
         # self._props[property][frame] = raw_score
         self._props = defaultdict(lambda: dict())
@@ -439,20 +433,28 @@ class RegionScore(object):
         self._mt_lock = Lock()
 
     def set_weights(self, weights):
-        try:
-            self.property_names = weights.keys()
-        except AttributeError, e:
-            raise AttributeError('weights must be a dict mapping property to importance')
-        self._weights = weights
+        if weights:
+            try:
+                self.property_names = weights.keys()
+            except AttributeError, e:
+                raise AttributeError('weights must be a dict mapping property '
+                                     'to importance')
+            self._weights = weights
+        else:
+            self._weights = None
 
     def set_regions(self, regions):
-        if regions[0] == 0:
-            self._regions = regions[1:]
+        if regions:
+            if regions[0] == 0:
+                self._regions = regions[1:]
+            else:
+                self._regions = regions[:]
         else:
-            self._regions = regions[:]
+            self._regions = None
 
     def set_filters(self, filters):
-        self.filters = filters
+        self.filters = filters or []
+            
 
     def update(self, property_name, frame, raw_score):
         """ updates the scoring objects knowledge, can be multithreaded """

@@ -70,7 +70,7 @@ class Model(object):
         self.predictor = predictor
         self.filt = filt
         self.clip_finder = clip_finder
-        if video_searcher is None:
+        if vid_searcher is None:
             raise ValueError('A vid_searcher is required')
         else:
             self.video_searcher = vid_searcher
