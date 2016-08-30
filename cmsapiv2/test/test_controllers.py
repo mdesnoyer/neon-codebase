@@ -9392,6 +9392,8 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
             until=0.0,
             tag_type=None)
 
+        search.stop()
+
     @tornado.testing.gen_test
     def test_search_no_item(self):
         response = yield self.http_client.fetch(self.url, headers=self.headers)
