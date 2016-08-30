@@ -6301,6 +6301,14 @@ class VideoMetadata(Searchable, StoredObject):
         # Tag ids associate lists of thumbnails to the video.
         self.tag_id = tag_id
 
+    @property
+    def clip_ids(self):
+        '''Returns a unique list of clip ids associated with this video.'''
+        return reduce(
+            lambda x,y: x | y,
+            [set(x.clip_ids) for x in self.job_results],
+            set())
+
     @staticmethod
     def _get_search_arguments():
         return [
@@ -6690,7 +6698,7 @@ class VideoCallbackResponse(AbstractJsonResponse):
                  s_url=None, err=None,
                  processing_state=RequestState.UNKNOWN,
                  experiment_state=ExperimentState.UNKNOWN,
-                 winner_thumbnail=None):
+                 winner_thumbnail=None,  clip_ids=None):
         self.job_id = jid
         self.video_id = vid
         self.framenos = fnos if fnos is not None else []
@@ -6701,6 +6709,7 @@ class VideoCallbackResponse(AbstractJsonResponse):
         self.set_processing_state(processing_state)
         self.experiment_state = experiment_state
         self.winner_thumbnail = winner_thumbnail
+        self.clip_ids = clip_ids or []
 
     def set_processing_state(self, internal_state):
         self.processing_state = ExternalRequestState.from_internal_state(
