@@ -1855,7 +1855,10 @@ class VideoHelper(object):
         result_type = args.get('result_type', None) 
         if result_type and result_type.lower() == neondata.ResultType.CLIPS:
             request.n_clips = int(args.get('n_clips', 1)) 
-            request.result_type = result_type 
+            request.result_type = result_type
+            request.clip_length = args.get('clip_length', None)
+            if request.clip_length is not None:
+                request.clip_length = float(request.clip_length)
         else: 
             request.result_type = neondata.ResultType.THUMBNAILS 
             request.api_param = int(args.get('n_thumbs', 5))
@@ -2247,7 +2250,8 @@ class VideoHandler(ShareableContentHandler):
             'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
             'gender': In(model.predictor.VALID_GENDER),
             'age': In(model.predictor.VALID_AGE_GROUP),
-            'n_clips': All(Coerce(int), Range(min=1, max=8)),  
+            'n_clips': All(Coerce(int), Range(min=1, max=8)),
+            'clip_length': All(Coerce(float), Range(min=0.0)),
             'result_type': In(neondata.ResultType.ARRAY_OF_TYPES) 
         })
 

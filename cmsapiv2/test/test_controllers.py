@@ -2321,6 +2321,48 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(job.api_param, None)
         self.assertEquals(job.n_clips, 1)
         self.assertEquals(job.result_type, neondata.ResultType.CLIPS)
+        self.assertIsNone(job.clip_length)
+        self.assertIsNone(job.age)
+        self.assertIsNone(job.gender)
+
+    @patch('cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
+    @tornado.testing.gen_test
+    def test_post_video_with_clip_with_length(self, cmsdb_download_image_mock):
+        
+        url = ('/api/v2/{0}/videos?integration_id={1}'\
+               '&external_video_ref=1234ascs'\
+               '&default_thumbnail_url=url.invalid'\
+               '&title=a_title'\
+               '&url=some_url'\
+               '&thumbnail_ref=ref1'\
+               '&duration=16'\
+               '&result_type=clips'\
+               '&clip_length=5.3'\
+               '&n_clips=3').format(self.account_id_api_key,
+                                          self.test_i_id)
+        cmsdb_download_image_mock = self._future_wrap_mock(
+            cmsdb_download_image_mock)
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202)
+        rjson = json.loads(response.body)
+        self.assertNotEquals(rjson['job_id'],'')
+        job = yield neondata.NeonApiRequest.get(rjson['job_id'],
+                                                self.account_id_api_key,
+                                                async=True)
+
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertDictContainsSubset(json.loads(cargs[1]), job.__dict__)
+        self.assertEquals(cargs[2], 16)
+        self.assertEquals(job.api_param, None)
+        self.assertEquals(job.n_clips, 3)
+        self.assertEquals(job.result_type, neondata.ResultType.CLIPS)
+        self.assertAlmostEquals(job.clip_length, 5.3)
         self.assertIsNone(job.age)
         self.assertIsNone(job.gender)
 

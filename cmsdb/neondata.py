@@ -4840,7 +4840,8 @@ class NeonApiRequest(NamespacedStoredObject):
             age=None,
             gender=None, 
             result_type=None, 
-            n_clips=None):
+            n_clips=None,
+            clip_length=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -4892,7 +4893,10 @@ class NeonApiRequest(NamespacedStoredObject):
         self.result_type = result_type 
 
         # number of clips that would be desired if clips are chosen 
-        self.n_clips = n_clips  
+        self.n_clips = n_clips
+
+        # desired length of clip in seconds
+        self.clip_length = clip_length
 
     @classmethod
     def key2id(cls, key):
@@ -5577,9 +5581,10 @@ class ClipMetadata(StoredObject):
     '''
     def __init__(self, clip_id, video_id=None, urls=None,
                  model_version=None, enabled=True,
-                 rank=None, refid=None,
+                 refid=None, score=None,
                  serving_frac=None, ctr=None,
-                 features=None, start_frame=None, end_frame=None):
+                 start_frame=None, end_frame=None,
+                 model_params=None):
         super(ClipMetadata,self).__init__(clip_id)
        
         # video id this clip was generated from  
@@ -5588,8 +5593,6 @@ class ClipMetadata(StoredObject):
         self.urls = urls or [] 
         # is this clip enabled for mastermind A/B testing 
         self.enabled = enabled
-        # where this clip ranks amongst the other clips
-        self.rank = 0 if not rank else rank 
         # what version of the model generated this clip
         self.model_version = model_version 
         # what frame this clip starts at 
@@ -5597,10 +5600,11 @@ class ClipMetadata(StoredObject):
         # what frame this clip ends at 
         self.end_frame = end_frame
         
-        # This is a full feature vector. It stores a numpy array of
-        # floats.  Each index is dependent on the model used. Human
-        # readable versions of this exist in the Features table.
-        self.features = features 
+        # The score of this clip. Higher is better
+        self.score = score 
+
+        # Dictionary of parameters used to generate this score
+        self.model_params = model_params or {}
          
     @classmethod
     def _baseclass_name(cls):
@@ -5608,16 +5612,19 @@ class ClipMetadata(StoredObject):
         '''
         return ClipMetadata.__name__
 
-    @classmethod
-    def _additional_columns(cls):
-        return [PostgresColumn('features', '%s::bytea', 'features')]
-
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
         # TODO 
-        raise tornado.gen.Return(None) 
-
+        raise tornado.gen.Return(None)
+    
+class Rendition(StoredObject):
+    '''
+    Class schema for a rendition of a video 
+    '''
+    def __init__(self):
+        pass
+    
 class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
