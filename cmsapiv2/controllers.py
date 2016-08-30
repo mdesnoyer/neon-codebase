@@ -1848,32 +1848,32 @@ class VideoHelper(object):
         account_id_api_key -- the account_id/api_key
         """
         job_id = uuid.uuid1().hex
-        integration_id = args.get('integration_id', None)
+        integration_id = args.get('integration_id')
 
         request = neondata.NeonApiRequest(job_id, api_key=account_id_api_key)
         request.video_id = args['external_video_ref']
         if integration_id:
             request.integration_id = integration_id
-        request.video_url = args.get('url', None)
-        request.callback_url = args.get('callback_url', None)
-        request.video_title = args.get('title', None)
-        request.default_thumbnail = args.get('default_thumbnail_url', None)
-        request.external_thumbnail_ref = args.get('thumbnail_ref', None)
-        request.publish_date = args.get('publish_date', None)
-        request.callback_email = args.get('callback_email', None)
-        request.age = args.get('age', None)
-        request.gender = args.get('gender', None)
-       
-        # set the requests result type  
-        result_type = args.get('result_type', None) 
+        request.video_url = args.get('url')
+        request.callback_url = args.get('callback_url')
+        request.video_title = args.get('title')
+        request.default_thumbnail = args.get('default_thumbnail_url')
+        request.external_thumbnail_ref = args.get('thumbnail_ref')
+        request.publish_date = args.get('publish_date')
+        request.callback_email = args.get('callback_email')
+        request.age = args.get('age')
+        request.gender = args.get('gender')
+
+        # set the requests result type
+        result_type = args.get('result_type')
         if result_type and result_type.lower() == neondata.ResultType.CLIPS:
-            request.n_clips = int(args.get('n_clips', 1)) 
+            request.n_clips = int(args.get('n_clips', 1))
             request.result_type = result_type
-            request.clip_length = args.get('clip_length', None)
+            request.clip_length = args.get('clip_length')
             if request.clip_length is not None:
                 request.clip_length = float(request.clip_length)
-        else: 
-            request.result_type = neondata.ResultType.THUMBNAILS 
+        else:
+            request.result_type = neondata.ResultType.THUMBNAILS
             request.api_param = int(args.get('n_thumbs', 5))
 
         yield request.save(async=True)
@@ -2262,14 +2262,14 @@ class VideoHandler(ShareableContentHandler):
             'age': In(model.predictor.VALID_AGE_GROUP),
             'n_clips': All(Coerce(int), Range(min=1, max=8)),
             'clip_length': All(Coerce(float), Range(min=0.0)),
-            'result_type': In(neondata.ResultType.ARRAY_OF_TYPES) 
+            'result_type': In(neondata.ResultType.ARRAY_OF_TYPES)
         })
 
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        result_type = args.get('result_type', None) 
-        if not result_type: 
-            args['result_type'] = neondata.ResultType.THUMBNAILS 
+        result_type = args.get('result_type')
+        if not result_type:
+            args['result_type'] = neondata.ResultType.THUMBNAILS
 
         schema(args)
 
@@ -3980,49 +3980,42 @@ class SocialImageHandler(ShareableContentHandler):
     def get_access_levels(cls):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
-class ClipHandler(APIV2Handler): 
+class ClipHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             'clip_ids': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
-        }) 
-        
+        })
+
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
-
-        clip_ids = args['clip_ids'].split(',')
-        
-        fields = args.get('fields', None)
-        if fields:
-            fields = set(fields.split(','))
+        args = schema(args)
+        clip_ids = args['clip_ids']
+        fields = args.get('fields')
 
         _clips = yield neondata.ClipMetadata.get_many(
             clip_ids,
             create_default=False,
             log_missing=False,
             async=True)
-
         clips_dict = {}
-        clips = yield [self.db2api(obj, fields)
-                         for obj in _clips]
+        clips = yield [self.db2api(obj, fields) for obj in _clips]
         clips_dict['clips'] = clips
         clips_dict['count'] = len(clips)
-
         self.success(clips_dict)
 
     @classmethod
     def _get_default_returned_fields(cls):
         return ['video_id', 'clip_id', 'rank', 'start_frame',
-                'enabled', 'urls', 'renditions', 'end_frame', 
+                'enabled', 'urls', 'renditions', 'end_frame',
                 'created', 'updated']
 
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'start_frame',
-                'enabled', 'urls', 'renditions', 'end_frame', 
+                'enabled', 'urls', 'renditions', 'end_frame',
                 'created', 'updated']
 
     @classmethod
@@ -4033,7 +4026,7 @@ class ClipHandler(APIV2Handler):
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
         elif field == 'clip_id':
             retval = obj.key
-        # TODO neon_score, feature_ids, renditions 
+        # TODO neon_score, feature_ids, renditions
         elif field == 'url':
             retval = obj.urls[0] if obj.urls else []
         else:
@@ -4043,9 +4036,7 @@ class ClipHandler(APIV2Handler):
 
     @classmethod
     def get_access_levels(self):
-        return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ 
-        } 
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
 '''*********************************************************************
 Endpoints

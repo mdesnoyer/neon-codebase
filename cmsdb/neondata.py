@@ -5619,30 +5619,30 @@ class ClipMetadata(StoredObject):
                  start_frame=None, end_frame=None,
                  model_params=None, rendition_ids=None):
         super(ClipMetadata,self).__init__(clip_id)
-       
-        # video id this clip was generated from  
+
+        # video id this clip was generated from
         self.video_id = video_id
         # url for this clip
-        self.urls = urls or [] 
-        # is this clip enabled for mastermind A/B testing 
+        self.urls = urls or []
+        # is this clip enabled for mastermind A/B testing
         self.enabled = enabled
         # what version of the model generated this clip
-        self.model_version = model_version 
-        # what frame this clip starts at 
+        self.model_version = model_version
+        # what frame this clip starts at
         self.start_frame = start_frame
-        # what frame this clip ends at 
+        # what frame this clip ends at
         self.end_frame = end_frame
 
         # List of video rendition ids for versions of this clip that
         # are available
         self.rendition_ids = rendition_ids or []
-        
+
         # The score of this clip. Higher is better
-        self.score = score 
+        self.score = score
 
         # Dictionary of parameters used to generate this score
         self.model_params = model_params or {}
-         
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -5652,12 +5652,27 @@ class ClipMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
-        # TODO, 
+        ## TODO,
         raise tornado.gen.Return(None)
-    
+        #
+        #clip_i = 0
+        #for clip in clips:
+        #out_splits = options.output.rpartition('.')
+        #out_fn = '%s_%i.%s' % (out_splits[0], clip_i, out_splits[2])
+        #_log.info('Output clip %i with score %f to %s' %
+        #(clip_i, clip.score, out_fn))
+        #clip_i += 1
+        #
+        #writer = imageio.get_writer(out_fn, 'FFMPEG', fps=30.0)
+        #try:
+        #for frame in pycvutils.iterate_video(mov, clip.start, clip.end):
+        #writer.append_data(frame[:,:,::-1])
+        #finally:
+        #writer.close()
+
 class VideoRendition(StoredObject):
     '''
-    Class schema for a rendition of a video 
+    Class schema for a rendition of a video
     '''
     def __init__(self, rendition_id=None, url=None, width=None,
                  height=None, duration=None, codec=None, container=None,
@@ -5689,7 +5704,7 @@ class VideoRendition(StoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return VideoRendition.__name__
-    
+
 class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
@@ -6189,8 +6204,8 @@ class VideoJobThumbnailList(UnsaveableStoredObject):
     '''Represents the list of thumbnails from a video processing job.'''
     def __init__(self, age=None, gender=None, thumbnail_ids=None,
                  bad_thumbnail_ids=None,
-                 clip_ids=None, 
-                 model_version=None):
+                 model_version=None,
+                 clip_ids=None):
         self.model_version = model_version
         self.thumbnail_ids = thumbnail_ids or []
         self.bad_thumbnail_ids = bad_thumbnail_ids or []
