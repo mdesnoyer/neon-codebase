@@ -2816,13 +2816,13 @@ class VideoSearchInternalHandler(APIV2Handler):
         args = self.parse_args()
         args = schema(args)
 
-        since = args.get('since', None)
-        until = args.get('until', None)
-        query = args.get('query', None)
+        since = args.get('since')
+        until = args.get('until')
+        query = args.get('query')
 
-        account_id = args.get('account_id', None)
-        limit = int(args.get('limit', 25))
-        fields = args.get('fields', None)
+        account_id = args.get('account_id')
+        limit = int(args.get('limit'))
+        fields = args.get('fields')
 
         vid_dict = yield VideoHelper.get_search_results(
                        account_id,
@@ -2958,8 +2958,8 @@ class VideoSearchExternalHandler(APIV2Handler):
         query = args.get('query')
         show_hidden = args.get('show_hidden')
 
-        limit = int(args.get('limit', 25))
-        fields = args.get('fields', None)
+        limit = int(args.get('limit'))
+        fields = args.get('fields')
 
         base_url = '/api/v2/%s/videos/search' % account_id
         vid_dict = yield VideoHelper.get_search_results(
@@ -3685,7 +3685,7 @@ class FeatureHandler(APIV2Handler):
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
-        schema(args)
+        args = schema(args)
         model_name = args.get('model_name', None)
         keys = args.get('key', None)
 
