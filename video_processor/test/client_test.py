@@ -21,6 +21,7 @@ from boto.sqs.message import Message
 import boto.exception
 import cmsdb.cdnhosting
 from cmsdb import neondata
+import cv2
 from cvutils.imageutils import PILImageUtils
 import integrations
 from itertools import chain
@@ -68,7 +69,7 @@ import utils.ps
 from utils import statemon
 import video_processor.client
 import video_processor.video_processing_queue
-from video_processor.client import VideoClient, VideoProcessor
+from video_processor.client import VideoClient
 import youtube_dl
 
 _log = logging.getLogger(__name__)
@@ -279,7 +280,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.api_request.api_method = 'topn'
         self.api_request.api_param = 1 
         self.api_request.save()
-        vprocessor = VideoProcessor(
+        vprocessor = video_processor.client.ThumbnailProcessor(
             job,
             self.model,
             self.model_version,
@@ -663,7 +664,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         '''Verify execution of the process_all call in ProcessVideo'''
 
         vprocessor = self.setup_video_processor("neon", url='http://video.com')
-        yield vprocessor.process_video(self.test_video_file, n_thumbs=6, m_thumbs=6)
+        vprocessor.n_thumbs = 6
+        vprocessor.m_thumbs = 6
+        yield vprocessor.process_video(self.test_video_file)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
@@ -718,7 +721,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.api_request.state = state
             self.api_request.save()
             with self.assertRaises(video_processor.client.OtherWorkerCompleted):
-                yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+                yield vprocessor.process_video(self.test_video_file)
 
         # Try when the current run should continue
         for state in [neondata.RequestState.SUBMIT,
@@ -730,7 +733,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             vprocessor = self.setup_video_processor('neon')
             self.api_request.state = state
             self.api_request.save()
-            yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+            yield vprocessor.process_video(self.test_video_file)
             self.assertGreater(len(vprocessor.thumbnails), 0)
 
     @tornado.testing.gen_test
@@ -751,7 +754,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield al.save(async=True) 
         yield vprocessor.video_metadata.save(async=True)
         with self.assertRaises(video_processor.client.BadVideoError) as e:
-            yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+            yield vprocessor.process_video(self.test_video_file)
 
         api_request = yield neondata.NeonApiRequest.get(
             vprocessor.job_params['job_id'],
@@ -771,7 +774,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                  float('-inf'), 600,
                                  filtered_reason='black')], []
         vprocessor = self.setup_video_processor("neon")
-        yield vprocessor.process_video(self.test_video_file2, n_thumbs=2)
+        vprocessor.n_thumbs = 2
+        yield vprocessor.process_video(self.test_video_file2)
 
         # Verify that all the frames were added to the data maps
         neon_thumbs = [x[0] for x in vprocessor.thumbnails if
@@ -806,13 +810,17 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(
+        vprocessor = video_processor.client.ThumbnailProcessor(
             job,
             self.model,
             self.model_version, multiprocessing.BoundedSemaphore(1),
             self.job_queue_mock,
             self.job_message)
-        yield vprocessor._get_center_frame(self.test_video_file)
+        mov = cv2.VideoCapture(self.test_video_file)
+        try:
+            yield vprocessor._get_center_frame(mov)
+        finally:
+            mov.release()
         meta, img = vprocessor.thumbnails[0]
         self.assertIsNotNone(img)
         self.assertTrue(isinstance(img, Image.Image))
@@ -829,7 +837,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(
+        vprocessor = video_processor.client.ThumbnailProcessor(
             job,
             self.model,
             self.model_version,
@@ -837,16 +845,20 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.job_queue_mock,
             self.job_message
             )
-        yield vprocessor._get_random_frame(self.test_video_file)
-        meta1, img1 = vprocessor.thumbnails[0]
-        self.assertIsNotNone(img1)
-        self.assertTrue(isinstance(img1, Image.Image))
-        self.assertEqual(meta1.type, neondata.ThumbnailType.RANDOM)
-        self.assertEqual(meta1.rank, 0)
+        mov = cv2.VideoCapture(self.test_video_file)
+        try:
+            yield vprocessor._get_random_frame(mov)
+            meta1, img1 = vprocessor.thumbnails[0]
+            self.assertIsNotNone(img1)
+            self.assertTrue(isinstance(img1, Image.Image))
+            self.assertEqual(meta1.type, neondata.ThumbnailType.RANDOM)
+            self.assertEqual(meta1.rank, 0)
 
-        yield vprocessor._get_random_frame(self.test_video_file)
-        meta2, img2 = vprocessor.thumbnails[1]
-        self.assertNotEqual(meta2.frameno, meta1.frameno)
+            yield vprocessor._get_random_frame(mov)
+            meta2, img2 = vprocessor.thumbnails[1]
+            self.assertNotEqual(meta2.frameno, meta1.frameno)
+        finally:
+            mov.release()
 
     @tornado.testing.gen_test
     def test_dequeue_job(self):

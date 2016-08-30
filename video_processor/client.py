@@ -207,9 +207,23 @@ class VideoProcessor(object):
 
         self.executor = concurrent.futures.ThreadPoolExecutor(10)
 
+        self._mov = None
+
     def __del__(self):
         # Clean up the executor
         self.executor.shutdown(False)
+
+        self.mov = None
+
+    @property
+    def mov(self):
+        return self._mov
+    
+    @mov.setter
+    def mov(self, value):
+        if self._mov:
+            self._mov.release()
+        self._mov = value
 
     @tornado.gen.coroutine
     def update_video_metadata_video_info(self):
@@ -328,6 +342,9 @@ class VideoProcessor(object):
         finally:
             #Delete the temp video file which was downloaded
             self.tempfile.close()
+
+            # Close the video capture object
+            self.mov = None
 
     @tornado.gen.coroutine
     def download_video_file(self):
@@ -565,7 +582,7 @@ class VideoProcessor(object):
 
         #Try to open the video file using openCV
         try:
-            mov = cv2.VideoCapture(video_file)
+            self.mov = cv2.VideoCapture(video_file)
         except Exception, e:
             _log.error("Error opening video file %s: %s"  % 
                        (self.video_url, e))
@@ -630,7 +647,7 @@ class VideoProcessor(object):
         self.model.update_processing_strategy(processing_strategy)
 
         try:
-            yield self._process_video_impl(mov)
+            yield self._process_video_impl(self.mov)
         except model.errors.VideoReadError:
                 msg = "Error using OpenCV to read video. %s" % self.video_url
                 _log.error(msg)
