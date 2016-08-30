@@ -30,7 +30,7 @@ httpagentparser==1.6.0
 avro==1.7.6
 thrift==0.9.1
 paramiko==1.14.0
-pandas==0.15.2
+pandas==0.18.1
 impyla==0.8.1
 dateutils==0.6.6
 winpdb==1.4.8
@@ -39,7 +39,7 @@ nose-cov==1.6
 happybase==0.9
 pyhs2==0.6.0
 voluptuous==0.8.7
-scikit-learn==0.16.1
+scikit-learn==0.17.1
 psycopg2==2.6.1
 queries==1.7.5
 PyJWT==1.4.0
@@ -52,4 +52,5 @@ youtube_dl>=2016.07.13
 hdfs==2.0.6
 grpcio==0.13.1
 requests-toolbelt==0.6.2
-imageio>=1.5
+PySceneDetect==0.3.4
+imageio==1.5

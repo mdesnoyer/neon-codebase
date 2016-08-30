@@ -25,6 +25,12 @@ import utils.obj
 from utils import statemon
 from model import video_searcher
 from model import local_video_searcher
+from utils.options import options, define
+
+define('model_data_dir', 
+       default=os.path.join(os.path.dirname(__file__), '..', '..',
+                            'model_data'),
+       help='Directory where the model data is stored')
 
 _log = logging.getLogger(__name__)
 
@@ -44,18 +50,31 @@ class VideoThumbnail(object):
 
     def __str__(self):
         return utils.obj.full_object_str(self, ['features', 'image'])
+
+class VideoClip(object):
+    '''Holds data about a video clip.'''
+    def __init__(self, start, end, score):
+        self.start = start # The start frame number
+        self.end = end # The end frame number
+        self.score = score # The score of this clip
+
+    def __str__(self):
+        return utils.obj.full_object_str(self)
     
 
 class Model(object):
     '''The whole model, which consists of a predictor and a filter.'''    
-    def __init__(self, predictor, filt=None, vid_searcher=None):
-        self.__version__ = 3
+    def __init__(self, predictor, filt=None, vid_searcher=None,
+                 clip_finder=None):
+        self.__version__ = 4
         self.predictor = predictor
         self.filt = filt
-        if video_searcher is None:
+        self.clip_finder = clip_finder
+        if vid_searcher is None:
             raise ValueError('A vid_searcher is required')
         else:
             self.video_searcher = vid_searcher
+        
 
 
     def __setstate__(self, state):
@@ -75,10 +94,17 @@ class Model(object):
         except Exception, e:
             _log.error(("Video Searcher does not support different "
                         "processing strategies."))
+        if self.clip_finder:
+            self.clip_finder.update_processing_strategy(processing_strategy)
+
+    def set_predictor(self, predictor):
+        self.predictor = predictor
+        self.clip_finder.predictor = predictor
+        self.video_searcher.predictor = predictor
 
     def reset(self):
         self.predictor.reset()
-
+        self.clip_finder.reset()
 
     def score(self, image, do_filtering=True):
         '''Scores a single image. 
@@ -102,10 +128,26 @@ class Model(object):
         '''Select the top n and/or bottom m thumbnails from a video.
 
         Returns:
-        List of VideoThumbnail objects sorted by score
+        List of VideoThumbnail objects sorted by score descending
         '''
         return self.video_searcher.choose_thumbnails(video, n, video_name, m)
 
+    def find_clips(self, mov, n=1, max_len=None, min_len=None):
+        '''Finds clips from a video.
+
+        If both max_len and min_len are None, then only complete scenes
+        will be returned.
+
+        Inputs:
+        mov - A OpenCV VideoCapture object
+        n - Number of clips to find
+        max_len - Max length of each clip (seconds)
+        min_len - Min length of each clip (seconds)
+
+        Outputs:
+        List of VideoClip objects sorted by score descending
+        '''
+        return self.clip_finder.find_clips(mov, n, max_len, min_len)
 
     def restore_additional_data(self, filename):
         '''
@@ -137,24 +179,30 @@ def load_model(filename):
 
     '''
     with open(filename, 'rb') as f:
-        model = pickle.load(f)
-    model.restore_additional_data(filename)
+        mod = pickle.load(f)
+    mod.restore_additional_data(filename)
     
-    return model 
+    return mod
 
-def generate_model(ls_inp_filename, predictor):
+def generate_model(filename, predictor):
     '''
-    Given a filename pointing to an input dict for 
-    local video searcher and a functioning instance
-    of the predictor, generates a new model.
+    Given a filename pointing to a pickled model, load the model
+    and set the predictor 
 
-    ls_inp_filename: A filename that contains a pickled dictionary of the
-        inputs required for local search (the combiner, face finder, etc)
+    ls_inp_filename: Filename of the pickled model
     predictor: an instance of the predictor.
     '''
-    with open(ls_inp_filename) as f:
-        ls_in_dict = pickle.load(f)
-    loc_srch = local_video_searcher.LocalSearcher(predictor, **ls_in_dict)
-    model = Model(predictor, vid_searcher=loc_srch)
-    model.restore_additional_data(ls_inp_filename)
-    return model
+    mod = load_model(filename)
+    mod.set_predictor(predictor)
+    return mod
+
+def save_custom_predictor(predictor, predictor_name):
+    '''Save a custom predictor with a given name.'''
+    with open(os.path.join(options.model_data_dir, predictor_name), 'wb') as f:
+        pickle.dump(predictor, f, 2)
+
+def load_custom_predictor(predictor_name):
+    '''Loads a custom predictor.'''
+    with open(os.path.join(options.model_data_dir, predictor_name), 'rb') as f:
+        pred = pickle.load(f)
+    return pred
