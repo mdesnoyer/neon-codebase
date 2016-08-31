@@ -1024,6 +1024,83 @@ class VideoProcessor(object):
             statemon.state.increment('save_vmdata_error')
             raise DBError("Error writing video data to database")
 
+    @tornado.gen.coroutine
+    def _tag_thumbnails(self, api_request):
+        '''Tags all the thumbnails with the tag associated with the video.
+
+        Creates a tag for this video if it doesn't exist.
+
+        Also makes sure any info on the tag is consistent.
+        '''
+        if not self.video_metadata.tag_id:
+            _log.warn(
+                'Video %s was missing tag at during thumbnail selection',
+                self.video_metadata.get_id())
+            tag = neondata.Tag(
+                None,
+                account_id=self.video_metadata.get_account_id(),
+                tag_type=neondata.TagType.VIDEO,
+                name=api_request.video_title,
+                video_id=self.video_metadata.get_id())
+            try:
+                success = yield tag.save(async=True)
+                if not success:
+                    raise DBError('Could not write tag')
+            except Exception as e:
+                msg = "Error saving the tag to database: %s" % e
+                _log.error(msg)
+                statemon.state.increment('tag_write_error')
+                raise DBError(msg)
+            self.video_metadata.tag_id = tag.get_id()
+        else:
+            #update the name of the tag to match the video title
+            def _set_tag_name(tag_obj):
+                tag_obj.name = api_request.video_title
+            try:
+                tag = yield neondata.Tag.modify(self.video_metadata.tag_id,
+                                                _set_tag_name,
+                                                async=True)
+                if not tag:
+                    raise DBError('Could not modify tag. It was not there')
+            except Exception as e:
+                msg = "Error saving the tag to database: %s" % e
+                _log.error(msg)
+                statemon.state.increment('tag_write_error')
+                raise DBError(msg)
+
+        # Tag all the new thumbnails with the tag
+        _tag_thumb_ids = (self.video_result.thumbnail_ids +
+            self.video_result.bad_thumbnail_ids +
+            self.video_metadata.non_job_thumb_ids)
+        try:
+            ct = yield neondata.TagThumbnail.save_many(
+                tag_id=self.video_metadata.tag_id,
+                thumbnail_id=_tag_thumb_ids,
+                async=True)
+        except Exception as e:
+            msg = "Error mapping thumbs to tags: %s" % e
+            _log.error(msg)
+            statemon.state.increment('tag_write_error')
+            raise DBError(msg)
+
+        # Enable the video to be served if we have any thumbnails available
+        def _set_serving_enabled_and_tag(video_obj):
+            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.tag_id = self.video_metadata.tag_id
+
+        try:
+            self.video_metadata = yield neondata.VideoMetadata.modify(
+                self.video_metadata.key,
+                _set_serving_enabled_and_tag,
+                async=True)
+            if not self.video_metadata:
+                raise DBError('Video modification error. It was not there.')
+        except Exception as e:
+            msg = "Error writing video data to database: %s" % e
+            _log.error(msg)
+            statemon.state.increment('save_vmdata_error')
+            raise DBError(msg)
+
 class ThumbnailProcessor(VideoProcessor):
     '''Processor that extracts thumbnails from a video.'''
     def __init__(self, params, model, model_version, cv_semaphore,
@@ -1161,73 +1238,7 @@ class ThumbnailProcessor(VideoProcessor):
 
         yield self._get_default_thumb(api_request, cdn_metadata)
 
-        # Set the association of the video tag and each thumbnail.
-        if not self.video_metadata.tag_id:
-            _log.warn(
-                'Video %s was missing tag at during thumbnail selection',
-                self.video_metadata.get_id())
-            tag = neondata.Tag(
-                None,
-                account_id=self.video_metadata.get_account_id(),
-                tag_type=neondata.TagType.VIDEO,
-                name=api_request.video_title,
-                video_id=self.video_metadata.get_id())
-            try:
-                success = yield tag.save(async=True)
-                if not success:
-                    raise DBError('Could not write tag')
-            except Exception as e:
-                msg = "Error saving the tag to database: %s" % e
-                _log.error(msg)
-                statemon.state.increment('tag_write_error')
-                raise DBError(msg)
-        # Otherwise update the name of the tag to match the video title
-        else:
-            def _set_tag_name(tag_obj):
-                tag_obj.name = api_request.video_title
-            try:
-                tag = yield neondata.Tag.modify(self.video_metadata.tag_id,
-                                                _set_tag_name,
-                                                async=True)
-                if not tag:
-                    raise DBError('Could not modify tag. It was not there')
-            except Exception as e:
-                msg = "Error saving the tag to database: %s" % e
-                _log.error(msg)
-                statemon.state.increment('tag_write_error')
-                raise DBError(msg)
-
-        _tag_thumb_ids = (self.video_result.thumbnail_ids +
-            self.video_result.bad_thumbnail_ids +
-            self.video_metadata.non_job_thumb_ids)
-        try:
-            ct = yield neondata.TagThumbnail.save_many(
-                tag_id=tag.get_id(),
-                thumbnail_id=_tag_thumb_ids,
-                async=True)
-        except Exception as e:
-            msg = "Error mapping thumbs to tags: %s" % e
-            _log.error(msg)
-            statemon.state.increment('tag_write_error')
-            raise DBError(msg)
-
-        # Enable the video to be served if we have any thumbnails available
-        def _set_serving_enabled_and_tag(video_obj):
-            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            video_obj.tag_id = tag.get_id()
-
-        try:
-            self.video_metadata = yield neondata.VideoMetadata.modify(
-                self.video_metadata.key,
-                _set_serving_enabled_and_tag,
-                async=True)
-            if not self.video_metadata:
-                raise DBError('Video modification error. It was not there.')
-        except Exception as e:
-            msg = "Error writing video data to database: %s" % e
-            _log.error(msg)
-            statemon.state.increment('save_vmdata_error')
-            raise DBError(msg)
+        yield self._tag_thumbnails(api_request)
 
     def _build_callback_response(self):
         frames = [x[0].frameno for x in self.thumbnails
@@ -1454,7 +1465,21 @@ class ClipProcessor(VideoProcessor):
         # Save the video information to the database
         yield self._merge_video_data()
             
-                
+        yield self._get_default_thumb(api_request, cdn_metadata)
+
+        yield self._tag_thumbnails(api_request)
+
+        # Finally tag all the clips to the video
+        try:
+            ct = yield neondata.ClipThumbnail.save_many(
+                tag_id=self.video_metadata.tag_id,
+                clip_id=self.video_result.clip_ids,
+                async=True)
+        except Exception as e:
+            msg = "Error mapping clips to tags: %s" % e
+            _log.error(msg)
+            statemon.state.increment('tag_write_error')
+            raise DBError(msg)
 
     def _build_callback_response(self):
         clip_ids = [x[0].get_id() for x in self.clips 
