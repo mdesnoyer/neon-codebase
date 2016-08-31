@@ -2496,12 +2496,13 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.state = neondata.RequestState.SERVING
         x.http_callback='http://some.where'
         x.response['framenos'] = [34, 61]
-        x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
       neondata.VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
                            winner_tid='key1_vid1_t2').save()
-      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
-                                       'key1_vid1_t2']).save()
+      vid = VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2'])
+      vid.serving_url = vid.get_serving_url(save=False)
+      vid.save()
       ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
       ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
@@ -2515,7 +2516,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
          'video_id' : 'vid1',
          'error': None,
          'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
+         'serving_url' : vid.get_serving_url(save=False),
          'processing_state' : neondata.ExternalRequestState.SERVING,
          'experiment_state' : neondata.ExperimentState.COMPLETE,
          'winner_thumbnail' : 'key1_vid1_t2'}
@@ -2539,10 +2540,11 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.state = neondata.RequestState.SERVING
         x.http_callback='http://some.where'
         x.response['framenos'] = [34, 61]
-        x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
-      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
-                                       'key1_vid1_t2']).save()
+      vid = VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2'])
+      vid.serving_url = vid.get_serving_url(save=False)
+      vid.save()
       ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
       ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
@@ -2556,7 +2558,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
          'video_id' : 'vid1',
          'error': None,
          'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
+         'serving_url' : vid.get_serving_url(save=False),
          'processing_state' : neondata.ExternalRequestState.SERVING,
          'experiment_state' : neondata.ExperimentState.UNKNOWN,
          'winner_thumbnail' : None}
@@ -2580,10 +2582,11 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.state = neondata.RequestState.FINISHED
         x.http_callback='http://some.where'
         x.response['framenos'] = [34, 61]
-        x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
-      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
-                                       'key1_vid1_t2']).save()
+      vid = VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2'])
+      vid.serving_url = vid.get_serving_url(save=False)
+      vid.save()
       ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
       ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
@@ -2597,7 +2600,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
          'video_id' : 'vid1',
          'error': None,
          'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
+         'serving_url' : vid.get_serving_url(save=False),
          'processing_state' : neondata.ExternalRequestState.PROCESSED,
          'experiment_state' : neondata.ExperimentState.UNKNOWN,
          'winner_thumbnail' : None}
