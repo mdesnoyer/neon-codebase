@@ -630,10 +630,6 @@ def _load_impala_table(**kwargs):
     except:
         statemon.state.increment('impala_table_load_failure')
         raise
-    finally:
-        if is_first_run and is_initial_data_load:
-            _log.info("Bringing down the number of task instances to zero")
-            cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
     return "Impala tables loaded"
 
@@ -704,13 +700,16 @@ def _update_table_build_times(**kwargs):
     """
     execution_date = kwargs['execution_date']
 
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+
+    _log.info("Bringing down the number of task instances to zero")
+    cluster.change_instance_group_size(group_type='TASK', new_size=0)
+
     # Do not update this table during backfills to ensure mastermind does not read old stats.
     # This table will be updated when backfill reaches the current day run or during normal processing
     # for current day run
     if execution_date.strftime("%Y/%m/%d") == datetime.utcnow().strftime("%Y/%m/%d"):
-        cluster = ClusterGetter.get_cluster()
-        cluster.connect()
-
         stats.impala_table.update_table_build_times(cluster)
 
 
