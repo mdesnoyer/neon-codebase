@@ -5933,6 +5933,13 @@ class ThumbnailMetadata(StoredObject):
         self.width = image.size[0]
         self.height = image.size[1]
         self.update_phash(image)
+
+        # Save the image as jpeg, then generate the key from its hash.
+        fmt = 'jpeg'
+        filestream = StringIO()
+        image.save(filestream, fmt, quality=90)
+        filestream.seek(0)
+        imgdata = filestream.read()
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
         # Host the primary copy of the image
