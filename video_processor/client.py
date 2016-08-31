@@ -1424,12 +1424,17 @@ class ClipProcessor(VideoProcessor):
             model_version=self.model_version,
             clip_ids=[x.get_id() for x in self.clips])
         
-        # Create thumbnails for all the clips
+        # Create the actual clip assets and the thumbnails for them
         self.clip_thumbs = []
-        cur_frame = None
         for clip in self.clips:
-            success, cur_frame = pycvutils.seek_video(self.mov,
-                                                      clip.start_frame)
+            _log.info('Creating assets for clip %i for video id %s' %
+                      (clip.rank, clip.video_id))
+            yield clip.add_clip_data(self.mov, self.video_metadata,
+                                     cdn_metadata)
+
+            # Now create the thumb
+            success, _ = pycvutils.seek_video(self.mov,
+                                              clip.start_frame)
             if success:
                 success, image = self.mov.read()
             if not success:
@@ -1471,7 +1476,7 @@ class ClipProcessor(VideoProcessor):
 
         # Finally tag all the clips to the video
         try:
-            ct = yield neondata.ClipThumbnail.save_many(
+            ct = yield neondata.TagClip.save_many(
                 tag_id=self.video_metadata.tag_id,
                 clip_id=self.video_result.clip_ids,
                 async=True)
