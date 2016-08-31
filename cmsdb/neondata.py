@@ -657,6 +657,11 @@ class TagType(object):
     VIDEO = 'video'
     COLLECTION = 'col'
 
+class VideoRenditionContainerType(object):
+    '''Valid video rendition types'''
+    MP4 = 'mp4'
+    GIF = 'gif'  # ffmpeg may only be able to take gif input for gif output
+
 class ExperimentState:
     '''A class that acts like an enum for the state of the experiment.'''
     UNKNOWN = 'unknown'
@@ -3724,7 +3729,8 @@ class CDNHostingMetadata(UnsaveableStoredObject):
                  source_crop=None,
                  crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True):
+                 crop_with_text_detection=True,
+                 video_rendition_sizes=None):
 
         self.key = key
 
@@ -3795,6 +3801,12 @@ class CDNHostingMetadata(UnsaveableStoredObject):
             [875, 500],
             [1280, 720]]
 
+        # @TODO configure clip render.
+        # List of 4-element list [width, height, container_type, codec].
+        self.video_rendition_sizes = video_rendition_sizes or [
+            [160, 90, 'mp4', 'h264'],
+            [320, 180, 'mp4', 'h264'],]
+
     @classmethod
     def _create(cls, key, obj_dict):
         obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
@@ -3802,7 +3814,7 @@ class CDNHostingMetadata(UnsaveableStoredObject):
         # Normalize the CDN prefixes
         obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
                                obj.cdn_prefixes)
-        
+
         return obj
 
     @staticmethod
@@ -3844,7 +3856,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
                  make_tid_folders=False, rendition_sizes=None, policy=None,
                  source_crop=None, crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True):
+                 crop_with_text_detection=True, video_rendition_sizes=None):
         '''
         Create the object
         '''
@@ -3885,7 +3897,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
                  rendition_sizes=None,
                  source_crop=None, crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True):
+                 crop_with_text_detection=True,
+                 video_rendition_sizes=None):
         super(NeonCDNHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -3896,6 +3909,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
             rendition_sizes=rendition_sizes,
+            video_rendition_sizes=video_rendition_sizes,
             policy='public-read',
             source_crop=source_crop,
             crop_with_saliency=crop_with_saliency,
@@ -5687,12 +5701,19 @@ class ClipMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
+        '''Put the clip to CDN. Write the database for this ClipMetadata.
+
+        Inputs- clip a cv2 VideoCapture
+            -video_info a VideoMetadata or None
+            -cdn_metadata a CDNHostingMetadata or None'''
 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload_video(
             video,
             self.key,
+            self.start_frame,
+            self.end_frame,
             async=True)
         s3_url = None
         if len(s3_url_list) == 1:
@@ -5704,17 +5725,10 @@ class ClipMetadata(StoredObject):
         if cdn_metadata is None:
             cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
 
-        writer = imageio.get_writer(imageio.RETURN_BYTES, 'FFMPEG', fps=30.0)
-        try:
-            for frame in pycvutils.iterate_video(clip, clip.start, clip.end):
-                writer.append_data(frame[:,:,::-1])
-        finally:
-            writer.close()
-
         hosters = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
-        yield [h.upload_video(clip, self.key, s3_url, async=True) for h in hosters]
+        yield [h.upload_video(clip, self.key, self.start_frame, self.end_frame,
+                              s3_url, async=True) for h in hosters]
 
-        raise tornado.gen.Return(None)
 
 class VideoRendition(StoredObject):
     '''
@@ -5906,7 +5920,9 @@ class ThumbnailMetadata(StoredObject):
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload(
-            image, self.key, async=True,
+            image,
+            self.key,
+            async=True,
             do_source_crop=self.do_source_crop,
             do_smart_crop=self.do_smart_crop)
 

@@ -19,6 +19,7 @@ import model
 import model.predictor
 import numpy as np
 import time
+import tempfile
 import utils.autoscale
 from utils.options import options, define
 from utils import pycvutils
@@ -36,51 +37,24 @@ define('len', default=None, type=float, help='Desired clip length in seconds')
 define('n', default=1, help='Number of clips to extract')
 
 _log = logging.getLogger(__name__)
+from shutil import copyfile
 
 def main():
-    conn = utils.autoscale.MultipleAutoScaleGroups(
-        options.aq_groups.split(','))
-    predictor = model.predictor.DeepnetPredictor(aquila_connection=conn)
-    
-    _log.info('Searching for clips in %s' % options.input)
+
     mov = cv2.VideoCapture(options.input)
-    
-    _log.info('Opening model %s' % options.model)
-    mod = model.generate_model(options.model, predictor)
-    if options.custom_predictor is not None:
-        mod.clip_finder.custom_predictor = model.load_custom_predictor(
-            options.custom_predictor)
-    mod.clip_finder.scene_detector.threshold = 30.0
-    mod.clip_finder.scene_detector.min_scene_len = 30
-    mod.clip_finder.weight_dict['custom'] = 1.0
-    mod.clip_finder.weight_dict['valence'] = 1.0
-    
+    clip = model.VideoClip(0, 200, 55)
 
-    clips = []
-    try:
-        predictor.connect()
+    ffmpeg_params = ['-vf', 'scale=320:240']
 
-        clips = mod.find_clips(mov, options.n, max_len=options.len,
-                               min_len=options.len)
+    with tempfile.NamedTemporaryFile(suffix='.mp4') as target:
+         with imageio.get_writer(target.name, 'FFMPEG', fps=29.97, ffmpeg_params=ffmpeg_params) as writer:
 
-    finally:
-        predictor.shutdown()
+            _log.info('Output clip with score %f to %s' %
+                      (clip.score, target.name))
 
-    clip_i = 0
-    for clip in clips:
-        out_splits = options.output.rpartition('.')
-        out_fn = '%s_%i.%s' % (out_splits[0], clip_i, out_splits[2])
-        _log.info('Output clip %i with score %f to %s' %
-                  (clip_i, clip.score, out_fn))
-        clip_i += 1
-
-        writer = imageio.get_writer(out_fn, 'FFMPEG', fps=30.0)
-        try:
             for frame in pycvutils.iterate_video(mov, clip.start, clip.end):
                 writer.append_data(frame[:,:,::-1])
-        finally:
-            writer.close()
-    
+         copyfile(target.name, options.output)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
