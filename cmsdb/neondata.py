@@ -651,6 +651,13 @@ class ThumbnailType(object):
     FILTERED    = "filtered"
     DEFAULT     = "default" #sent via api request
     CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
+    CLIP        = "clip" # from the front of a clip
+
+class ClipType(object):
+    '''Clip type enumeration.'''
+    NEON        = "neon"
+    DEFAULT     = "default" #sent via api request
+    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
 
 class TagType(object):
     '''All valid Tag types'''
@@ -2544,6 +2551,17 @@ class TagThumbnail(MappingObject):
     def _get_keys():
         return ['tag_id', 'thumbnail_id']
 
+class TagClip(MappingObject):
+    '''TagClip represents an association of a tag to a clip.'''
+
+    @staticmethod
+    def _get_table():
+        return 'tag_clip'
+
+    @staticmethod
+    def _get_keys():
+        return ['tag_id', 'clip_id']
+
 
 class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
@@ -2572,13 +2590,17 @@ class Tag(Searchable, StoredObject):
         '''Overrides parent to also delete associations of tag.'''
 
         # Delete associations.
-        thumbnail_ids = yield TagThumbnail.get(
-            tag_id=key,
-            async=True)
+        thumbnail_ids = yield TagThumbnail.get(tag_id=key, async=True)
         if thumbnail_ids:
             yield TagThumbnail.delete_many(
                 tag_id=key,
                 thumbnail_id=thumbnail_ids,
+                async=True)
+        clip_ids = yield TagClip.get(tag_id=key, async=True)
+        if clip_ids:
+            yield TagClip.delete_many(
+                tag_id=key,
+                clip_id=clip_ids,
                 async=True)
         # Delete tag itself.
         yield super(Tag, cls).delete(key, async=True)
@@ -2600,22 +2622,6 @@ class Tag(Searchable, StoredObject):
     def _get_where_part(key, args={}):
         if key == 'query':
             return "_data->>'name' ~* %s"
-
-    @staticmethod
-    def _baseclass_name():
-        return Tag.__name__
-
-    def get_account_id(self):
-        return self.account_id
-
-
-class Clip(StoredObject):
-    '''Stub for gif clips'''
-
-    def __init__(self, clip_id, account_id=None, share_token=None):
-        super(Clip, self).__init__(clip_id)
-        self.account_id = account_id
-        self.share_token = share_token
 
     @staticmethod
     def _baseclass_name():
@@ -2771,6 +2777,11 @@ class InternalVideoID(object):
 
         vid = "_".join(internal_vid.split('_')[1:])
         return vid
+
+    @staticmethod
+    def get_account_id(internval_vid):
+        '''Gets the acocunt id from the video id.'''
+        return internal_vid.rpartition('_')[0]
 
 class TrackerAccountID(object):
     ''' Tracker Account ID generation '''
@@ -5624,27 +5635,29 @@ class ThumbnailURLMapper(NamespacedStoredObject):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
-class ClipMetadata(StoredObject): 
+class Clip(StoredObject): 
     '''
     Class schema for Clip information.
 
     Keyed by clip_id
     '''
-    def __init__(self, clip_id, video_id=None, thumbnail_id=None, urls=None,
+    def __init__(self, clip_id=None, video_id=None, thumbnail_id=None,
+                 urls=None,
                  ttype=None, rank=0, model_version=None, enabled=True,
                  refid=None, score=None,
                  serving_frac=None, ctr=None,
                  start_frame=None, end_frame=None,
                  model_params=None, rendition_ids=None):
-        super(ClipMetadata,self).__init__(clip_id)
+        clip = clip_id or uuid.uuid4().hex
+        super(Clip,self).__init__(clip_id)
        
-        # video id this clip was generated from  
+        # internal video id this clip was generated from  
         self.video_id = video_id
         # url for this clip
         self.urls = urls or []
         # The thumbnail that can be used to represent this clip
         self.thumbnail_id = thumbnail_id
-        # the type of this thumbnail. Uses ThumbnailType
+        # the type of this clip. Uses ClipType
         self.type = ttype
         # where this clip ranks amongst the other clips of this type
         self.rank = rank or 0
@@ -5665,12 +5678,16 @@ class ClipMetadata(StoredObject):
         # will be a score combined of a raw valence score plus some
         # other stuff (like motion analysis)
         self.score = score
+
+    @property
+    def account_id(self):
+        return InternalVideoID.get_account_id(self.video_id)
          
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return ClipMetadata.__name__
+        return Clip.__name__
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
