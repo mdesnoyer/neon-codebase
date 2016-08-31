@@ -5709,25 +5709,50 @@ class ClipMetadata(StoredObject):
 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url_list = yield primary_hoster.upload_video(
+        primary_result = yield primary_hoster.upload_video(
             video,
             self.key,
             self.start_frame,
             self.end_frame,
             async=True)
-        s3_url = None
         if len(s3_url_list) == 1:
-            s3_url = s3_url_list[0][0]
-            self.urls.insert(0, s3_url)
+            primaru_url = s3_url_list[0][0]
+            self.urls.insert(0, primary_url)
+        else:
+            raise IOError('Primary file was not uploaded %s' % self.key)
+
+        # Save primary rendition object and associate it with this ClipMetadata.
+        primary_width = clip.get(cv2.CAP_PROP_FRAME_WIDTH)
+        primary_height = clip.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        duration = (self.end_frame - self.start_frame) / 30.
+        primary_container = primary_result[3]
+        primary_codec = primary_result[4]
+        vr0 = neondata.VideoRendition(None, url=primary_url,
+                             width=primary_width, height=primary_height,
+                             duration=duration, container=primary_container,
+                             codec=primary_codec)
+        yield vr0.save(async=True)
+        self.rendition_ids.append(vr0.key)
 
         if video_info is None:
             video_info = yield VideoMetadata.get(self.video_id, async=True)
         if cdn_metadata is None:
             cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
 
-        hosters = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
-        yield [h.upload_video(clip, self.key, self.start_frame, self.end_frame,
-                              s3_url, async=True) for h in hosters]
+        hosts = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
+        for host in hosts:
+            results = yield host.upload_video(clip, self.key, self.start_frame,
+                                               self.end_frame, s3_url, async=True)
+
+            # Results is a list of [url, width, height, container, codec]s.
+            vr = neondata.VideoRendition(None, url=results[0], width=results[1],
+                                         height=results[2], container=results[3],
+                                         codec=results[4], duration=duration)
+            yield vr.save(async=True)
+            self.rendition_ids.append(vr.key)
+
+        yield self.save(async=True)
+
 
 
 class VideoRendition(StoredObject):
@@ -5901,19 +5926,13 @@ class ThumbnailMetadata(StoredObject):
                        images. If this is None, it is looked up, which is
                        slow. If a source_crop is requested, the image is also
                        cropped here.'''
+
         image = PILImageUtils.convert_to_rgb(image)
+
         # Update the image metadata
         self.width = image.size[0]
         self.height = image.size[1]
         self.update_phash(image)
-
-        # Convert the image to JPG
-        fmt = 'jpeg'
-        filestream = StringIO()
-        image.save(filestream, fmt, quality=90)
-        filestream.seek(0)
-        imgdata = filestream.read()
-
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
         # Host the primary copy of the image
@@ -5925,8 +5944,6 @@ class ThumbnailMetadata(StoredObject):
             async=True,
             do_source_crop=self.do_source_crop,
             do_smart_crop=self.do_smart_crop)
-
-        # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
         s3_url = None

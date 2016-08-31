@@ -280,7 +280,8 @@ class CDNHosting(object):
                         cdn_val = yield self._upload_and_check_file(
                             target, 'mp4', clip_id, width, height, url, False)
                         if cdn_val:
-                            results.append(cdn_val)
+                            # Include container and codec from size.
+                            results.append(cdn_val + size[2:2])
                     except e:
                         _log.error('Failed to generate or upload video %s', e)
 
