@@ -338,7 +338,7 @@ class CDNHosting(object):
         Your implementation must create urls with the same base (all
         the way up to the last '/') for each thumbnail id. If you use
         a random number, then, the easiest thing to do is to use
-        rng = random.Random(tid)
+        rng = random.Random(key)
         # Figure out the cdn url using rng
 
         To be implemented by a subclass.
@@ -562,7 +562,7 @@ class CloudinaryHosting(CDNHosting):
                              "the url")
 
         # 0, 0 indicates original (base image size)
-        img_name = "neontn%s_w%s_h%s.jpg" % (tid, "0", "0")
+        img_name = "neontn%s_w%s_h%s.jpg" % (key, "0", "0")
 
         params = {}
         params['timestamp'] = int(time.time())
@@ -576,8 +576,8 @@ class CloudinaryHosting(CDNHosting):
         params['file'] = url
         response = yield self.make_request(params, None, headers, async=True)
         if response.error:
-            msg = ("Failed to upload image to cloudinary for tid %s: %s" %
-                   (tid, response.error))
+            msg = ("Failed to upload file to cloudinary for key %s: %s" %
+                   (key, response.error))
             _log.error_n(msg)
             raise IOError(msg)
 
@@ -660,8 +660,8 @@ class AkamaiHosting(CDNHosting):
         # randomly selected letters. This structure affords over 281 million
         # elements before reaching the recommended limit for a given account
 
-        # the customer account root folder id is taken from the tid. This may
-        # break in the future if the tid scheme changes. Another option would
+        # the customer account root folder id is taken from the key. This may
+        # break in the future if the key scheme changes. Another option would
         # be to add a root folder to the class that would be set using the
         # account id. For now, this is fine so go with it.
         name_pieces = []
@@ -694,7 +694,7 @@ class AkamaiHosting(CDNHosting):
                                              ntries=self.ntries,
                                              async=True)
         if response.error:
-            msg = ("Error uploading file to akamai for tid %s: %s"
+            msg = ("Error uploading file to akamai for key %s: %s"
                    % (key, response.error))
             _log.error_n(msg)
             statemon.state.increment('akamai_upload_error')

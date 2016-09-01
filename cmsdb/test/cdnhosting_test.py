@@ -334,6 +334,12 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                 yield cmsdb.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
+class TestCloudinaryHosting(test_utils.neontest.AsyncTestCase):
+
+    def setUp(self):
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestCloudinaryHosting, self).setUp()
+
     @patch('cmsdb.cdnhosting.utils.http.send_request')
     def test_cloudinary_hosting(self, mock_http):
         mock_http = self._future_wrap_mock(mock_http)
@@ -350,7 +356,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mock_http.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 200,buffer=StringIO(mock_response))
-        url = cd.upload(None, tid, url)
+        url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 2)
         self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
         self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
@@ -373,7 +379,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR,
                 'Failed to upload image to cloudinary for tid %s' % tid):
             with self.assertRaises(IOError):
-                url = cd.upload(None, tid, url)
+                url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 1)
 
 
