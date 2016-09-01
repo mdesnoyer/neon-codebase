@@ -21,7 +21,6 @@ if sys.path[0] != __base_path__:
 
 import atexit
 import boto.exception
-from boto.s3.connection import S3Connection
 import cmsapiv2.client
 from cmsdb import neondata
 import concurrent.futures
@@ -61,7 +60,6 @@ from utils import pycvutils
 import utils.http
 from utils import statemon
 from video_processor import video_processing_queue
-import youtube_dl
 
 import logging
 _log = logging.getLogger(__name__)
@@ -963,6 +961,11 @@ class VideoProcessor(object):
                                 model_version=video_obj.model_version))
                         video_obj.non_job_thumb_ids = keep_thumbs
 
+            video_obj.non_job_thumb_ids = list(
+                set(video_obj.non_job_thumb_ids + 
+                    self.video_metadata.non_job_thumb_ids))
+                                                   
+
             # Update the job results
             found_result = False
             for result in video_obj.job_results:
@@ -1378,7 +1381,7 @@ class ClipProcessor(VideoProcessor):
     '''Processor that extracts clips from a video.'''
     def __init__(self, params, model, model_version, cv_semaphore,
                  job_queue, job_message, reprocess=False):
-        super(ThumbnailProcessor, self).__init__(
+        super(ClipProcessor, self).__init__(
             params, model, model_version, cv_semaphore,
             job_queue, job_message, reprocess)
 
@@ -1430,7 +1433,8 @@ class ClipProcessor(VideoProcessor):
             _log.info('Creating assets for clip %i for video id %s' %
                       (clip.rank, clip.video_id))
             yield clip.add_clip_data(self.mov, self.video_metadata,
-                                     cdn_metadata)
+                                     cdn_metadata,
+                                     async=True)
 
             # Now create the thumb
             success, _ = pycvutils.seek_video(self.mov,
@@ -1487,8 +1491,8 @@ class ClipProcessor(VideoProcessor):
             raise DBError(msg)
 
     def _build_callback_response(self):
-        clip_ids = [x[0].get_id() for x in self.clips 
-                    if x[0].type == neondata.ThumbnailType.NEON]
+        clip_ids = [x.get_id() for x in self.clips 
+                    if x.type == neondata.ThumbnailType.NEON]
 
         cresp = neondata.VideoCallbackResponse(
             self.video_metadata.job_id,

@@ -50,6 +50,7 @@ import test_utils
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.net
+import test_utils.opencv
 import test_utils.postgresql
 from test_utils import sqsmock
 from tornado.concurrent import Future
@@ -2115,6 +2116,114 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             urls=['fourth_best']).save(async=True) 
         with self.assertRaises(Exception): 
             tas = yield self.vprocessor._get_email_params(video_data)
+
+class TestFinalizeClipResponse(TestFinalizeResponse):
+    def setUp(self):
+        super(TestFinalizeClipResponse, self).setUp()
+
+        # populate some data
+        na = neondata.NeonUserAccount('acct1')
+        self.api_key = na.neon_api_key
+        na.save()
+        neondata.NeonPlatform.modify(self.api_key, '0',
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
+
+        self.video_id = '%s_vid1' % self.api_key
+        self.api_request = neondata.NeonApiRequest(
+            'job1', self.api_key,
+            'vid1',
+            'some fun video',
+            'http://video.mp4',
+            http_callback='http://callback.com',
+            result_type=neondata.ResultType.CLIPS,
+            default_clip='http://default_clip.mp4',
+            n_clips=2,
+            callback_email='test@invalid.xxx')
+        self.api_request.state = neondata.RequestState.PROCESSING
+        self.api_request.save()
+
+        # Setup the processor object
+        job = self.api_request.__dict__
+        self.vprocessor = video_processor.client.ClipProcessor(
+            job,
+            self.model_mock,
+            'test_version',
+            multiprocessing.BoundedSemaphore(1),
+            MagicMock(),
+            MagicMock())
+        self.vprocessor.mov = test_utils.opencv.VideoCaptureMock(
+            h=480, w=640, frame_count=2997)
+        self.vprocessor.video_metadata.duration = 100.0
+        self.vprocessor.video_metadata.frame_size = (640, 480)
+
+        self.vprocessor.clips = [
+            neondata.Clip(video_id=self.video_id,
+                          ttype=neondata.ClipType.NEON,
+                          rank=0,
+                          start_frame=15,
+                          end_frame=30,
+                          score=0.63,
+                          model_version='test_version'),
+            neondata.Clip(video_id=self.video_id,
+                          ttype=neondata.ClipType.NEON,
+                          rank=1,
+                          start_frame=115,
+                          end_frame=210,
+                          score=0.55,
+                          model_version='test_version')]
+
+    def tearDown(self):
+        super(TestFinalizeClipResponse, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_default_process(self):
+        yield self.vprocessor.finalize_response()
+
+        # Make sure that the api request is updated
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+
+        self.assertEquals(api_request.state, neondata.RequestState.FINISHED)
+        self.assertEquals(api_request.callback_state,
+                          neondata.CallbackState.PROCESSED_SENT)
+
+        # Check the video metadata in the database
+        video_data = neondata.VideoMetadata.get(self.video_id)
+        self.assertEquals(len(video_data.thumbnail_ids), 0)
+        self.assertEquals(len(video_data.non_job_thumb_ids), 2)
+        self.assertEquals(len(video_data.non_job_clip_ids), 1)
+        self.assertAlmostEquals(video_data.duration, 100.0)
+        self.assertEquals(video_data.frame_size, [640, 480])
+        self.assertEquals(video_data.url, 'http://video.mp4')
+        self.assertEquals(video_data.integration_id, '0')
+        self.assertEquals(video_data.model_version, 'test_version')
+        self.assertTrue(video_data.serving_enabled)
+        self.assertIsNone(video_data.serving_url) # serving_url not saved here
+
+        # Check the job result list
+        self.assertEquals(len(video_data.job_results), 1)
+        job_result = video_data.job_results[0]
+        self.assertIsNone(job_result.gender)
+        self.assertIsNone(job_result.age)
+        self.assertEquals(job_result.model_version, 'test_version')
+        self.assertEquals(len(job_result.clip_ids), 2)
+        self.assertEquals(job_result.thumbnail_ids, [])
+        self.assertEquals(job_result.bad_thumbnail_ids, [])
+
+        # Check the default clip
+        default_clip = neondata.Clip.get(video_data.non_job_clip_ids[0])
+        self.assertEquals(default_clip.type, neondata.ClipType.DEFAULT)
+        self.assertEquals(default_clip.video_id, self.video_id)
+        self.assertIn('http://default_clip.mp4', default_clip.urls)
+        self.assertTrue(default_clip.enabled)
+        self.assertEquals(default_clip.rank, 0)
+
+        # Check the clip information
+        
 
 
 class SmokeTest(test_utils.neontest.AsyncTestCase):

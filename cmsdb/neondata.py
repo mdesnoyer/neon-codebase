@@ -4891,7 +4891,8 @@ class NeonApiRequest(NamespacedStoredObject):
             gender=None, 
             result_type=None, 
             n_clips=None,
-            clip_length=None):
+            clip_length=None,
+            default_clip=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -4947,6 +4948,10 @@ class NeonApiRequest(NamespacedStoredObject):
 
         # desired length of clip in seconds
         self.clip_length = clip_length
+
+        # url of the default clip
+        self.default_clip = default_clip
+        
 
     @classmethod
     def key2id(cls, key):
@@ -5158,9 +5163,56 @@ class NeonApiRequest(NamespacedStoredObject):
                                                cdn_metadata,
                                                save_objects=True,
                                                async=True)
-        raise tornado.gen.Return(thumb) 
-        # Push a thumbnail serving directive to Kinesis so that it can
-        # be served quickly.
+        raise tornado.gen.Return(thumb)
+
+    @tornado.gen.coroutine
+    def save_default_clip(self, cdn_metadata=None):
+        '''Save the default clip by attaching it to a video. The video
+        metadata for this request must be in the database already.
+
+        Inputs:
+        cdn_metadata - If known, the metadata to save to the cdn.
+                       Otherwise it will be looked up.
+        '''
+        if not self.default_clip:
+            # No default clip to ingest
+            return
+
+        # Check to see if there is already a default clip that the system
+        # knows about (and thus was already uploaded)
+        video = yield tornado.gen.Task(
+            VideoMetadata.get,
+            InternalVideoID.generate(self.api_key,
+                                     self.video_id))
+        if video is None:
+            msg = ('VideoMetadata for job %s is missing. '
+                   'Cannot add clip' % self.job_id)
+            _log.error(msg)
+            raise DBStateError(msg)
+
+        known_clips = yield tornado.gen.Task(
+            Clip.get_many,
+            video.non_job_clip_ids)
+        min_rank = 1
+        for clip in known_clips:
+            if clip.type == ClipType.DEFAULT:
+                if self.default_clip in clip.urls:
+                    # The exact thumbnail is already there
+                    raise tornado.gen.Return(clip)
+            
+                if clip.rank < min_rank:
+                    min_rank = clip.rank
+        cur_rank = min_rank - 1
+
+        # Ingest the new clip
+        clip = Clip(ttype=ClipType.DEFAULT,
+                    enabled=True,
+                    rank=cur_rank)
+        yield clip.ingest(self.default_clip,
+                          video.get_id(), 
+                          cdn_metadata=cdn_metadata
+                          save_objects=True)
+        raise tornado.gen.Return(clip)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -5642,12 +5694,9 @@ class Clip(StoredObject):
     Keyed by clip_id
     '''
     def __init__(self, clip_id=None, video_id=None, thumbnail_id=None,
-                 urls=None,
-                 ttype=None, rank=0, model_version=None, enabled=True,
-                 refid=None, score=None,
-                 serving_frac=None, ctr=None,
-                 start_frame=None, end_frame=None,
-                 model_params=None, rendition_ids=None):
+                 urls=None, ttype=None, rank=0, model_version=None,
+                 enabled=True, score=None, start_frame=None, end_frame=None,
+                 rendition_ids=None):
         clip = clip_id or uuid.uuid4().hex
         super(Clip,self).__init__(clip_id)
        
@@ -5694,6 +5743,27 @@ class Clip(StoredObject):
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
         # TODO, 
         raise tornado.gen.Return(None)
+
+    @tornado.gen.coroutine
+    def ingest(self, url, video_id, cdn_metadata=None, save_objects=False):
+        '''Ingests a clip from a given url.
+
+        Also associates it with a VideoMetadata object.
+
+        The video is downloaded locally and any renditions are created
+        as necessary.
+
+        Inputs:
+        url - url of the clip to download
+        video_id - Internal video id to associate this clip with
+        cdn_metadata - If known, the metadata to save to the cdn.
+                       Otherwise it will be looked up.
+        save_objects - If true, the objects in the database are updated
+        '''
+        if len(self.urls) > 0 and url not in self.urls:
+            raise ValueError('This video was already ingested.')
+
+        
     
 class VideoRendition(StoredObject):
     '''
@@ -6259,6 +6329,7 @@ class VideoMetadata(Searchable, StoredObject):
                  serving_enabled=True, custom_data=None,
                  publish_date=None, hidden=None, share_token=None,
                  job_results=None, non_job_thumb_ids=None,
+                 non_job_clip_ids=None, 
                  bad_tids=None, tag_id=None):
         super(VideoMetadata, self).__init__(video_id)
         # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
@@ -6273,6 +6344,10 @@ class VideoMetadata(Searchable, StoredObject):
         # A list of thumbnail ids that are not associated with a
         # specific run of the job (e.g. default thumb)
         self.non_job_thumb_ids = non_job_thumb_ids or []
+
+        # A list of clip ids that are not associated with a specific
+        # run of the job (e.g. default clip)
+        self.non_job_clip_ids = non_job_clip_ids or []
 
         self.url = video_url
         self.duration = duration # in seconds
