@@ -1359,17 +1359,15 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         expected_response = {
             'job_id' : 'job1',
             'video_id' : 'vid1',
-            'framenos' : [69, 6],
-            'thumbnails' : [n_thumbs[1].key, n_thumbs[0].key],
-            'error' : None
+            'error' : None,
+            'serving_url' : None
             }
         self.assertDictContainsSubset(expected_response,
                                       api_request.response)
-
-        # Compare serving URL here. Ignore the i* part of serving_url; because subdomains
-        # can be different from multiple get_serving_url calls
-        self.assertEquals(api_request.response['serving_url'].split('neon-images')[1],
-                video_data.get_serving_url(save=False).split('neon-images')[1])
+        self.assertItemsEqual(api_request.response['framenos'],
+                              [69, 6])
+        self.assertItemsEqual(api_request.response['thumbnails'],
+                              [n_thumbs[1].key, n_thumbs[0].key])
    
         # check video object again to ensure serving_url is not set
         video_data = neondata.VideoMetadata.get(self.video_id)

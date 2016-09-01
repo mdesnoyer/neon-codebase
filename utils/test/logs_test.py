@@ -96,6 +96,9 @@ class TestAccessLogger(test_utils.neontest.TestCase):
         logging.handlers.os = self.fake_os
         logging.open = self.fake_open
 
+        self.logger_configured = utils.logs._added_configured_logger
+        utils.logs._added_configured_logger = False
+
     def tearDown(self):
         # Delete any handlers in the tornado access logger
         handlers_to_delete = [x for x in self.access_logger.handlers if
@@ -105,6 +108,7 @@ class TestAccessLogger(test_utils.neontest.TestCase):
 
         logging.handlers.os = os
         logging.open = __builtin__.open
+        utils.logs._added_configured_logger = self.logger_configured
 
     def test_access_log_no_propagate(self):
         utils.logs.AddConfiguredLogger()
