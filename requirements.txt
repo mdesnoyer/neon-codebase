@@ -37,7 +37,6 @@ simplejson==2.3.2
 svmlight==0.4
 tornado==4.2.1
 thrift==0.9.1
-tornado==4.2.1
 winpdb==1.4.8
 voluptuous==0.8.7
 scikit-learn==0.16.1

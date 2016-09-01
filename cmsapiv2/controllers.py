@@ -1534,8 +1534,6 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
     def _load_images_from_request(self):
         """Sets self.images to PIL images from request urls or multipart body.
 
-        This looks for the array of files in 'upload' in multipart body.
-
         Handles mix of submission format. Will set self.images to at least one
         image or raise 400 on the batch"""
 
@@ -1547,16 +1545,15 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
             self.images.append((url, _image))
 
         # Get each in body.
-        try:
-            for upload in self.request.files['upload']:
+        for fl in self.request.files.itervalues():
+            for upload in fl:
                 try:
-                    _image = ThumbnailHandler._get_image_from_httpfile(upload)
+                    _image = ThumbnailHandler._get_image_from_httpfile(
+                        upload)
                     self.images.append((None, _image))
                 except IOError as e:
                     _log.warn('Could not get image from request body')
                     pass
-        except KeyError:
-            pass  # No upload set in body.
 
         # If all are bad, raise a 400.
         if not self.images:
@@ -2370,47 +2367,53 @@ class VideoHandler(ShareableContentHandler):
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
 
+        if len(self.request.files) > 1:
+            raise BadRequestError('Too many files uploaded. Only 1 is allowed')
+
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key,
             args['video_id'])
 
-        @tornado.gen.coroutine
         def _update_video(v):
             v.testing_enabled =  Boolean()(
                 args.get('testing_enabled', v.testing_enabled))
             v.hidden =  Boolean()(args.get('hidden', v.hidden))
-            dturl = args.get('default_thumbnail_url', None)
-            if dturl or len(self.request.files['upload']) > 0: 
-                min_rank = yield self._get_min_rank(internal_video_id)
-                new_thumb = neondata.ThumbnailMetadata(
-                        None,
-                        ttype=neondata.ThumbnailType.DEFAULT,
-                        rank=min_rank - 1)
-            if dturl: 
-                yield v.download_and_add_thumbnail(
-                    new_thumb, 
-                    image_url=dturl,
-                    save_objects=True) 
-            elif len(self.request.files['upload']) > 0: 
-                upload = self.request.files['upload'][0] 
-                image = PIL.Image.open(io.BytesIO(upload.body))
-                yield v.download_and_add_thumbnail(
-                    new_thumb, 
-                    image=image,
-                    save_objects=True) 
 
-        def _modify_tag(t): 
-            t.hidden = Boolean()(args.get('hidden', t.hidden))
 
         video = yield neondata.VideoMetadata.modify(
             internal_video_id,
             _update_video,
             async=True)
 
+        # Now add new thumbnails to the video if they are there
+        dturl = args.get('default_thumbnail_url', None)
+        if dturl or len(self.request.files) == 1: 
+            min_rank = yield self._get_min_rank(internal_video_id)
+            new_thumb = neondata.ThumbnailMetadata(
+                    None,
+                    ttype=neondata.ThumbnailType.DEFAULT,
+                    rank=min_rank - 1)
+        if dturl: 
+            yield video.download_and_add_thumbnail(
+                new_thumb, 
+                image_url=dturl,
+                save_objects=True,
+                async=True) 
+        elif len(self.request.files) == 1: 
+            upload = self.request.files.values()[0][0]
+            image = PIL.Image.open(io.BytesIO(upload.body))
+            yield video.download_and_add_thumbnail(
+                new_thumb, 
+                image=image,
+                save_objects=True,
+                async=True) 
+
         if not video:
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
 
+        def _modify_tag(t): 
+            t.hidden = Boolean()(args.get('hidden', t.hidden))
         if video.tag_id: 
             yield neondata.Tag.modify(
                 video.tag_id, 

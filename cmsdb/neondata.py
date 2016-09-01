@@ -1223,10 +1223,11 @@ class StoredObject(object):
         Example usage:
         StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
+        @tornado.gen.coroutine
         def _process_one(d):
             val = d[key]
             if val is not None:
-                func(val)
+                yield tornado.gen.maybe_future(func(val))
 
         updated_d = yield StoredObject.modify_many(
                  [key], _process_one,
@@ -1303,9 +1304,7 @@ class StoredObject(object):
 
             mappings[key] = cur_obj 
         try:
-            vals = func(mappings)
-            if isinstance(vals, concurrent.futures.Future):
-                yield vals
+            vals = yield tornado.gen.maybe_future(func(mappings))
         finally:
             insert_statements = []
             update_objs = [] 
@@ -5163,6 +5162,7 @@ class NeonApiRequest(NamespacedStoredObject):
                               if x and x.type == ThumbnailType.NEON]
                     response.framenos = [x.frameno for x in thumbs]
                     response.thumbnails = [x.key for x in thumbs]
+                    response.serving_url = vidmeta.serving_url
                 response.job_id = self.job_id
                 response.video_id = self.video_id
 

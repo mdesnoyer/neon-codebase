@@ -1106,8 +1106,7 @@ class VideoProcessor(object):
             self.video_metadata.job_id,
             neondata.InternalVideoID.to_external(self.video_metadata.key),
             fnos,
-            thumbs,
-            self.video_metadata.get_serving_url(save=False))
+            thumbs)
         return cresp.to_dict()
 
     @tornado.gen.coroutine 
