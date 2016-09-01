@@ -248,6 +248,7 @@ class AkamaiNetstorage(object):
         
         Return: HTTPResponse object
         '''
+        import pdb; pdb.set_trace()
         if md5 is None:
             m = hashlib.md5(body)
             md5 = m.hexdigest()

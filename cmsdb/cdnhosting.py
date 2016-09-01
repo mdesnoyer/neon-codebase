@@ -329,7 +329,7 @@ class CDNHosting(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, _file, key, width, height, url=None, overwrite=True):
+    def _upload_impl(self, _file, _format, key, width, height, url=None, overwrite=True):
         '''Upload the specific image to the CDN service.
 
         Note that this could be called multiple times for the same
@@ -431,6 +431,7 @@ class AWSHosting(CDNHosting):
     @tornado.gen.coroutine
     def _upload_impl(self, _file, _format, key, width, height, url=None,
                      overwrite=True):
+
         rng = random.Random(key)
 
         if _format not in ['mp4', 'jpeg']:
@@ -487,8 +488,9 @@ class AWSHosting(CDNHosting):
             if _format == 'mp4':
                 content_type = {'Content-Type': 'video/mp4'}
             else:
-                content_type = {'Content-Type': 'video/jpeg'}
+                content_type = {'Content-Type': 'image/jpeg'}
 
+            import pdb; pdb.set_trace()
             yield utils.botoutils.run_async(
                 key.set_contents_from_file,
                 _file,
@@ -548,7 +550,7 @@ class CloudinaryHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, _file, _format, key, url=None,
+    def _upload_impl(self, _file, _format, key, width, height, url=None,
                      overwrite=True):
         '''
         Upload the image to cloudinary.
@@ -642,7 +644,7 @@ class AkamaiHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, _file, _format, key, url=None,
+    def _upload_impl(self, _file, _format, key, width, height, url=None,
             overwrite=True):
         rng = random.Random(key)
 

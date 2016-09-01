@@ -242,7 +242,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     def test_permissions_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().get_key.side_effect = [None]
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission error')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3PermissionsError('Permission error')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
@@ -258,7 +258,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     def test_create_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().get_key.side_effect = [None]
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
@@ -315,7 +315,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_permissions_error_s3_redirect(self):
         self.s3conn.get_bucket = MagicMock()
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission Error')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3PermissionsError('Permission Error')]
         self.s3conn.create_bucket('host-bucket')
 
         with self.assertLogExists(logging.ERROR, 'AWS client error'):
@@ -326,7 +326,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_create_error_s3_redirect(self):
         self.s3conn.get_bucket = MagicMock()
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
         self.s3conn.create_bucket('host-bucket')
 
         with self.assertLogExists(logging.ERROR, 'AWS Server error'):
