@@ -2121,6 +2121,19 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
     def setUp(self):
         super(TestFinalizeClipResponse, self).setUp()
 
+        # Mock out the clip download
+        self.video_download_patcher = patch(
+            'video_processor.client.neondata.utils.video_download')
+        self.video_download_mod_mock = self.video_download_patcher.start()
+        self.video_download_mock = self._future_wrap_mock(
+            self.video_download_mod_mock.VideoDownloader().download_video_file)
+
+        # Mock out the opencv video capture object
+        self.cv2_patcher = patch('video_processor.client.cv2.VideoCapture')
+        self.cv2_cap_mock = self.cv2_patcher.start()
+        self.cv2_cap_mock.return_value = test_utils.opencv.VideoCaptureMock(
+            h=480, w=640)
+
         # populate some data
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
@@ -2178,6 +2191,8 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
                           model_version='test_version')]
 
     def tearDown(self):
+        self.cv2_patcher.stop()
+        self.video_download_patcher.stop()
         super(TestFinalizeClipResponse, self).tearDown()
 
     @tornado.testing.gen_test
@@ -2201,7 +2216,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(video_data.url, 'http://video.mp4')
         self.assertEquals(video_data.integration_id, '0')
         self.assertEquals(video_data.model_version, 'test_version')
-        self.assertTrue(video_data.serving_enabled)
+        self.assertFalse(video_data.serving_enabled)
         self.assertIsNone(video_data.serving_url) # serving_url not saved here
 
         # Check the job result list
@@ -2221,9 +2236,69 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertIn('http://default_clip.mp4', default_clip.urls)
         self.assertTrue(default_clip.enabled)
         self.assertEquals(default_clip.rank, 0)
+        self.assertIsNotNone(default_clip.thumbnail_id)
 
         # Check the clip information
-        
+        clips = neondata.Clip.get_many(job_result.clip_ids)
+        self.assertEquals(clips[0].type, neondata.ClipType.NEON)
+        self.assertEquals(clips[0].video_id, self.video_id)
+        self.assertEquals(clips[0].rank, 0)
+        self.assertEquals(clips[0].start_frame, 15)
+        self.assertEquals(clips[0].end_frame, 30)
+        self.assertAlmostEqual(clips[0].score, 0.63)
+        self.assertEquals(clips[0].model_version, 'test_version')
+        self.assertEquals(len(clips[0].urls), 1)
+        self.assertTrue(clips[0].enabled)
+        self.assertIsNotNone(clips[0].thumbnail_id)
+        self.assertEquals(clips[1].type, neondata.ClipType.NEON)
+        self.assertEquals(clips[1].video_id, self.video_id)
+        self.assertEquals(clips[1].rank, 1)
+        self.assertEquals(clips[1].start_frame, 115)
+        self.assertEquals(clips[1].end_frame, 210)
+        self.assertAlmostEqual(clips[1].score, 0.55)
+        self.assertEquals(clips[1].model_version, 'test_version')
+        self.assertEquals(len(clips[1].urls), 1)
+        self.assertTrue(clips[1].enabled)
+        self.assertIsNotNone(clips[1].thumbnail_id)
+        self.assertNotEquals(clips[0].thumbnail_id,
+                             clips[1].thumbnail_id)
+        self.assertEquals(video_data.non_job_thumb_ids,
+                          [x.thumbnail_id for x in clips])
+
+        # Check a thumbnail that's for the clip
+        clip_thumb = neondata.ThumbnailMetadata.get(clips[0].thumbnail_id)
+        self.assertEquals(clip_thumb.type, neondata.ThumbnailType.CLIP)
+        self.assertEquals(clip_thumb.video_id, self.video_id)
+        self.assertTrue(clip_thumb.enabled)
+        self.assertIsNotNone(clip_thumb.phash)
+
+        # Check that the clips and thumbs are all taged
+        tag = neondata.Tag.get(video_data.tag_id)
+        self.assertIsNotNone(tag)
+        self.assertEquals(tag.tag_type, neondata.TagType.VIDEO)
+        self.assertEquals(tag.name, 'some fun video')
+        self.assertEquals(tag.video_id, self.video_id)
+        self.assertEquals(tag.account_id, self.api_key)
+        tag_thumb_ids = neondata.TagThumbnail.get(tag_id=tag.get_id())
+        self.assertItemsEqual(tag_thumb_ids,
+                              video_data.non_job_thumb_ids)
+        tag_clip_ids = neondata.TagClip.get(tag_id=tag.get_id())
+        self.assertItemsEqual(tag_clip_ids,
+                              [x.get_id() for x in clips])
+
+        # Check that the clips are hosted in S3
+        # TODO
+
+        # Check the callback
+        self.assertDictContainsSubset({
+            'job_id' : 'job1',
+            'video_id' : 'vid1',
+            'error' : None,
+            'thumbnails' : [],
+            'framenos' : []},
+            api_request.response)
+        self.assertItemsEqual(api_request.response['clip_ids'],
+                              [x.get_id() for x in clips])
 
 
 class SmokeTest(test_utils.neontest.AsyncTestCase):

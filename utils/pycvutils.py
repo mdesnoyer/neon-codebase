@@ -131,6 +131,24 @@ def iterate_video(video, start=0, end=None):
 
         yield image
 
+def extract_frame(video, frame_no):
+    '''Extracts a specific frame from the video.
+
+    Inputs:
+    video - An OpenCV VideoCapture object
+    frame_no - Frame number to extract
+
+    Returns:
+    An OpenCV image
+    '''
+    success, _ = seek_video(video, frame_no)
+    if success:
+        success, image = video.read()
+    if not success:
+        raise VideoError('Error extracting frame %s ' % frame_no)
+    return image
+        
+
 def _ensure_CV(image):
     '''
     Ensures that the image is an Numpy array

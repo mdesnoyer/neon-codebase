@@ -29,6 +29,7 @@ import code
 from collections import OrderedDict, defaultdict
 import concurrent.futures
 import copy
+import cv2
 import cv.imhash_index
 import datetime
 import dateutil.parser
@@ -59,6 +60,7 @@ import cvutils.imageutils
 from cvutils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
+from utils import pycvutils
 from utils import statemon
 import utils.sync
 import utils.s3
@@ -2422,9 +2424,8 @@ class MappingObject(object):
         ):
             return
         raise ValueError(
-            'Called with long list, int or object left:%s right:%s',
-            values0,
-            values1)
+            'Called with long list, int or object left:%s right:%s' %
+            (values0, values1))
 
     @classmethod
     def _validate_keys(cls, keys):
@@ -5209,9 +5210,8 @@ class NeonApiRequest(NamespacedStoredObject):
                     enabled=True,
                     rank=cur_rank)
         yield clip.ingest(self.default_clip,
-                          video.get_id(), 
-                          cdn_metadata=cdn_metadata,
-                          save_objects=True)
+                          video, 
+                          cdn_metadata=cdn_metadata)
         raise tornado.gen.Return(clip)
 
     @utils.sync.optional_sync
@@ -5697,8 +5697,8 @@ class Clip(StoredObject):
                  urls=None, ttype=None, rank=0, model_version=None,
                  enabled=True, score=None, start_frame=None, end_frame=None,
                  rendition_ids=None):
-        clip = clip_id or uuid.uuid4().hex
-        super(Clip,self).__init__(clip_id)
+        clip_id = clip_id or uuid.uuid4().hex
+        super(Clip, self).__init__(clip_id)
        
         # internal video id this clip was generated from  
         self.video_id = video_id
@@ -5745,7 +5745,7 @@ class Clip(StoredObject):
         raise tornado.gen.Return(None)
 
     @tornado.gen.coroutine
-    def ingest(self, url, video_id, cdn_metadata=None, save_objects=False):
+    def ingest(self, url, video_meta, cdn_metadata=None):
         '''Ingests a clip from a given url.
 
         Also associates it with a VideoMetadata object.
@@ -5755,19 +5755,62 @@ class Clip(StoredObject):
 
         Inputs:
         url - url of the clip to download
-        video_id - Internal video id to associate this clip with
+        video_meta - VideoMetadata object
         cdn_metadata - If known, the metadata to save to the cdn.
                        Otherwise it will be looked up.
         save_objects - If true, the objects in the database are updated
         '''
         if len(self.urls) > 0 and url not in self.urls:
             raise ValueError('This video was already ingested.')
+        self.urls.append(url)
 
         downloader = utils.video_download.VideoDownloader(url)
         try:
-            video_info = yield downloader.download_video_file()
+            _ = yield downloader.download_video_file()
+
+            # Upload the clip to our hosting location
+            mov = cv2.VideoCapture(downloader.get_local_filename())
+            yield self.add_clip_data(mov, cdn_metadata=cdn_metadata,
+                                     async=True)
+
+            thumb_image = pycvutils.extract_frame(mov, 0)
         finally:
             downloader.close()
+
+        # Do database updates
+        self.video_id = video_meta.get_id()
+
+        # Add the clip to the video object
+        def _add_clip(video_obj):
+            video_obj.non_job_clip_ids.append(self.get_id())
+        video_meta = yield VideoMetadata.modify(video_meta.get_id(), 
+                                                _add_clip, 
+                                                async=True)
+
+        # Create the thumbnail object for the thumb that represents this clip
+        thumb = ThumbnailMetadata(
+            None,
+            self.video_id,
+            ttype=ThumbnailType.CLIP,
+            enabled=True)
+        yield thumb.add_image_data(pycvutils.to_pil(thumb_image), video_meta,
+                                   cdn_metadata, async=True)
+        self.thumbnail_id = thumb.get_id()
+
+        success = yield thumb.save(async=True)
+        if not success:
+            raise DBConnectionError('Could not save thumbnail')
+
+        success = yield self.save(async=True)
+        if not success:
+            raise DBConnectionError('Could not save clip')
+
+        # Finally tag the clip to the video
+        ct = yield TagClip.save(
+            tag_id=video_meta.tag_id,
+            clip_id=self.get_id(),
+            async=True)
+        
     
 class VideoRendition(StoredObject):
     '''

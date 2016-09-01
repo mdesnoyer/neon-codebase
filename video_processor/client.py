@@ -1333,18 +1333,12 @@ class ClipProcessor(VideoProcessor):
                                      async=True)
 
             # Now create the thumb
-            success, _ = pycvutils.seek_video(self.mov,
-                                              clip.start_frame)
-            if success:
-                success, image = self.mov.read()
-            if not success:
-                raise VideoError('Error extracting frame %s from %s' % 
-                                 (clip.start_frame, self.video_metadata.url))
+            image = pycvutils.extract_frame(self.mov, clip.start_frame)
             thumb = neondata.ThumbnailMetadata(
                 None,
                 self.video_metadata.key,
                 ttype=neondata.ThumbnailType.CLIP,
-                enabled=False,
+                enabled=True,
                 frameno=clip.start_frame)
             thumb = yield self.video_metadata.add_thumbnail(
                 thumb, pycvutils.to_pil(image),
@@ -1373,6 +1367,8 @@ class ClipProcessor(VideoProcessor):
         yield self._get_default_thumb(api_request, cdn_metadata)
 
         yield self._tag_thumbnails(api_request)
+
+        yield api_request.save_default_clip(cdn_metadata)
 
         # Finally tag all the clips to the video
         try:
