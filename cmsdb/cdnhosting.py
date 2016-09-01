@@ -490,7 +490,6 @@ class AWSHosting(CDNHosting):
             else:
                 content_type = {'Content-Type': 'image/jpeg'}
 
-            import pdb; pdb.set_trace()
             yield utils.botoutils.run_async(
                 key.set_contents_from_file,
                 _file,
@@ -691,8 +690,7 @@ class AkamaiHosting(CDNHosting):
             if stat_response.code == 200:
                 raise tornado.gen.Return(cdn_url)
 
-        # @TODO make sure akamai's upload can handle a fh.
-        response = yield self.ak_conn.upload(path, _file,
+        response = yield self.ak_conn.upload(path, _file.read(),
                                              ntries=self.ntries,
                                              async=True)
         if response.error:
