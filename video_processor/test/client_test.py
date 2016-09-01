@@ -2209,7 +2209,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         # Check the video metadata in the database
         video_data = neondata.VideoMetadata.get(self.video_id)
         self.assertEquals(len(video_data.thumbnail_ids), 0)
-        self.assertEquals(len(video_data.non_job_thumb_ids), 2)
+        self.assertEquals(len(video_data.non_job_thumb_ids), 0)
         self.assertEquals(len(video_data.non_job_clip_ids), 1)
         self.assertAlmostEquals(video_data.duration, 100.0)
         self.assertEquals(video_data.frame_size, [640, 480])
@@ -2262,8 +2262,6 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertIsNotNone(clips[1].thumbnail_id)
         self.assertNotEquals(clips[0].thumbnail_id,
                              clips[1].thumbnail_id)
-        self.assertEquals(video_data.non_job_thumb_ids,
-                          [x.thumbnail_id for x in clips])
 
         # Check a thumbnail that's for the clip
         clip_thumb = neondata.ThumbnailMetadata.get(clips[0].thumbnail_id)
@@ -2280,8 +2278,8 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(tag.video_id, self.video_id)
         self.assertEquals(tag.account_id, self.api_key)
         tag_thumb_ids = neondata.TagThumbnail.get(tag_id=tag.get_id())
-        self.assertItemsEqual(tag_thumb_ids,
-                              video_data.non_job_thumb_ids)
+        # The clip thumbnails are not tagged to the video
+        self.assertItemsEqual(tag_thumb_ids, [])
         tag_clip_ids = neondata.TagClip.get(tag_id=tag.get_id())
         self.assertItemsEqual(tag_clip_ids,
                               [x.get_id() for x in clips])

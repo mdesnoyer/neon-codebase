@@ -1755,8 +1755,9 @@ class Searchable(object):
     def _get_where_part(key, args):
         '''Support custom "query" searches
 
-        This funcion should return a string that implements a custom query in the where
-        for whichever data fields make sense for your subclass.
+        This funcion should return a string that implements a custom
+        query in the where for whichever data fields make sense for
+        your subclass.
 
         For example, Tag having _name uses:
 
@@ -5700,7 +5701,7 @@ class Clip(StoredObject):
         clip_id = clip_id or uuid.uuid4().hex
         super(Clip, self).__init__(clip_id)
        
-        # internal video id this clip was generated from  
+        # internal video id this clip is associated with  
         self.video_id = video_id
         # url for this clip
         self.urls = urls or []
@@ -5718,10 +5719,6 @@ class Clip(StoredObject):
         self.start_frame = start_frame
         # what frame this clip ends at 
         self.end_frame = end_frame
-
-        # List of video rendition ids for versions of this clip that
-        # are available
-        self.rendition_ids = rendition_ids or []
         
         # The score of this clip. Higher is better. Note that this
         # will be a score combined of a raw valence score plus some
@@ -5812,13 +5809,13 @@ class Clip(StoredObject):
             async=True)
         
     
-class VideoRendition(StoredObject):
+class VideoRendition(StoredObject, Searchable):
     '''
     Class schema for a rendition of a video 
     '''
     def __init__(self, rendition_id=None, url=None, width=None,
                  height=None, duration=None, codec=None, container=None,
-                 encoding_rate=None):
+                 encoding_rate=None, clip_id=None, video_id=None):
         rendition_id = rendition_id or uuid.uuid4().hex
         super(VideoRendition, self).__init__(rendition_id)
 
@@ -5841,11 +5838,19 @@ class VideoRendition(StoredObject):
         # Average encoding rate in kpbs
         self.encoding_rate = encoding_rate
 
+        # This could be a rendition of either a Clip or a VideoMetadata video
+        self.clip_id = clip_id
+        self.video_id = video_id
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return VideoRendition.__name__
+
+    @staticmethod
+    def _get_search_arguments():
+        return ['clip_id', 'video_id']
     
 class ThumbnailMetadata(StoredObject):
     '''

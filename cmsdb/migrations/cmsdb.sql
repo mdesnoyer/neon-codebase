@@ -608,6 +608,8 @@ CREATE INDEX thumbnailmetadata_video_id ON thumbnailmetadata USING btree (((_dat
 CREATE INDEX videometadata_job_id ON videometadata USING btree (((_data ->> 'job_id'::text)));
 CREATE INDEX videometadata_integration_id ON videometadata USING btree (((_data ->> 'integration_id'::text)));
 CREATE INDEX videometadata_thumbnail_ids ON videometadata USING gin (((_data->'thumbnail_ids')));
+CREATE INDEX videorendition_clip_id ON videometadata USING btree (((_data ->> 'clip_id'::text)));
+CREATE INDEX videorendition_video_id ON videometadata USING btree (((_data ->> 'video_id'::text)));
 
 -- Text pattern ops indexes, for places we do a lot of text comps
 
