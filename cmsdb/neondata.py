@@ -2804,7 +2804,7 @@ class InternalVideoID(object):
         return vid
 
     @staticmethod
-    def get_account_id(internval_vid):
+    def get_account_id(internal_vid):
         '''Gets the acocunt id from the video id.'''
         return internal_vid.rpartition('_')[0]
 
@@ -5780,7 +5780,7 @@ class Clip(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
-        '''Put the clip to CDN. Write the database for this ClipMetadata.
+        '''Put the clip to CDN. Write the database for this Clip.
 
         Inputs- clip a cv2 VideoCapture
             -video_info a VideoMetadata or None
@@ -5800,7 +5800,7 @@ class Clip(StoredObject):
         else:
             raise IOError('Primary file was not uploaded %s' % self.key)
 
-        # Save primary rendition object and associate it with this ClipMetadata.
+        # Save primary rendition object and associate it with this Clip.
         primary_width = clip.get(cv2.CAP_PROP_FRAME_WIDTH)
         primary_height = clip.get(cv2.CAP_PROP_FRAME_HEIGHT)
         duration = (self.end_frame - self.start_frame) / 30.

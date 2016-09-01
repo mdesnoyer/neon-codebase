@@ -248,7 +248,7 @@ class CDNHosting(object):
         '''Render renditions. Put them to CDN
 
         Inputs- video a cv2.VideoCapture
-            -clip_id id of the  containing ClipMetadata
+            -clip_id id of the containing Clip
             -start integer, start frame
             -end integer, end frame
             -url the url that the file should be put to or None

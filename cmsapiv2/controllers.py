@@ -2943,8 +2943,13 @@ class ShareHandler(APIV2Handler):
             raise e
 
         resource = yield _class.get(_id, async=True)
-        if resource and resource.get_account_id() != args['account_id']:
-            raise ForbiddenError()
+        if resource:
+            try:
+                account_id = resource.get_account_id()
+            except AttributeError:
+                account_id = resource.account_id
+            if account_id != args['account_id']:
+                raise ForbiddenError()
         if not resource:
             raise NotFoundError('Resource not found for id')
 
@@ -3981,7 +3986,7 @@ class ClipHandler(APIV2Handler):
         if fields:
             fields = fields.split(',')
 
-        _clips = yield neondata.ClipMetadata.get_many(
+        _clips = yield neondata.Clip.get_many(
             clip_ids,
             create_default=False,
             log_missing=False,

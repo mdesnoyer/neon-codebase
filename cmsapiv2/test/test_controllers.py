@@ -6403,7 +6403,7 @@ class TestShareHandler(TestVerifiedControllersBase):
 
     @tornado.testing.gen_test
     def test_get_clip(self):
-        clip = neondata.Clip('u_c0', account_id='u')
+        clip = neondata.Clip('u_c0', video_id='u_v0')
         clip.save()
         url = self.get_url('/api/v2/u/clips/share/?clip_id=%s' % clip.get_id())
         response = yield self.http_client.fetch(url)
@@ -9639,15 +9639,15 @@ class TestClipHandler(TestVerifiedControllersBase):
                 job_results=vjtl)
         self.vm.save()
         # save a few clips 
-        clip = neondata.ClipMetadata(
+        clip = neondata.Clip(
             'testa_vid1_1', 
             video_id='vid1')
         clip.save() 
-        clip = neondata.ClipMetadata(
+        clip = neondata.Clip(
             'testa_vid1_2', 
             video_id='vid1')
         clip.save() 
-        clip = neondata.ClipMetadata(
+        clip = neondata.Clip(
             'testa_vid1_3', 
             video_id='vid1')
         clip.save() 
