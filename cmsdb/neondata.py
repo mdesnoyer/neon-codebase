@@ -2638,6 +2638,24 @@ class Tag(Searchable, StoredObject):
         return self.account_id
 
 
+class Clip(StoredObject):
+    '''Stub for gif clips'''
+
+    def __init__(self, clip_id, account_id=None, share_token=None):
+        super(Clip, self).__init__(clip_id)
+        self.account_id = account_id
+        self.share_token = share_token
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Clip.__name__
+
+    def get_account_id(self):
+        return self.account_id
+         
+
 class AbstractHashGenerator(object):
     '''Abstract Hash Generator'''
 
@@ -5720,15 +5738,13 @@ class Clip(StoredObject):
 
     Keyed by clip_id
     '''
-    def __init__(self, clip_id, video_id=None, thumbnail_id=None, urls=None,
+    def __init__(self, clip_id=None, video_id=None, thumbnail_id=None, urls=None,
                  ttype=None, rank=0, model_version=None, enabled=True,
-                 refid=None, score=None,
-                 serving_frac=None, ctr=None,
-                 start_frame=None, end_frame=None,
-                 model_params=None, rendition_ids=None):
-        super(ClipMetadata,self).__init__(clip_id)
+                 score=None, start_frame=None, end_frame=None):
+        clip_id = clip_id or uuid.uuid4().hex
+        super(Clip,self).__init__(clip_id)
 
-        # video id this clip was generated from
+        # interval video id this clip is associated with
         self.video_id = video_id
         # url for this clip
         self.urls = urls or []
@@ -5746,6 +5762,7 @@ class Clip(StoredObject):
         self.start_frame = start_frame
         # what frame this clip ends at
         self.end_frame = end_frame
+
         # The score of this clip. Higher is better. Note that this
         # will be a score combined of a raw valence score plus some
         # other stuff (like motion analysis)
@@ -5754,12 +5771,66 @@ class Clip(StoredObject):
     @property
     def account_id(self):
         return InternalVideoID.get_account_id(self.video_id)
-         
+
     @classmethod
     def _baseclass_name(cls):
-        '''Returns the class name of the base class of the hierarchy.
-        '''
+        '''Returns the class name of the base class of the hierarchy.'''
         return Clip.__name__
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
+        '''Put the clip to CDN. Write the database for this ClipMetadata.
+
+        Inputs- clip a cv2 VideoCapture
+            -video_info a VideoMetadata or None
+            -cdn_metadata a CDNHostingMetadata or None'''
+
+        primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
+            PrimaryNeonHostingMetadata())
+        primary_result = yield primary_hoster.upload_video(
+            video,
+            self.key,
+            self.start_frame,
+            self.end_frame,
+            async=True)
+        if len(s3_url_list) == 1:
+            primaru_url = s3_url_list[0][0]
+            self.urls.insert(0, primary_url)
+        else:
+            raise IOError('Primary file was not uploaded %s' % self.key)
+
+        # Save primary rendition object and associate it with this ClipMetadata.
+        primary_width = clip.get(cv2.CAP_PROP_FRAME_WIDTH)
+        primary_height = clip.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        duration = (self.end_frame - self.start_frame) / 30.
+        primary_container = primary_result[3]
+        primary_codec = primary_result[4]
+        vr0 = neondata.VideoRendition(None, url=primary_url,
+                             width=primary_width, height=primary_height,
+                             duration=duration, container=primary_container,
+                             codec=primary_codec)
+        yield vr0.save(async=True)
+        self.rendition_ids.append(vr0.key)
+
+        if video_info is None:
+            video_info = yield VideoMetadata.get(self.video_id, async=True)
+        if cdn_metadata is None:
+            cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
+
+        hosts = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
+        for host in hosts:
+            results = yield host.upload_video(clip, self.key, self.start_frame,
+                                               self.end_frame, s3_url, async=True)
+
+            # Results is a list of [url, width, height, container, codec]s.
+            vr = neondata.VideoRendition(None, url=results[0], width=results[1],
+                                         height=results[2], container=results[3],
+                                         codec=results[4], duration=duration)
+            yield vr.save(async=True)
+            self.rendition_ids.append(vr.key)
+
+        yield self.save(async=True)
 
 
     @tornado.gen.coroutine
@@ -5828,62 +5899,6 @@ class Clip(StoredObject):
             tag_id=video_meta.tag_id,
             clip_id=self.get_id(),
             async=True)
-        
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
-        '''Put the clip to CDN. Write the database for this ClipMetadata.
-
-        Inputs- clip a cv2 VideoCapture
-            -video_info a VideoMetadata or None
-            -cdn_metadata a CDNHostingMetadata or None'''
-
-        primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
-            PrimaryNeonHostingMetadata())
-        primary_result = yield primary_hoster.upload_video(
-            video,
-            self.key,
-            self.start_frame,
-            self.end_frame,
-            async=True)
-        if len(s3_url_list) == 1:
-            primaru_url = s3_url_list[0][0]
-            self.urls.insert(0, primary_url)
-        else:
-            raise IOError('Primary file was not uploaded %s' % self.key)
-
-        # Save primary rendition object and associate it with this ClipMetadata.
-        primary_width = clip.get(cv2.CAP_PROP_FRAME_WIDTH)
-        primary_height = clip.get(cv2.CAP_PROP_FRAME_HEIGHT)
-        duration = (self.end_frame - self.start_frame) / 30.
-        primary_container = primary_result[3]
-        primary_codec = primary_result[4]
-        vr0 = neondata.VideoRendition(None, url=primary_url,
-                             width=primary_width, height=primary_height,
-                             duration=duration, container=primary_container,
-                             codec=primary_codec)
-        yield vr0.save(async=True)
-        self.rendition_ids.append(vr0.key)
-
-        if video_info is None:
-            video_info = yield VideoMetadata.get(self.video_id, async=True)
-        if cdn_metadata is None:
-            cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
-
-        hosts = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
-        for host in hosts:
-            results = yield host.upload_video(clip, self.key, self.start_frame,
-                                               self.end_frame, s3_url, async=True)
-
-            # Results is a list of [url, width, height, container, codec]s.
-            vr = neondata.VideoRendition(None, url=results[0], width=results[1],
-                                         height=results[2], container=results[3],
-                                         codec=results[4], duration=duration)
-            yield vr.save(async=True)
-            self.rendition_ids.append(vr.key)
-
-        yield self.save(async=True)
-
 
 
 class VideoRendition(StoredObject, Searchable):
