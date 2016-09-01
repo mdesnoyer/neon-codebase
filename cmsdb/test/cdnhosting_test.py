@@ -315,7 +315,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_permissions_error_s3_redirect(self):
         self.s3conn.get_bucket = MagicMock()
-        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3PermissionsError('Permission Error')]
+        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission Error')]
         self.s3conn.create_bucket('host-bucket')
 
         with self.assertLogExists(logging.ERROR, 'AWS client error'):
@@ -326,7 +326,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_create_error_s3_redirect(self):
         self.s3conn.get_bucket = MagicMock()
-        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
+        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
         self.s3conn.create_bucket('host-bucket')
 
         with self.assertLogExists(logging.ERROR, 'AWS Server error'):
@@ -377,7 +377,7 @@ class TestCloudinaryHosting(test_utils.neontest.AsyncTestCase):
           lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 502, buffer=StringIO("gateway error"))
         with self.assertLogExists(logging.ERROR,
-                'Failed to upload image to cloudinary for tid %s' % tid):
+                'Failed to upload file to cloudinary for key %s' % tid):
             with self.assertRaises(IOError):
                 url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 1)
@@ -807,7 +807,7 @@ class TestAkamaiHosting(CDNTestBase):
         tid = 'akamai_vid1_tid2'
         
         with self.assertLogExists(logging.ERROR, 
-                'Error uploading image to akamai for tid %s' % tid):
+                'Error uploading file to akamai for key %s' % tid):
             with self.assertRaises(IOError):
                 yield self.hoster.upload(self.image, tid, async=True)
         

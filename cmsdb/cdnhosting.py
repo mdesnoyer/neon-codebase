@@ -203,6 +203,7 @@ class CDNHosting(object):
 
                     image_file = StringIO()
                     im.save(image_file, 'jpeg', quality=90)
+                    image_file.seek(0)
 
                     cdn_val = yield self._upload_and_check_file(
                         image_file, 'jpeg', tid, width, height, url, overwrite)
@@ -210,6 +211,7 @@ class CDNHosting(object):
             else:
                 image_file = StringIO()
                 image.save(image_file, 'jpeg', quality=90)
+                image_file.seek(0)
                 width = image.size[0]
                 height = image.size[1]
 
@@ -444,7 +446,6 @@ class AWSHosting(CDNHosting):
         else:
             cdn_prefix = "http://s3.amazonaws.com/%s" % self.s3bucket_name
 
-
         # Build the key name
         name_pieces = []
         if self.folder_prefix:
@@ -482,7 +483,7 @@ class AWSHosting(CDNHosting):
                 # it's probably the same image. Thank you lossy jpeg
                 # compression. I'd love to do an md5, but we don't get
                 # that from S3
-                if key.size and filestream.len == key.size:
+                if key.size and _file.len == key.size:
                     raise tornado.gen.Return(cdn_url)
 
             if _format == 'mp4':
@@ -509,6 +510,7 @@ class AWSHosting(CDNHosting):
                 'AWS client error when uploading file to s3://%s/%s : %s' %
                     (self.s3bucket_name, key_name, e))
             statemon.state.increment('s3_upload_error')
+
             raise IOError(str(e))
 
         raise tornado.gen.Return(cdn_url)
