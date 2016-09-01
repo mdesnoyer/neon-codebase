@@ -40,10 +40,8 @@ import psutil
 import Queue
 import random
 import re
-import shutil 
 import signal
 import socket
-import tempfile
 import tornado.web
 import tornado.gen
 import tornado.escape
@@ -59,6 +57,7 @@ import utils.neon
 from utils import pycvutils
 import utils.http
 from utils import statemon
+import utils.video_download
 from video_processor import video_processing_queue
 
 import logging
@@ -118,10 +117,6 @@ define('notification_api_key', default='icAxBCbwo--owZaFED8hWA',
        help='Api key for the notifications')
 define('extra_workers', default=0,
        help='Number of extra workers to allow downloads to happen in the background')
-define('video_temp_dir', default=None,
-       help='Temporary directory to download videos to')
-define('max_bandwidth_per_core', default=15500000.0,
-       help='Max bandwidth in bytes/s')
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
@@ -178,11 +173,6 @@ class VideoProcessor(object):
         self.job_queue = job_queue
         self.job_message = job_message
         self.video_url = self.job_params['video_url']
-        #get the video file extension
-        parsed = urlparse.urlparse(self.video_url)
-        vsuffix = os.path.splitext(parsed.path)[1]
-        self.tempfile = tempfile.NamedTemporaryFile(
-            suffix=vsuffix, delete=True, dir=options.video_temp_dir)
 
         # The default thumb url extracted from the video url
         self.extracted_default_thumbnail = None
@@ -204,15 +194,12 @@ class VideoProcessor(object):
         self.model = model
         self.model_version = model_version
 
-        self.executor = concurrent.futures.ThreadPoolExecutor(10)
-
         self._mov = None
+        self._video_downloader = None
 
     def __del__(self):
-        # Clean up the executor
-        self.executor.shutdown(False)
-
         self.mov = None
+        self.video_downloader = None
 
     @property
     def mov(self):
@@ -223,6 +210,16 @@ class VideoProcessor(object):
         if self._mov:
             self._mov.release()
         self._mov = value
+
+    @property
+    def video_downloader(self):
+        return self._video_downloader
+    
+    @video_downloader.setter
+    def video_downloader(self, value):
+        if self._video_downloader:
+            self._video_downloader.close()
+        self._video_downloader = value
 
     @tornado.gen.coroutine
     def update_video_metadata_video_info(self):
@@ -259,7 +256,8 @@ class VideoProcessor(object):
             with self.cv_semaphore:
                 statemon.state.increment('workers_cv_processing')
                 try:
-                    yield self.process_video(self.tempfile.name) 
+                    yield self.process_video(
+                        self.video_downloader.get_local_filename()) 
                 finally:
                     statemon.state.decrement('workers_cv_processing')
 
@@ -339,8 +337,8 @@ class VideoProcessor(object):
                     async=True) 
        
         finally:
-            #Delete the temp video file which was downloaded
-            self.tempfile.close()
+            # Close the video downloader
+            self.video_downloader = None
 
             # Close the video capture object
             self.mov = None
@@ -365,122 +363,41 @@ class VideoProcessor(object):
 
         _log.info('Starting download of video %s. Throttled: %s' % 
                   (self.video_url, do_throttle))
-
+        self.video_downloader = utils.video_download.VideoDownloader(
+            self.video_url,
+            do_throttle)
         try:
-            s3match = s3re.search(self.video_url)
-            if s3match:
-                # Get the video from s3 directly
-                try:
-                    bucket_name = s3match.group(4)
-                    key_name = s3match.group(5)
-                    s3conn = S3Connection()
-                    bucket = yield self.executor.submit(
-                        s3conn.get_bucket, bucket_name)
-                    key = yield self.executor.submit(
-                        bucket.get_key, key_name)
-                    self.video_metadata.duration = video_duration
-                    yield self.update_video_metadata_video_info()
-                    yield self._set_job_timeout(self.video_metadata.duration,
-                                                key.size)
-                    yield self.executor.submit(
-                        key.get_contents_to_file, self.tempfile)
-                    yield self.executor.submit(self.tempfile.flush)
-                    return
-                except boto.exception.S3ResponseError as e:
-                    _log.warn('Error getting video url %s via boto. '
-                              'Falling back on http: %s' % (self.video_url, e))
-                    statemon.state.increment('s3url_download_error')
-
-            # Now try using youtube-dl to download the video. This can
-            # potentially handle a ton of different video sources.
-            def _handle_progress(x):
-                if x['status'] == 'finished':
-                    shutil.move(x['filename'], self.tempfile.name)
-                    
-            dl_params = {}
-            dl_params['noplaylist'] = True
-            dl_params['ratelimit'] = (options.max_bandwidth_per_core 
-                                      if do_throttle else None)
-            dl_params['restrictfilenames'] = True
-            dl_params['progress_hooks'] = [_handle_progress]
-            dl_params['outtmpl'] = unicode(str(
-                os.path.join(options.video_temp_dir or '/tmp',
-                             '%s_%%(id)s.%%(ext)s' %
-                             self.job_params['api_key'])))
-
-            # Specify for formats that we want in order of preference
-            dl_params['format'] = (
-                'best[ext=mp4][height<=720][protocol^=?http]/'
-                'best[ext=mp4][protocol^=?http]/'
-                'best[height<=720][protocol^=?http]/'
-                'best[protocol^=?http]/'
-                'best/'
-                'bestvideo')
-            dl_params['logger'] = _log
+            video_info = yield self.video_downloader.get_video_info()
             
-            with youtube_dl.YoutubeDL(dl_params) as ydl:
-                # Dig down to the real url
-                cur_url = self.video_url
-                found_video = False
-                while not found_video:
-                    video_info = yield self.executor.submit(ydl.extract_info,
-                        cur_url, download=False)
-                    result_type = video_info.get('_type', 'video')
-                    if result_type == 'url':
-                        # Need to step to the next url
-                        cur_url = video_info['url']
-                        continue
-                    # Distinguish between /playlist and /watch?list= urls:
-                    # skip the former and download the latter.
-                    elif result_type == 'playlist' and 'entries' not in video_info:
-                        # This effectively strips list and index parameters from the playlist url.
-                        cur_url = video_info['webpage_url']
-                        continue
-                    elif result_type == 'video':
-                        # If type playlist, we get the first or current video.
-                        found_video = True
-                    else:
-                        # They gave us another type of url
-                        msg = ('Unhandled video type %s' %
-                               (result_type))
-                        raise youtube_dl.utils.DownloadError(msg)
+            # Update information about the video before we download it
+            self.extracted_default_thumbnail = video_info.get('thumbnail')
+            def _update_title(x):
+                if x.video_title is None:
+                    x.video_title = video_info.get('title', None)
+            yield neondata.NeonApiRequest.modify(
+                self.job_params['job_id'], self.job_params['api_key'] ,
+                _update_title,
+                async=True)
 
-                # Update information about the video before we download it
-                self.extracted_default_thumbnail = video_info.get('thumbnail')
-                def _update_title(x):
-                    if x.video_title is None:
-                        x.video_title = video_info.get('title', None)
-                yield neondata.NeonApiRequest.modify(
-                    self.job_params['job_id'], self.job_params['api_key'] ,
-                    _update_title,
-                    async=True)
+            # Update some of our metadata if there's better info
+            # from the video
+            self.video_metadata.duration = video_info.get(
+                'duration', video_duration)
+            if video_info.get('upload_date', None) is not None:
+                self.video_metadata.publish_date = \
+                  dateutil.parser.parse(video_info['upload_date']).isoformat()
+            yield self.update_video_metadata_video_info()
 
-                # Update some of our metadata if there's better info
-                # from the video
-                self.video_metadata.duration = video_info.get(
-                    'duration', video_duration)
-                if video_info.get('upload_date', None) is not None:
-                    self.video_metadata.publish_date = \
-                      dateutil.parser.parse(video_info['upload_date']).isoformat()
-                yield self.update_video_metadata_video_info()
+            # Update the timeout
+            yield self._set_job_timeout(
+                self.video_metadata.duration,
+                video_info.get('filesize', 
+                               video_info.get('filesize_approx')))
 
-                # Update the timeout
-                yield self._set_job_timeout(
-                    self.video_metadata.duration,
-                    video_info.get('filesize', 
-                                   video_info.get('filesize_approx')))
-                    
-                # Do the real download
-                video_info = yield self.executor.submit(ydl.extract_info,
-                                                        cur_url, download=True)
-                                                              
+            # Do the real download
+            video_info = yield self.video_downloader.download_video_file()
 
-            _log.info('Finished downloading video %s' % self.video_url)
-
-        except (youtube_dl.utils.DownloadError,
-                youtube_dl.utils.ExtractorError, 
-                youtube_dl.utils.UnavailableVideoError,
-                socket.error) as e:
+        except utils.video_download.VideoDownloadError as e:
             # If this video came from an integration, then try to
             # refresh the url and re-download.
             if (self.video_metadata.integration_id is not None and 
@@ -511,32 +428,11 @@ class VideoProcessor(object):
                     return
 
             msg = "Error downloading video from %s: %s" % (self.video_url, e)
-            _log.error(msg)
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
-
-        except boto.exception.BotoClientError as e:
-            msg = ("Client error downloading video %s from S3: %s" % 
-                   (self.video_url, e))
-            _log.error(msg)
-            statemon.state.increment('video_download_error')
-            raise VideoDownloadError(msg)
-
-        except boto.exception.BotoServerError as e:
-            msg = ("Server error downloading video %s from S3: %s" %
-                   (self.video_url, e))
-            _log.error(msg)
-            statemon.state.increment('video_download_error')
-            raise VideoDownloadError(msg)
-
+            
         except DBError:
             raise
-
-        except IOError as e:
-            msg = "Error saving video to disk: %s" % e
-            _log.error(msg)
-            statemon.state.increment('video_download_error')
-            raise VideoDownloadError(msg)
 
     @tornado.gen.coroutine
     def _process_video_impl(self, mov):

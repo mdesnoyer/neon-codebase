@@ -22,7 +22,6 @@ mock==1.0.1
 moto==0.2.9
 mrjob==0.4.1
 nose-cov==1.6
-pandas==0.15.2
 paramiko==1.14.0
 poster==0.8.1
 psutil==1.2.1
@@ -37,10 +36,7 @@ simplejson==2.3.2
 svmlight==0.4
 tornado==4.2.1
 thrift==0.9.1
-paramiko==1.14.0
 pandas==0.18.1
-impyla==0.8.1
-dateutils==0.6.6
 winpdb==1.4.8
 voluptuous==0.8.7
 scikit-learn==0.17.1

@@ -148,10 +148,10 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         # Mock out the YoutubeDL
         self.youtube_patcher = patch(
-            'video_processor.client.youtube_dl.YoutubeDL')
+            'video_processor.client.utils.video_download.youtube_dl.YoutubeDL')
         self.youtube_client_mock = self.youtube_patcher.start()
         self.youtube_extract_info_mock = \
-            self.youtube_client_mock().__enter__().extract_info
+            self.youtube_client_mock().extract_info
         self.youtube_extract_info_mock.return_value = {
             u'_type': u'video',
             u'id': 'yces6PZOsgc', 
@@ -405,19 +405,19 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             ]
         
         vprocessor = self.setup_video_processor("neon")
-        with self.assertLogExists(logging.ERROR, "Error downloading video"):
+        with self.assertLogExists(logging.ERROR, "Error getting video info"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
 
-        with self.assertLogExists(logging.ERROR, "Error downloading video"):
+        with self.assertLogExists(logging.ERROR, "Error getting video info"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
 
-        with self.assertLogExists(logging.ERROR, "Error downloading video"):
+        with self.assertLogExists(logging.ERROR, "Error getting video info"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
 
-        with self.assertLogExists(logging.ERROR, "Error downloading video"):
+        with self.assertLogExists(logging.ERROR, "Error getting video info"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
         
@@ -426,7 +426,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                 yield vprocessor.download_video_file()
                 
 
-    @patch('video_processor.client.S3Connection')
+    @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
     def test_download_s3_video(self, s3_mock):
         vdata = '%030x' % random.randrange(16**(10*1024*1024))
@@ -441,13 +441,13 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor = self.setup_video_processor(
             "neon", url='s3://customer-videos/some/video.mp4')
         yield vprocessor.download_video_file()
-        vprocessor.tempfile.seek(0) 
-        self.assertEqual(vprocessor.tempfile.read(), vdata)
+        vprocessor.video_downloader.tempfile.seek(0) 
+        self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
 
-    @patch('video_processor.client.S3Connection')
+    @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
     def test_download_s3_video_http_path(self, s3_mock):
         vdata = '%030x' % random.randrange(16**(10*1024*1024))
@@ -462,13 +462,13 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor = self.setup_video_processor(
             "neon", url='https://s3-us-west-2.amazonaws.com/customer-videos/some/video.mp4')
         yield vprocessor.download_video_file()
-        vprocessor.tempfile.seek(0) 
-        self.assertEqual(vprocessor.tempfile.read(), vdata)
+        vprocessor.video_downloader.tempfile.seek(0) 
+        self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
 
-    @patch('video_processor.client.S3Connection')
+    @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
     def test_download_s3_video_error(self, s3_mock):
         s3_mock.side_effect = [
@@ -480,11 +480,11 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor = self.setup_video_processor(
             "neon", url='s3://customer-videos/some/video.mp4')
        
-        with self.assertLogExists(logging.ERROR, "Client error downloading"):
+        with self.assertLogExists(logging.ERROR, "Client error getting video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
         
-        with self.assertLogExists(logging.ERROR, "Server error downloading"):
+        with self.assertLogExists(logging.ERROR, "Server error getting video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
         
@@ -492,7 +492,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
 
-    @patch('video_processor.client.S3Connection')
+    @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
     def test_download_s3_error_with_valid_httpfallback(self, s3_mock):
         s3_mock.side_effect = [

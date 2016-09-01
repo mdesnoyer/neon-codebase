@@ -13,6 +13,7 @@ from boto.s3.connection import S3Connection
 import concurrent.futures
 import logging
 import re
+import socket
 import shutil
 import tempfile
 import tornado.gen
@@ -42,7 +43,7 @@ class VideoDownloader(object):
         self.video_info = {} # Dictionary of info in youtube_dl format
 
         #get the video file extension
-        parsed = urlparse.urlparse(self.video_url)
+        parsed = urlparse.urlparse(self.url)
         vsuffix = os.path.splitext(parsed.path)[1]
         # Temporary file where the video is stored on disk
         self.tempfile = tempfile.NamedTemporaryFile(
@@ -66,8 +67,7 @@ class VideoDownloader(object):
         dl_params['progress_hooks'] = [_handle_progress]
         dl_params['outtmpl'] = unicode(str(
             os.path.join(options.temp_dir or '/tmp',
-                         '%s_%%(id)s.%%(ext)s' %
-                         self.job_params['api_key'])))
+                         '%(id)s.%(ext)s')))
         # Specify for formats that we want in order of preference
         dl_params['format'] = (
             'best[ext=mp4][height<=720][protocol^=?http]/'
@@ -88,6 +88,9 @@ class VideoDownloader(object):
         self.tempfile.close()
         self.executor.shutdown(False)
 
+    def get_local_filename(self):
+        return self.tempfile.name
+
     @tornado.gen.coroutine
     def get_video_info(self):
         '''Retrieves information about the video without downloading it.
@@ -103,7 +106,7 @@ class VideoDownloader(object):
                     s3key = yield self._get_s3_key()
                     self.video_info['url'] = self.url
                     self.video_info['filesize'] = s3key.size
-                    return
+                    raise tornado.gen.Return(self.video_info)
                 except boto.exception.S3ResponseError as e:
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.url, e))
@@ -166,7 +169,7 @@ class VideoDownloader(object):
         '''Downloads the video file to disk.'''
         video_info = yield self.get_video_info()
         
-        _log.info('Downloading %s' % video_info['url'])
+        _log.info('Downloading %s' % self.url)
 
         try:
            if self.s3key is not None:
@@ -179,10 +182,10 @@ class VideoDownloader(object):
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.url, e))
 
-            # Use Youtube DL. This can handle a ton of different video sources
-            self.video_info = yield self.executor.submit(
-                self.ydl.extract_info,
-                cur_url, download=True)
+           # Use Youtube DL. This can handle a ton of different video sources
+           self.video_info = yield self.executor.submit(
+               self.ydl.extract_info,
+               self.url, download=True)
 
         except (youtube_dl.utils.DownloadError,
                 youtube_dl.utils.ExtractorError, 
@@ -213,4 +216,4 @@ class VideoDownloader(object):
             s3conn = S3Connection()
             bucket = yield self.executor.submit(s3conn.get_bucket, bucket_name)
             self.s3key = yield self.executor.submit(bucket.get_key, key_name)
-        return self.s3key
+        raise tornado.gen.Return(self.s3key)

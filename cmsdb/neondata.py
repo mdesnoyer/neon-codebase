@@ -5210,7 +5210,7 @@ class NeonApiRequest(NamespacedStoredObject):
                     rank=cur_rank)
         yield clip.ingest(self.default_clip,
                           video.get_id(), 
-                          cdn_metadata=cdn_metadata
+                          cdn_metadata=cdn_metadata,
                           save_objects=True)
         raise tornado.gen.Return(clip)
 
@@ -5763,7 +5763,11 @@ class Clip(StoredObject):
         if len(self.urls) > 0 and url not in self.urls:
             raise ValueError('This video was already ingested.')
 
-        
+        downloader = utils.video_download.VideoDownloader(url)
+        try:
+            video_info = yield downloader.download_video_file()
+        finally:
+            downloader.close()
     
 class VideoRendition(StoredObject):
     '''
