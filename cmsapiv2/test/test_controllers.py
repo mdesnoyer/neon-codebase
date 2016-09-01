@@ -3353,7 +3353,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 404)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'do not exist .* viddoesnotexist')
+                                 'do not exist .*viddoesnotexist*')
 
     def test_get_multiple_video_dne(self):
         url = '/api/v2/%s/videos?'\
@@ -5022,11 +5022,13 @@ class TestVideoStatsHandler(TestControllersBase):
                                                 method='GET')
         rjson = json.loads(response.body)
         self.assertEquals(rjson['count'], 2)
-        statistic_one = rjson['statistics'][0]
-        self.assertEquals(statistic_one['experiment_state'],
+        statistic_one = next(s for s in rjson['statistics']
+            if s['video_id'] == 'vid1')
+        self.assertEqual(statistic_one['experiment_state'],
                           neondata.ExperimentState.COMPLETE)
-        statistic_two = rjson['statistics'][1]
-        self.assertEquals(statistic_two['experiment_state'],
+        statistic_two = next(s for s in rjson['statistics']
+            if s['video_id'] == 'vid2')
+        self.assertEqual(statistic_two['experiment_state'],
                           neondata.ExperimentState.RUNNING)
 
     @tornado.testing.gen_test
@@ -5121,10 +5123,12 @@ class TestThumbnailStatsHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)
-        self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['count'], 2)
-        status_one = rjson['statistics'][0]
-        status_two = rjson['statistics'][1]
+        self.assertEqual(response.code, 200)
+        self.assertEqual(rjson['count'], 2)
+        status_one = next(s for s in rjson['statistics']
+            if s['thumbnail_id'] == 'testingtid')
+        status_two = next(s for s in rjson['statistics']
+            if s['thumbnail_id'] == 'testing_vtid_one')
         self.assertEquals(status_one['ctr'], 0.23)
         self.assertEquals(status_two['ctr'], 0.12)
 
@@ -5137,8 +5141,10 @@ class TestThumbnailStatsHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['count'], 2)
-        status_one = rjson['statistics'][0]
-        status_two = rjson['statistics'][1]
+        status_one = next(s for s in rjson['statistics']
+            if s['thumbnail_id'] == 'testingtid')
+        status_two = next(s for s in rjson['statistics']
+            if s['thumbnail_id'] == 'testing_vtid_one')
         self.assertEquals(status_one['ctr'], 0.23)
         self.assertEquals(status_two['ctr'], 0.12)
 
@@ -9413,6 +9419,33 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(set(thumbs), set(thumbnail_ids))
 
 
+class TestTagSearchInternalHandler(TestVerifiedControllersBase):
+
+    @tornado.testing.gen_test
+    def test_search_with_default_limit(self):
+        pstr = 'cmsdb.neondata.Tag.search_for_objects_and_times'
+        search = patch(pstr)
+        wrapped = self._future_wrap_mock(search.start())
+        def side_effect(**kwargs):
+            return [], None, None
+        wrapped.side_effect = side_effect
+
+        # In particular we expect limit to be defaulted to 25.
+        url = self.get_url('/api/v2/tags/search/')
+        r = yield self.http_client.fetch(url)
+        self.assertEqual(r.code, 200)
+        wrapped.assert_called_with(
+            account_id=None,
+            since=0.0,
+            limit=25,
+            show_hidden=False,
+            query=None,
+            until=0.0,
+            tag_type=None)
+
+        search.stop()
+
+
 class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 
     def setUp(self):
@@ -9421,6 +9454,30 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
             '/api/v2/%s/tags/search/' % self.account_id)
         self.thumbs_url = self.get_url(
             '/api/v2/%s/tags/?tag_id={tag_id}' % self.account_id)
+
+    @tornado.testing.gen_test
+    def test_search_with_default_limit(self):
+        pstr = 'cmsdb.neondata.Tag.search_for_objects_and_times'
+        search = patch(pstr)
+        wrapped = self._future_wrap_mock(search.start())
+
+        # Search expects a list and two times to be raised.
+        def side_effect(**kwargs):
+            return [], None, None
+        wrapped.side_effect = side_effect
+        r = yield self.http_client.fetch(self.url)
+        self.assertEqual(r.code, 200)
+        # We must see a limit of 25 set.
+        wrapped.assert_called_with(
+            account_id=self.account_id,
+            since=0.0,
+            limit=25,
+            show_hidden=False,
+            query=None,
+            until=0.0,
+            tag_type=None)
+
+        search.stop()
 
     @tornado.testing.gen_test
     def test_search_no_item(self):

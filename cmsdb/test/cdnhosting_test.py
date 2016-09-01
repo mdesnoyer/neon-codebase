@@ -242,7 +242,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     def test_permissions_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().get_key.side_effect = [None]
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission error')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3PermissionsError('Permission error')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
@@ -258,7 +258,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     def test_create_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().get_key.side_effect = [None]
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
@@ -334,6 +334,12 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                 yield cmsdb.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
+class TestCloudinaryHosting(test_utils.neontest.AsyncTestCase):
+
+    def setUp(self):
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestCloudinaryHosting, self).setUp()
+
     @patch('cmsdb.cdnhosting.utils.http.send_request')
     def test_cloudinary_hosting(self, mock_http):
         mock_http = self._future_wrap_mock(mock_http)
@@ -350,7 +356,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mock_http.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 200,buffer=StringIO(mock_response))
-        url = cd.upload(None, tid, url)
+        url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 2)
         self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
         self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
@@ -371,9 +377,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
           lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 502, buffer=StringIO("gateway error"))
         with self.assertLogExists(logging.ERROR,
-                'Failed to upload image to cloudinary for tid %s' % tid):
+                'Failed to upload file to cloudinary for key %s' % tid):
             with self.assertRaises(IOError):
-                url = cd.upload(None, tid, url)
+                url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 1)
 
 
@@ -801,7 +807,7 @@ class TestAkamaiHosting(CDNTestBase):
         tid = 'akamai_vid1_tid2'
         
         with self.assertLogExists(logging.ERROR, 
-                'Error uploading image to akamai for tid %s' % tid):
+                'Error uploading file to akamai for key %s' % tid):
             with self.assertRaises(IOError):
                 yield self.hoster.upload(self.image, tid, async=True)
         
