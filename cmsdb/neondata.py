@@ -126,6 +126,7 @@ statemon.define('postgres_pools', int)
 statemon.define('postgres_pool_full', int)
 
 class ThumbDownloadError(IOError):pass
+class VideoDownloadError(IOError):pass
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
 
@@ -5860,13 +5861,16 @@ class Clip(StoredObject):
                        Otherwise it will be looked up.
         save_objects - If true, the objects in the database are updated
         '''
-        if len(self.urls) > 0 and url not in self.urls:
-            raise ValueError('This video was already ingested.')
+        if len(self.urls) > 0:
+            if url not in self.urls:
+                raise ValueError(
+                    'This video was already ingested from a different url.')
+            return
         self.urls.append(url)
 
         downloader = utils.video_download.VideoDownloader(url)
         try:
-            _ = yield downloader.download_video_file()
+            _  = yield downloader.download_video_file()
 
             # Upload the clip to our hosting location
             mov = cv2.VideoCapture(downloader.get_local_filename())

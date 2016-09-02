@@ -1373,15 +1373,6 @@ class ClipProcessor(VideoProcessor):
 
         yield self._tag_video(api_request)
 
-        try:
-            yield api_request.save_default_clip(cdn_metadata)
-        except IOError as e:
-            _log.warn("Default clip download failed for vid %s" %
-                      api_request.video_id)
-            err_msg = "Failed to download default thumbnail: %s" % e
-            statemon.increment('default_clip_error')
-            raise DefaultClipError(err_msg)
-
         # Finally tag all the clips to the video
         try:
             ct = yield neondata.TagClip.save_many(
@@ -1393,6 +1384,15 @@ class ClipProcessor(VideoProcessor):
             _log.error(msg)
             statemon.state.increment('tag_write_error')
             raise DBError(msg)
+
+        try:
+            yield api_request.save_default_clip(cdn_metadata)
+        except utils.video_download.VideoDownloadError as e:
+            _log.warn("Default clip download failed for vid %s" %
+                      api_request.video_id)
+            err_msg = "Failed to download default thumbnail: %s" % e
+            statemon.state.increment('default_clip_error')
+            raise DefaultClipError(err_msg)
 
     def _build_callback_response(self):
         clip_ids = [x.get_id() for x in self.clips 

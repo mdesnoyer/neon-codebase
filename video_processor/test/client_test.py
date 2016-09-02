@@ -68,6 +68,7 @@ import utils.neon
 from utils.options import define, options
 import utils.ps
 from utils import statemon
+import utils.video_download
 import video_processor.client
 import video_processor.video_processing_queue
 from video_processor.client import VideoClient
@@ -2211,11 +2212,13 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         super(TestFinalizeClipResponse, self).setUp()
 
         # Mock out the clip download
+        dl_error = utils.video_download.VideoDownloadError
         self.video_download_patcher = patch(
             'video_processor.client.neondata.utils.video_download')
         self.video_download_mod_mock = self.video_download_patcher.start()
         self.video_download_mock = self._future_wrap_mock(
             self.video_download_mod_mock.VideoDownloader().download_video_file)
+        self.video_download_mod_mock.VideoDownloadError = dl_error
 
         # Mock out the opencv video capture object
         self.cv2_patcher = patch('video_processor.client.cv2.VideoCapture')
@@ -2286,6 +2289,8 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
     @tornado.testing.gen_test
     def test_default_process(self):
         yield self.vprocessor.finalize_response()
+
+        self.assertTrue(self.video_download_mock.called)
 
         # Make sure that the api request is updated
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -2650,6 +2655,28 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(len(job_results[0].clip_ids), 2)
         self.assertEquals(job_results[0].model_version, 'test_version')
 
+    @tornado.testing.gen_test
+    def test_default_clip_download_error(self):
+        self.video_download_mock.side_effect = [
+            utils.video_download.VideoDownloadError('Where did the video go?')
+            ]
+
+        with self.assertRaises(video_processor.client.DefaultClipError):
+            yield self.vprocessor.finalize_response()
+
+        # Make sure the extracted clips are there and tagged
+        video_data = neondata.VideoMetadata.get(self.video_id)
+        self.assertEquals(len(video_data.job_results), 1)
+        job_result = video_data.job_results[0]
+        self.assertEquals(len(job_result.clip_ids), 2)
+        clips = neondata.Clip.get_many(job_result.clip_ids)
+        self.assertEquals(clips[0].type, neondata.ClipType.NEON)
+        self.assertEquals(clips[0].rank, 0)
+        self.assertEquals(clips[1].type, neondata.ClipType.NEON)
+        self.assertEquals(clips[1].rank, 1)
+        tag_clip_ids = neondata.TagClip.get(tag_id=video_data.tag_id)
+        self.assertItemsEqual(tag_clip_ids,
+                              [x.get_id() for x in clips])
 
 class SmokeTest(test_utils.neontest.AsyncTestCase):
     '''Smoke test for the video processing client'''
