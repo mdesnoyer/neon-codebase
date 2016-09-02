@@ -2417,7 +2417,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             self.job_queue_mock.hide_message)
 
         # Mock out the video download
-        self.client_s3_patcher = patch('video_processor.client.S3Connection')
+        self.client_s3_patcher = patch(
+            'video_processor.client.utils.video_download.S3Connection')
         self.mock_conn2 = self.client_s3_patcher.start()
         self.mock_conn2.return_value = self.s3conn
         self.test_video_file = os.path.join(
