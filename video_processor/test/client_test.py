@@ -1508,6 +1508,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
 
         video = neondata.VideoMetadata.get(self.video_id)
         self.assertEqual(tag.get_id(), video.tag_id)
+        self.assertEqual(tag.name, 'some fun video')
 
         tag_thumb_ids = set(neondata.TagThumbnail.get(tag_id=tag.get_id()))
         job_result = video.job_results[0]
@@ -2284,8 +2285,6 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
 
     @tornado.testing.gen_test
     def test_default_process(self):
-        self.maxDiff = None
-        
         yield self.vprocessor.finalize_response()
 
         # Make sure that the api request is updated
@@ -2428,6 +2427,62 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
             api_request.response)
         self.assertItemsEqual(api_request.response['clip_ids'],
                               [x.get_id() for x in clips])
+
+    @tornado.testing.gen_test
+    def test_reprocess_new_model_already_thumbs(self):
+
+        # The situation where a job for thumbs on an old model was
+        # already run. In this case, leave it also and a new job
+        # result should be generated.
+        thumbs = [
+            neondata.ThumbnailMetadata(
+                '%s_thumb1' % self.video_id,
+                self.video_id,
+                model_score=3.0,
+                ttype=neondata.ThumbnailType.NEON,
+                model_version='model1',
+                frameno=167,
+                rank=0)]
+        neondata.ThumbnailMetadata.save_all(thumbs)
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = [x.key for x in thumbs],
+            non_job_thumb_ids=[],
+            job_results=[neondata.VideoJobThumbnailList(
+                thumbnail_ids=[thumbs[0].key],
+                model_version='test_version')],
+            duration=97.0,
+            model_version='test_version')
+        video_meta.serving_url = 'my_serving_url.jpg'
+        video_meta.save()
+
+        # Write the request to the db
+        api_request = neondata.NeonApiRequest(
+            'job1', self.api_key, 'vid1',
+            'some fun video',
+            'http://video.mp4',
+            http_callback='http://callback.com',
+            result_type=neondata.ResultType.CLIPS)
+        api_request.state = neondata.RequestState.PROCESSING
+        api_request.save()
+        self.vprocessor.reprocess = True
+        self.vprocessor.model_version = 'new_model'
+        self.vprocessor.video_metadata.model_version = 'new_model'
+        yield self.vprocessor.finalize_response()
+
+        video_data = neondata.VideoMetadata.get(self.video_id)
+        self.assertEquals(video_data.model_version, 'new_model')
+        self.assertEquals(video_data.thumbnail_ids, [thumbs[0].key])
+
+        # There should be two job results now
+        job_results = video_data.job_results
+        self.assertEquals(len(job_results), 2)
+        self.assertEquals(job_results[0].thumbnail_ids, [thumbs[0].key])
+        self.assertEquals(job_results[0].clip_ids, [])
+        self.assertEquals(job_results[0].model_version, 'test_version')
+        self.assertEquals(job_results[1].thumbnail_ids, [])
+        self.assertEquals(len(job_results[1].clip_ids), 2)
+        self.assertEquals(job_results[1].model_version, 'new_model')
 
 
 class SmokeTest(test_utils.neontest.AsyncTestCase):
@@ -2932,6 +2987,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(len(video_meta.thumbnail_ids), 1)
         self.assertEquals(video_meta.model_version, 'my_model')
         self.assertEquals(len(video_meta.job_results[0].clip_ids), 1)
+        self.assertEquals(len(video_meta.non_job_clip_ids), 0)
 
         vid_thumb = neondata.ThumbnailMetadata.get(video_meta.thumbnail_ids[0])
         self.assertEquals(vid_thumb.type, neondata.ThumbnailType.OOYALA)
