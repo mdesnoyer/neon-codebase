@@ -5741,9 +5741,9 @@ class Clip(StoredObject):
 
     Keyed by clip_id
     '''
-    def __init__(self, clip_id=None, video_id=None, thumbnail_id=None, urls=None,
-                 ttype=None, rank=0, model_version=None, enabled=True,
-                 score=None, start_frame=None, end_frame=None):
+    def __init__(self, clip_id=None, video_id=None, thumbnail_id=None, 
+                 urls=None, ttype=None, rank=0, model_version=None, 
+                 enabled=True, score=None, start_frame=None, end_frame=None):
         clip_id = clip_id or uuid.uuid4().hex
         super(Clip,self).__init__(clip_id)
 
@@ -5792,12 +5792,11 @@ class Clip(StoredObject):
             -cdn_metadata a CDNHostingMetadata or None
 
         '''
-
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         primary_result = yield primary_hoster.upload_video(
             clip,
-            self.key,
+            self.get_id(),
             self.start_frame,
             self.end_frame,
             async=True)
@@ -6639,8 +6638,8 @@ class VideoMetadata(Searchable, StoredObject):
         # to the two objects are atomic. For now, put in the thumbnail
         # data and then update the video metadata.
         if save_objects:
-            sucess = yield thumb.save(async=True)
-            if not sucess:
+            success = yield thumb.save(async=True)
+            if not success:
                 raise IOError("Could not save thumbnail")
 
             updated_video = yield self.modify(
@@ -6659,10 +6658,11 @@ class VideoMetadata(Searchable, StoredObject):
 
             # Tag the thumbnail with the video's tag.
             if self.tag_id:
-                yield TagThumbnail.save(
+                success = yield TagThumbnail.save(
                     tag_id=self.tag_id,
                     thumbnail_id=thumb.get_id(),
                     async=True)
+                    
         else:
             _add_thumb_to_video_object(self)
 

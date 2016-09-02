@@ -80,6 +80,7 @@ statemon.define('unknown_exception', int)
 statemon.define('video_download_error', int)
 statemon.define('integration_error', int)
 statemon.define('default_thumb_error', int)
+statemon.define('default_clip_error', int)
 statemon.define('ffvideo_metadata_error', int)
 statemon.define('video_duration_30m', int)
 statemon.define('video_duration_60m', int)
@@ -131,7 +132,8 @@ define("frontend_base_url", default='https://app.neon-lab.com', help='The base u
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
-class DefaultThumbError(VideoError): pass  
+class DefaultThumbError(VideoError): pass
+class DefaultClipError(VideoError): pass
 class VideoDownloadError(VideoError, IOError): pass  
 class PredictionError(VideoError): pass
 class DBError(IOError): pass
@@ -1371,7 +1373,14 @@ class ClipProcessor(VideoProcessor):
 
         yield self._tag_video(api_request)
 
-        yield api_request.save_default_clip(cdn_metadata)
+        try:
+            yield api_request.save_default_clip(cdn_metadata)
+        except IOError as e:
+            _log.warn("Default clip download failed for vid %s" %
+                      api_request.video_id)
+            err_msg = "Failed to download default thumbnail: %s" % e
+            statemon.increment('default_clip_error')
+            raise DefaultClipError(err_msg)
 
         # Finally tag all the clips to the video
         try:

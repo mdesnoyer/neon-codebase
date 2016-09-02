@@ -25,6 +25,7 @@ import random
 import socket
 import string
 import subprocess
+import test_utils.opencv
 import test_utils.neontest
 import time
 import threading
@@ -2941,11 +2942,14 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         Tag(account_id='someone else', name='BCD').save()
         result = yield Tag.search_for_keys(query='A', async=True)
         self.assertEqual(2, len(result))
-        result = yield Tag.search_for_objects(query='A', account_id=self.account_id, async=True)
+        result = yield Tag.search_for_objects(
+            query='A', account_id=self.account_id, async=True)
         self.assertEqual(1, len(result))
-        result = yield Tag.search_for_objects(query='BC', account_id=self.account_id, async=True)
+        result = yield Tag.search_for_objects(
+            query='BC', account_id=self.account_id, async=True)
         self.assertEqual(2, len(result))
-        result = yield Tag.search_for_objects(name='BCD', account_id=self.account_id, async=True)
+        result = yield Tag.search_for_objects(
+            name='BCD', account_id=self.account_id, async=True)
         self.assertEqual(1, len(result))
 
     @tornado.testing.gen_test
@@ -3077,7 +3081,158 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
         f1 = fs[0]
         f2 = fs[1] 
         self.assertEquals(f1.index, 1)  
-        self.assertEquals(f2.index, 2)  
+        self.assertEquals(f2.index, 2)
+
+class TestClip(NeonDbTestCase, BasePGNormalObject):
+
+    def setUp(self):
+        # Mock out the video upload
+        self.hosting_patcher = patch(
+            'cmsdb.neondata.cmsdb.cdnhosting.CDNHosting')
+        self.hosting_mock = self.hosting_patcher.start()
+        self.upload_mock = self._future_wrap_mock(
+            self.hosting_mock.create().upload_video,
+            require_async_kw=True)
+        self.upload_mock.side_effect = (
+          lambda vid, clip_id, start, *args: 
+          [('%i.mp4' % (start), 640, 480, 'mp4', 'h264')])
+        self.hosting_mock.create.reset_mock()
+
+        # Mock out the VideoCapture object
+        self.cv_patcher = patch('cmsdb.neondata.cv2.VideoCapture')
+        self.cv_mock = self.cv_patcher.start()
+        self.cv_mock.side_effect = [test_utils.opencv.VideoCaptureMock(
+            h=480, w=640, frame_count=2997)]
+
+        # Make some database objects
+        self.video_id = 'acct1_vid1'
+        self.video = neondata.VideoMetadata(self.video_id,
+                                            i_id='int1')
+        self.video.save()
+        self.cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key('acct1', 'int1'),
+            cdns=[neondata.NeonCDNHostingMetadata(
+                video_rendition_sizes=[(500, 600, 'gif', 'gif2')])])
+        self.cdn.save()
+
+        self.clip = neondata.Clip(video_id=self.video_id,
+                                  start_frame=190,
+                                  end_frame=250,
+                                  urls=['myvideo.mp4'])
+        
+        super(TestClip, self).setUp()
+
+    def tearDown(self):
+        self.cv_patcher.stop
+        self.hosting_patcher.stop()
+        super(TestClip, self).tearDown()
+
+    @classmethod
+    def _get_object_type(cls):
+        return neondata.Clip
+
+    def test_properties(self):
+        clip = neondata.Clip('cid',
+                             video_id='acct1_vid',
+                             urls=None)
+        self.assertEquals(clip.account_id, 'acct1')
+        self.assertEquals(clip.get_id(), 'cid')
+        self.assertEquals(clip.urls, [])
+
+    @tornado.testing.gen_test
+    def test_add_clip_data(self):
+        mov_mock = test_utils.opencv.VideoCaptureMock(
+            h=200, w=300, frame_count=600, fps=15.0)
+        self.upload_mock.side_effect = [
+            [('primary.mp4', 300, 200, 'mp4', 'h264')],
+            [('one.mp4', 160, 90, 'mp4', 'h264'),
+             ('two.gif', 320, 240, 'gif', 'gif2')]]
+        
+        yield self.clip.add_clip_data(mov_mock, async=True)
+
+        # Test the hosting objects that were created
+        calls = self.hosting_mock.create.call_args_list
+        self.assertEquals(len(calls), 2) # Primary and hosting object
+        self.assertEquals(calls[0][0][0],
+                          neondata.PrimaryNeonHostingMetadata())
+        hosting_obj = calls[1][0][0]
+        self.assertEquals(hosting_obj.video_rendition_sizes,
+                          [[500, 600, 'gif', 'gif2']])
+
+        # Check the calls to upload_video
+        calls = self.upload_mock.call_args_list
+        self.assertEquals(len(calls), 2)
+        self.upload_mock.assert_any_call(mov_mock, self.clip.get_id(),
+                                         190, 250)
+        self.upload_mock.assert_any_call(mov_mock, self.clip.get_id(),
+                                         190, 250, 'primary.mp4')
+
+        # Check the resulting rendition objects.
+        renditions = neondata.VideoRendition.search_for_objects(
+            clip_id=self.clip.get_id())
+        self.assertEquals(len(renditions), 3)
+        rend_map = {x.url: x for x in renditions}
+        self.assertEquals(rend_map['primary.mp4'].width, 300)
+        self.assertEquals(rend_map['primary.mp4'].height, 200)
+        self.assertEquals(rend_map['primary.mp4'].container, 'mp4')
+        self.assertEquals(rend_map['primary.mp4'].codec, 'h264')
+        self.assertEquals(rend_map['primary.mp4'].duration, 4.0)
+        self.assertEquals(rend_map['primary.mp4'].clip_id, self.clip.get_id())
+        self.assertEquals(rend_map['one.mp4'].width, 160)
+        self.assertEquals(rend_map['one.mp4'].height, 90)
+        self.assertEquals(rend_map['one.mp4'].container, 'mp4')
+        self.assertEquals(rend_map['one.mp4'].codec, 'h264')
+        self.assertEquals(rend_map['one.mp4'].duration, 4.0)
+        self.assertEquals(rend_map['one.mp4'].clip_id, self.clip.get_id())
+        self.assertEquals(rend_map['two.gif'].width, 320)
+        self.assertEquals(rend_map['two.gif'].height, 240)
+        self.assertEquals(rend_map['two.gif'].container, 'gif')
+        self.assertEquals(rend_map['two.gif'].codec, 'gif2')
+        self.assertEquals(rend_map['two.gif'].duration, 4.0)
+        self.assertEquals(rend_map['two.gif'].clip_id, self.clip.get_id())
+
+    @tornado.testing.gen_test
+    def test_add_clip_data_primary_upload_error(self):
+        self.upload_mock.side_effect = [
+            []]
+
+        mov_mock = test_utils.opencv.VideoCaptureMock(
+            h=200, w=300, frame_count=600, fps=15.0)
+
+        with self.assertRaises(IOError):
+            yield self.clip.add_clip_data(mov_mock, async=True)
+        
+
+class TestVideoRendition(NeonDbTestCase, BasePGNormalObject):
+
+    @classmethod
+    def _get_object_type(cls):
+        return neondata.VideoRendition
+
+    def test_search(self):
+        neondata.VideoRendition(url='clip1.mp4', video_id='vid1',
+                                clip_id='clip1').save()
+        neondata.VideoRendition(url='clip2.mp4', video_id='vid1',
+                                clip_id='clip2').save()
+        neondata.VideoRendition(url='clip3.mp4', video_id='vid3',
+                                clip_id='clip3').save()
+
+        results = neondata.VideoRendition.search_for_objects(clip_id='clip2')
+        self.assertEquals(len(results), 1)
+        self.assertEquals(results[0].url, 'clip2.mp4')
+
+        results = neondata.VideoRendition.search_for_objects(
+            clip_id='unknown_clip')
+        self.assertEquals(len(results), 0)
+
+        results = neondata.VideoRendition.search_for_objects(video_id='vid1')
+        self.assertEquals(len(results), 2)
+        self.assertItemsEqual([x.url for x in results],
+                              ['clip2.mp4', 'clip1.mp4'])
+
+        results = neondata.VideoRendition.search_for_objects(
+            video_id='unknownvid')
+        self.assertEquals(len(results), 0)
 
 
 class TestStoredObject(test_utils.neontest.AsyncTestCase):

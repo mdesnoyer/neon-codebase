@@ -266,6 +266,7 @@ class CDNHosting(object):
             # Build a ffmpeg param to scale to the specified size.
             width = size[0] or cv2.get(CAP_PROP_FRAME_WIDTH)
             height = size[1] or cv2.get(CAP_PROP_FRAME_HEIGHT)
+            fps = cv2.get(CAP_PROP_FPS) or 30.0
             ffmpeg_params = []
             if size[0] and size[1]:
                 ffmpeg_params = ['-vf', 'scale=%s:%s' % (width, height)]
@@ -281,7 +282,7 @@ class CDNHosting(object):
             # Get a writer with a named temporary file with the
             # right file extension.
             with tempfile.NamedTemporaryFile(suffix=suffix) as target:
-                with imageio.get_writer(target.name, 'FFMPEG', fps=29.97, ffmpeg_params=ffmpeg_params) as writer:
+                with imageio.get_writer(target.name, 'FFMPEG', fps=fps, ffmpeg_params=ffmpeg_params) as writer:
 
                     try:
                         for frame in pycvutils.iterate_video(video, start, end):
