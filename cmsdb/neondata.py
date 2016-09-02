@@ -5259,7 +5259,7 @@ class NeonApiRequest(NamespacedStoredObject):
                     enabled=True,
                     rank=cur_rank)
         yield clip.ingest(self.default_clip,
-                          video, 
+                          video.get_id(), 
                           cdn_metadata=cdn_metadata)
         raise tornado.gen.Return(clip)
 
@@ -5846,20 +5846,21 @@ class Clip(StoredObject):
 
 
     @tornado.gen.coroutine
-    def ingest(self, url, video_meta, cdn_metadata=None):
+    def ingest(self, url, video_id, cdn_metadata=None):
         '''Ingests a clip from a given url.
 
         Also associates it with a VideoMetadata object.
+
+        Saves the Clip object to the database
 
         The video is downloaded locally and any renditions are created
         as necessary.
 
         Inputs:
         url - url of the clip to download
-        video_meta - VideoMetadata object
+        video_id - Internal video id
         cdn_metadata - If known, the metadata to save to the cdn.
                        Otherwise it will be looked up.
-        save_objects - If true, the objects in the database are updated
         '''
         if len(self.urls) > 0:
             if url not in self.urls:
@@ -5870,7 +5871,7 @@ class Clip(StoredObject):
 
         downloader = utils.video_download.VideoDownloader(url)
         try:
-            _  = yield downloader.download_video_file()
+            yield downloader.download_video_file()
 
             # Upload the clip to our hosting location
             mov = cv2.VideoCapture(downloader.get_local_filename())
@@ -5882,12 +5883,12 @@ class Clip(StoredObject):
             downloader.close()
 
         # Do database updates
-        self.video_id = video_meta.get_id()
+        self.video_id = video_id
 
         # Add the clip to the video object
         def _add_clip(video_obj):
             video_obj.non_job_clip_ids.append(self.get_id())
-        video_meta = yield VideoMetadata.modify(video_meta.get_id(), 
+        video_meta = yield VideoMetadata.modify(video_id, 
                                                 _add_clip, 
                                                 async=True)
 

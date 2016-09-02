@@ -38,6 +38,7 @@ from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 import utils.neon
 from utils.options import options
+import utils.video_download
 from cvutils.imageutils import PILImageUtils
 import unittest
 import uuid
@@ -3086,6 +3087,15 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
 class TestClip(NeonDbTestCase, BasePGNormalObject):
 
     def setUp(self):
+        # Mock out the clip download
+        dl_error = utils.video_download.VideoDownloadError
+        self.video_download_patcher = patch(
+            'cmsdb.neondata.utils.video_download')
+        self.video_download_mod_mock = self.video_download_patcher.start()
+        self.video_download_mock = self._future_wrap_mock(
+            self.video_download_mod_mock.VideoDownloader().download_video_file)
+        self.video_download_mod_mock.VideoDownloadError = dl_error
+        
         # Mock out the video upload
         self.hosting_patcher = patch(
             'cmsdb.neondata.cmsdb.cdnhosting.CDNHosting')
@@ -3096,6 +3106,9 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
         self.upload_mock.side_effect = (
           lambda vid, clip_id, start, *args: 
           [('%i.mp4' % (start), 640, 480, 'mp4', 'h264')])
+        self.upload_image_mock = self._future_wrap_mock(
+            self.hosting_mock.create().upload,
+            require_async_kw=True)
         self.hosting_mock.create.reset_mock()
 
         # Mock out the VideoCapture object
@@ -3107,7 +3120,8 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
         # Make some database objects
         self.video_id = 'acct1_vid1'
         self.video = neondata.VideoMetadata(self.video_id,
-                                            i_id='int1')
+                                            i_id='int1',
+                                            tag_id='tag1')
         self.video.save()
         self.cdn = neondata.CDNHostingMetadataList(
             neondata.CDNHostingMetadataList.create_key('acct1', 'int1'),
@@ -3117,8 +3131,7 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
 
         self.clip = neondata.Clip(video_id=self.video_id,
                                   start_frame=190,
-                                  end_frame=250,
-                                  urls=['myvideo.mp4'])
+                                  end_frame=250)
         
         super(TestClip, self).setUp()
 
@@ -3201,6 +3214,45 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
 
         with self.assertRaises(IOError):
             yield self.clip.add_clip_data(mov_mock, async=True)
+
+    @tornado.testing.gen_test
+    def test_ingest_already_done(self):
+        self.clip.urls = ['myvideo.mp4']
+        yield self.clip.ingest('myvideo.mp4', self.video_id)
+
+        self.assertEquals(self.video_download_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_ingest_new_location(self):
+        self.clip.urls = ['myvideo.mp4']
+        with self.assertRaises(ValueError):
+            yield self.clip.ingest('new_loc.mp4', self.video_id)
+
+        self.assertEquals(self.video_download_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_ingest_normal(self):
+        yield self.clip.ingest('myvideo.mp4', self.video_id)
+        
+        self.assertEquals(self.clip, neondata.Clip.get(self.clip.get_id()))
+
+        video = VideoMetadata.get(self.video_id)
+        self.assertEquals(self.video_id, self.clip.video_id)
+        self.assertEquals(video.non_job_clip_ids, [self.clip.get_id()])
+
+        # Check the thumb that represents the clip
+        thumb = ThumbnailMetadata.get(self.clip.thumbnail_id)
+        self.assertEquals(thumb.type, neondata.ThumbnailType.CLIP)
+        self.assertEquals(thumb.video_id, video.get_id())
+        self.assertTrue(thumb.enabled)
+        self.assertIsNotNone(thumb.get_id())
+        self.assertEquals(self.upload_image_mock.call_count, 2)
+
+        # Check the tag connection
+        self.assertEquals(neondata.TagClip.get(tag_id='tag1'),
+                          [self.clip.get_id()])
+
+    
         
 
 class TestVideoRendition(NeonDbTestCase, BasePGNormalObject):
