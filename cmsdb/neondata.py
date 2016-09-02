@@ -5891,6 +5891,9 @@ class Clip(StoredObject):
         video_meta = yield VideoMetadata.modify(video_id, 
                                                 _add_clip, 
                                                 async=True)
+        if video_meta is None:
+            raise DBStateError('Video %s was not in the database' %
+                               video_id)
 
         # Create the thumbnail object for the thumb that represents this clip
         thumb = ThumbnailMetadata(
