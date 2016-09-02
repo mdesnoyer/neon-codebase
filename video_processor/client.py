@@ -544,12 +544,12 @@ class VideoProcessor(object):
         try:
             yield self._process_video_impl(self.mov)
         except model.errors.VideoReadError:
-                msg = "Error using OpenCV to read video. %s" % self.video_url
-                _log.error(msg)
-                statemon.state.increment('video_read_error')
-                raise BadVideoError(msg)
+            msg = "Error using OpenCV to read video. %s" % self.video_url
+            _log.error(msg)
+            statemon.state.increment('video_read_error')
+            raise BadVideoError(msg)
         except model.errors.PredictionError as e:
-                raise PredictionError(e.message)
+            raise PredictionError(e.message)
         
         statemon.state.increment('processed_video')
         _log.info('Sucessfully finished searching video %s' % self.video_url)

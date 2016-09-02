@@ -123,6 +123,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.predict_mock = self._future_wrap_mock(
             self.model.predictor.predict, require_async_kw=True)
         self.predict_mock.return_value = (99, None, 'model1')
+        self.model.find_clips.side_effect = [[
+            model.VideoClip(45, 66, 0.53), model.VideoClip(888, 945, 0.44)]]
         
         # Fill out database
         na = neondata.NeonUserAccount('acct1')
@@ -999,6 +1001,88 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         # Make sure the job was not deleted yet
         self.job_delete_mock.assert_not_called()
+
+    @tornado.testing.gen_test
+    def test_process_clip(self):
+        self.api_request = neondata.NeonApiRequest(
+            'job1', self.api_key,
+            'vid1',
+            'some fun video',
+            'http://video.mp4',
+            http_callback='http://callback.com',
+            result_type=neondata.ResultType.CLIPS,
+            default_clip='http://default_clip.mp4',
+            n_clips=2,
+            callback_email='test@invalid.xxx',
+            clip_length=6.0)
+        self.api_request.save() 
+
+        vprocessor = video_processor.client.ClipProcessor(
+            self.api_request.__dict__,
+            self.model,
+            self.model_version,
+            multiprocessing.BoundedSemaphore(1),
+            self.job_queue_mock,
+            self.job_message)
+
+        yield vprocessor.process_video(self.test_video_file)
+
+        self.model.find_clips.assert_called()
+        cargs, kwargs = self.model.find_clips.call_args
+        self.assertEquals(kwargs, {'n' : 2,
+                                   'max_len' : 6.0,
+                                   'min_len' : 6.0})
+
+        self.assertEquals(len(vprocessor.clips), 2)
+        self.assertEquals(vprocessor.clips[0].video_id, self.video_id)
+        self.assertEquals(vprocessor.clips[0].type, neondata.ClipType.NEON)
+        self.assertEquals(vprocessor.clips[0].rank, 0)
+        self.assertEquals(vprocessor.clips[0].model_version,
+                          self.model_version)
+        self.assertEquals(vprocessor.clips[0].start_frame, 45)
+        self.assertEquals(vprocessor.clips[0].end_frame, 66)
+        self.assertAlmostEqual(vprocessor.clips[0].score, 0.53)
+        self.assertEquals(vprocessor.clips[1].video_id, self.video_id)
+        self.assertEquals(vprocessor.clips[1].type, neondata.ClipType.NEON)
+        self.assertEquals(vprocessor.clips[1].rank, 1)
+        self.assertEquals(vprocessor.clips[1].start_frame, 888)
+        self.assertEquals(vprocessor.clips[1].end_frame, 945)
+        self.assertAlmostEqual(vprocessor.clips[1].score, 0.44)
+
+    @tornado.testing.gen_test
+    def test_process_clip_errors(self):
+        self.model.find_clips.side_effect = [
+            model.errors.VideoReadError('video corrupt'),
+            model.errors.PredictionError('aquilla was bad')
+            ]
+        self.api_request = neondata.NeonApiRequest(
+            'job1', self.api_key,
+            'vid1',
+            'some fun video',
+            'http://video.mp4',
+            http_callback='http://callback.com',
+            result_type=neondata.ResultType.CLIPS,
+            default_clip='http://default_clip.mp4',
+            n_clips=2,
+            callback_email='test@invalid.xxx',
+            clip_length=6.0)
+        self.api_request.save() 
+
+        vprocessor = video_processor.client.ClipProcessor(
+            self.api_request.__dict__,
+            self.model,
+            self.model_version,
+            multiprocessing.BoundedSemaphore(1),
+            self.job_queue_mock,
+            self.job_message)
+
+        with self.assertLogExists(logging.ERROR, 
+                                  'Error using OpenCV to read video'):
+            with self.assertRaises(video_processor.client.BadVideoError):
+                yield vprocessor.process_video(self.test_video_file)
+
+        with self.assertRaises(video_processor.client.PredictionError):
+            yield vprocessor.process_video(self.test_video_file)
 
 
 class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
@@ -2476,6 +2560,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.predict_mock = self._future_wrap_mock(
             self.model.predictor.predict, require_async_kw=True)
         self.predict_mock.return_value = (99, None, 'model1')
+        self.model.find_clips.side_effect = [[
+            model.VideoClip(45, 66, 0.53)]]
 
         # Mock out the image download
         self.im_download_mocker = patch(
@@ -2485,6 +2571,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             require_async_kw=True)
         self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
         self.im_download_mock.return_value = self.random_image
+
+        # Mock out the video upload
+        self.video_upload_patcher = patch(
+            'cmsdb.cdnhosting.CDNHosting.upload_video')
+        self.video_upload_mock = self._future_wrap_mock(
+            self.video_upload_patcher.start())
+        self.video_upload_mock.side_effect = \
+          lambda v, clip, *args: [('%s.mp4' % clip,
+                                   640, 480, 'mp4', 'h264')]
 
         # Mock out the aquila lookup
         self.aquila_conn_patcher = patch(
@@ -2497,6 +2592,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             multiprocessing.BoundedSemaphore(1))
 
     def tearDown(self):
+        self.video_upload_patcher.stop()
         self.aquila_conn_patcher.stop()
         self.s3_patcher.stop()
         self.client_s3_patcher.stop()
@@ -2811,6 +2907,53 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                           neondata.RequestState.INT_ERROR)
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.NOT_SENT)
+
+    @tornado.testing.gen_test
+    def test_clip_processing(self):
+        utf8key = 'L\xc3\xb6rick_video.mp4'.decode('utf-8')
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 's3://my-videos/%s' % utf8key,
+            'result_type' : neondata.ResultType.CLIPS
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEqual(
+            api_request.state,
+            neondata.RequestState.FINISHED)
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertEquals(len(video_meta.thumbnail_ids), 1)
+        self.assertEquals(video_meta.model_version, 'my_model')
+        self.assertEquals(len(video_meta.job_results[0].clip_ids), 1)
+
+        vid_thumb = neondata.ThumbnailMetadata.get(video_meta.thumbnail_ids[0])
+        self.assertEquals(vid_thumb.type, neondata.ThumbnailType.OOYALA)
+
+        # Check the clips
+        clip = neondata.Clip.get(video_meta.job_results[0].clip_ids[0])
+        self.assertEquals(clip.video_id, video_meta.key)
+        self.assertEquals(clip.start_frame, 45)
+        self.assertEquals(clip.end_frame, 66)
+        self.assertAlmostEquals(clip.score, 0.53)
+        self.assertIsNotNone(clip.thumbnail_id)
+
+        # Check the thumbnail for the clip
+        thumb = neondata.ThumbnailMetadata.get(clip.thumbnail_id)
+        self.assertEquals(thumb.video_id, video_meta.key)
+        
+        # Validate each clip is tagged.
+        tagged_clip_ids = neondata.TagClip.get(tag_id=video_meta.tag_id)
+        self.assertItemsEqual([clip.get_id()], tagged_clip_ids)
+
+        # Makes sure that the video was uploaded
+        self.video_upload_mock.assert_called()
 
 
 if __name__ == '__main__':
