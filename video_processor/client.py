@@ -924,13 +924,8 @@ class VideoProcessor(object):
             raise DBError("Error writing video data to database")
 
     @tornado.gen.coroutine
-    def _tag_thumbnails(self, api_request):
-        '''Tags all the thumbnails with the tag associated with the video.
-
-        Creates a tag for this video if it doesn't exist.
-
-        Also makes sure any info on the tag is consistent.
-        '''
+    def _tag_video(self, api_request):
+        '''Creates a tag for this video and sets the information correctly.'''
         if not self.video_metadata.tag_id:
             _log.warn(
                 'Video %s was missing tag at during thumbnail selection',
@@ -967,21 +962,6 @@ class VideoProcessor(object):
                 statemon.state.increment('tag_write_error')
                 raise DBError(msg)
 
-        # Tag all the new thumbnails with the tag
-        _tag_thumb_ids = (self.video_result.thumbnail_ids +
-            self.video_result.bad_thumbnail_ids +
-            self.video_metadata.non_job_thumb_ids)
-        try:
-            ct = yield neondata.TagThumbnail.save_many(
-                tag_id=self.video_metadata.tag_id,
-                thumbnail_id=_tag_thumb_ids,
-                async=True)
-        except Exception as e:
-            msg = "Error mapping thumbs to tags: %s" % e
-            _log.error(msg)
-            statemon.state.increment('tag_write_error')
-            raise DBError(msg)
-
         # Enable the video to be served if we have any thumbnails available
         def _set_serving_enabled_and_tag(video_obj):
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
@@ -998,6 +978,31 @@ class VideoProcessor(object):
             msg = "Error writing video data to database: %s" % e
             _log.error(msg)
             statemon.state.increment('save_vmdata_error')
+            raise DBError(msg)
+
+    @tornado.gen.coroutine
+    def _tag_thumbnails(self, api_request):
+        '''Tags all the thumbnails with the tag associated with the video.
+
+        Creates a tag for this video if it doesn't exist.
+
+        Also makes sure any info on the tag is consistent.
+        '''
+        yield self._tag_video(api_request)
+        
+        # Tag all the new thumbnails with the tag
+        _tag_thumb_ids = (self.video_result.thumbnail_ids +
+            self.video_result.bad_thumbnail_ids +
+            self.video_metadata.non_job_thumb_ids)
+        try:
+            ct = yield neondata.TagThumbnail.save_many(
+                tag_id=self.video_metadata.tag_id,
+                thumbnail_id=_tag_thumb_ids,
+                async=True)
+        except Exception as e:
+            msg = "Error mapping thumbs to tags: %s" % e
+            _log.error(msg)
+            statemon.state.increment('tag_write_error')
             raise DBError(msg)
 
 class ThumbnailProcessor(VideoProcessor):
@@ -1340,16 +1345,12 @@ class ClipProcessor(VideoProcessor):
                 ttype=neondata.ThumbnailType.CLIP,
                 enabled=True,
                 frameno=clip.start_frame)
-            thumb = yield self.video_metadata.add_thumbnail(
-                thumb, pycvutils.to_pil(image),
-                cdn_metadata=cdn_metadata,
-                save_objects=False,
-                async=True)
+            yield thumb.add_image_data(pycvutils.to_pil(image),
+                                       self.video_metadata,
+                                       cdn_metadata,
+                                       async=True)
             self.clip_thumbs.append(thumb)
             clip.thumbnail_id = thumb.key
-
-        # Save the thumbnails from the clips to the database
-        yield self._merge_thumbnails(self.clip_thumbs)
 
         # Save the clips to the database
         try:
@@ -1361,12 +1362,14 @@ class ClipProcessor(VideoProcessor):
             statemon.state.increment('clip_write_error')
             raise DBError("Error writing clips data to database")
 
+        yield self._merge_thumbnails(self.clip_thumbs)
+
         # Save the video information to the database
         yield self._merge_video_data()
             
         yield self._get_default_thumb(api_request, cdn_metadata)
 
-        yield self._tag_thumbnails(api_request)
+        yield self._tag_video(api_request)
 
         yield api_request.save_default_clip(cdn_metadata)
 

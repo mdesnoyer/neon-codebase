@@ -1757,7 +1757,7 @@ class Searchable(object):
         raise NotImplementedError('Add list of valid args in subclass')
 
     @staticmethod
-    def _get_where_part(key, args):
+    def _get_where_part(key, args={}):
         '''Support custom "query" searches
 
         This funcion should return a string that implements a custom
@@ -3834,6 +3834,7 @@ class CDNHostingMetadata(UnsaveableStoredObject):
 
         # @TODO configure clip render.
         # List of 4-element list [width, height, container_type, codec].
+        # If height and width are None, no resizing is done
         self.video_rendition_sizes = video_rendition_sizes or [
             [160, 90, 'mp4', 'h264'],
             [320, 180, 'mp4', 'h264'],]
@@ -3894,7 +3895,8 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         super(S3CDNHostingMetadata, self).__init__(
             key, cdn_prefixes, resize, update_serving_urls, rendition_sizes, 
             source_crop, crop_with_saliency, crop_with_face_detection,
-            crop_with_text_detection)
+            crop_with_text_detection,
+            video_rendition_sizes=video_rendition_sizes)
         self.access_key = access_key # S3 access key
         self.secret_key = secret_key # S3 secret access key
         self.bucket_name = bucket_name # S3 bucket to host in
@@ -3972,7 +3974,8 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             source_crop=source_crop,
             crop_with_saliency=crop_with_saliency,
             crop_with_face_detection=crop_with_face_detection,
-            crop_with_text_detection=crop_with_text_detection)
+            crop_with_text_detection=crop_with_text_detection,
+            video_rendition_sizes=[(None, None, 'mp4', 'h264')])
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -5780,38 +5783,42 @@ class Clip(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
-        '''Put the clip to CDN. Write the database for this Clip.
+        '''Put the clip to CDN. 
+
+        Does not save the Clip object to the database.
 
         Inputs- clip a cv2 VideoCapture
             -video_info a VideoMetadata or None
-            -cdn_metadata a CDNHostingMetadata or None'''
+            -cdn_metadata a CDNHostingMetadata or None
+
+        '''
 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         primary_result = yield primary_hoster.upload_video(
-            video,
+            clip,
             self.key,
             self.start_frame,
             self.end_frame,
             async=True)
-        if len(s3_url_list) == 1:
-            primaru_url = s3_url_list[0][0]
+        if len(primary_result) == 1:
+            primary_result = primary_result[0]
+            primary_url = primary_result[0]
             self.urls.insert(0, primary_url)
         else:
             raise IOError('Primary file was not uploaded %s' % self.key)
 
-        # Save primary rendition object and associate it with this Clip.
-        primary_width = clip.get(cv2.CAP_PROP_FRAME_WIDTH)
-        primary_height = clip.get(cv2.CAP_PROP_FRAME_HEIGHT)
-        duration = (self.end_frame - self.start_frame) / 30.
-        primary_container = primary_result[3]
-        primary_codec = primary_result[4]
-        vr0 = neondata.VideoRendition(None, url=primary_url,
-                             width=primary_width, height=primary_height,
-                             duration=duration, container=primary_container,
-                             codec=primary_codec)
-        yield vr0.save(async=True)
-        self.rendition_ids.append(vr0.key)
+        # Save primary rendition object.
+        fps = float(clip.get(cv2.CAP_PROP_FPS)) or 30.0
+        duration = ((self.end_frame or clip.get(cv2.CAP_PROP_FRAME_COUNT)) - 
+                    (self.start_frame or 0)) / fps
+        renditions = [VideoRendition(url=primary_url,
+                                     width=primary_result[1], 
+                                     height=primary_result[2],
+                                     duration=duration, 
+                                     container=primary_result[3],
+                                     codec=primary_result[4],
+                                     clip_id=self.get_id())]
 
         if video_info is None:
             video_info = yield VideoMetadata.get(self.video_id, async=True)
@@ -5821,16 +5828,21 @@ class Clip(StoredObject):
         hosts = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
         for host in hosts:
             results = yield host.upload_video(clip, self.key, self.start_frame,
-                                               self.end_frame, s3_url, async=True)
+                                              self.end_frame, primary_url,
+                                              async=True)
 
             # Results is a list of [url, width, height, container, codec]s.
-            vr = neondata.VideoRendition(None, url=results[0], width=results[1],
-                                         height=results[2], container=results[3],
-                                         codec=results[4], duration=duration)
-            yield vr.save(async=True)
-            self.rendition_ids.append(vr.key)
+            for result in results:
+                vr = VideoRendition(url=result[0], 
+                                    width=result[1],
+                                    height=result[2], 
+                                    container=result[3],
+                                    codec=result[4], 
+                                    duration=duration,
+                                    clip_id=self.get_id())
+                renditions.append(vr)
 
-        yield self.save(async=True)
+        yield VideoRendition.save_all(renditions, async=True)
 
 
     @tornado.gen.coroutine
@@ -5943,6 +5955,10 @@ class VideoRendition(StoredObject, Searchable):
     @staticmethod
     def _get_search_arguments():
         return ['clip_id', 'video_id']
+
+    @staticmethod
+    def _get_where_part(key, args={}):
+        return ''
     
 class ThumbnailMetadata(StoredObject):
     '''

@@ -112,6 +112,8 @@ def iterate_video(video, start=0, end=None):
     '''
     num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     end = min(end, num_frames)
+    if start is None:
+        start = 0
     for frameno in range(start, end):
         seek_sucess, cur_frame = seek_video(
             video,

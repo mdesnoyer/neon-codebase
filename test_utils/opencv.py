@@ -34,6 +34,10 @@ class VideoCaptureMock(object):
             return self.frame_count
         elif prop == cv2.CAP_PROP_FPS:
             return self.fps
+        elif prop == cv2.CAP_PROP_FRAME_WIDTH:
+            return self.w
+        elif prop == cv2.CAP_PROP_FRAME_HEIGHT:
+            return self.h
         raise ValueError('Unhandled property %s' % prop)
 
     def set(self, prop, value):

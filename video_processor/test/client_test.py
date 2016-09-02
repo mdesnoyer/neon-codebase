@@ -1062,6 +1062,21 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 200)
 
+        # Add some data
+        na = neondata.NeonUserAccount('acct1')
+        self.api_key = na.neon_api_key
+        na.save()
+        
+        neondata.NeonPlatform.modify(self.api_key, '0',
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)],
+                                             video_rendition_sizes=[
+                                                 (1280, 720, 'mp4', 'h264')])])
+        cdn.save()
+
 
     def tearDown(self):
         self.s3_patcher.stop()
@@ -1087,17 +1102,6 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         super(TestFinalizeThumbnailResponse, self).setUp()
 
         # populate some data
-        na = neondata.NeonUserAccount('acct1')
-        self.api_key = na.neon_api_key
-        na.save()
-        neondata.NeonPlatform.modify(self.api_key, '0',
-                                     lambda x: x, create_missing=True)
-
-        cdn = neondata.CDNHostingMetadataList(
-            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
-            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
-        cdn.save()
-
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.NeonApiRequest(
             'job1', self.api_key,
@@ -2132,20 +2136,18 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.cv2_patcher = patch('video_processor.client.cv2.VideoCapture')
         self.cv2_cap_mock = self.cv2_patcher.start()
         self.cv2_cap_mock.return_value = test_utils.opencv.VideoCaptureMock(
-            h=480, w=640)
+            h=480, w=640, fps=30.0, frame_count=300)
+
+        # Mock out the video upload
+        self.video_upload_patcher = patch(
+            'cmsdb.cdnhosting.CDNHosting.upload_video')
+        self.video_upload_mock = self._future_wrap_mock(
+            self.video_upload_patcher.start())
+        self.video_upload_mock.side_effect = \
+          lambda v, clip, *args: [('%s.mp4' % clip,
+                                   640, 480, 'mp4', 'h264')]
 
         # populate some data
-        na = neondata.NeonUserAccount('acct1')
-        self.api_key = na.neon_api_key
-        na.save()
-        neondata.NeonPlatform.modify(self.api_key, '0',
-                                     lambda x: x, create_missing=True)
-
-        cdn = neondata.CDNHostingMetadataList(
-            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
-            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
-        cdn.save()
-
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.NeonApiRequest(
             'job1', self.api_key,
@@ -2193,10 +2195,13 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
     def tearDown(self):
         self.cv2_patcher.stop()
         self.video_download_patcher.stop()
+        self.video_upload_patcher.stop()
         super(TestFinalizeClipResponse, self).tearDown()
 
     @tornado.testing.gen_test
     def test_default_process(self):
+        self.maxDiff = None
+        
         yield self.vprocessor.finalize_response()
 
         # Make sure that the api request is updated
@@ -2237,6 +2242,9 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertTrue(default_clip.enabled)
         self.assertEquals(default_clip.rank, 0)
         self.assertIsNotNone(default_clip.thumbnail_id)
+        self.assertItemsEqual(default_clip.urls, 
+                              ['%s.mp4' % default_clip.get_id(),
+                               'http://default_clip.mp4'])
 
         # Check the clip information
         clips = neondata.Clip.get_many(job_result.clip_ids)
@@ -2250,6 +2258,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(len(clips[0].urls), 1)
         self.assertTrue(clips[0].enabled)
         self.assertIsNotNone(clips[0].thumbnail_id)
+        self.assertEquals(clips[0].urls, ['%s.mp4' % clips[0].get_id()])
         self.assertEquals(clips[1].type, neondata.ClipType.NEON)
         self.assertEquals(clips[1].video_id, self.video_id)
         self.assertEquals(clips[1].rank, 1)
@@ -2260,6 +2269,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(len(clips[1].urls), 1)
         self.assertTrue(clips[1].enabled)
         self.assertIsNotNone(clips[1].thumbnail_id)
+        self.assertEquals(clips[1].urls, ['%s.mp4' % clips[1].get_id()])
         self.assertNotEquals(clips[0].thumbnail_id,
                              clips[1].thumbnail_id)
 
@@ -2282,10 +2292,47 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertItemsEqual(tag_thumb_ids, [])
         tag_clip_ids = neondata.TagClip.get(tag_id=tag.get_id())
         self.assertItemsEqual(tag_clip_ids,
-                              [x.get_id() for x in clips])
+                              [x.get_id() for x in clips+[default_clip]])
 
-        # Check that the clips are hosted in S3
-        # TODO
+        # Check that the clips were uploaded, both a primary and a rendition
+        upload_args = [x[0][1:] for x in self.video_upload_mock.call_args_list]
+        self.assertItemsEqual(upload_args, [
+            (default_clip.get_id(), None, None),
+            (default_clip.get_id(),None,None,'%s.mp4' % default_clip.get_id()),
+            (clips[0].get_id(), 15, 30),
+            (clips[0].get_id(), 15, 30, '%s.mp4' % clips[0].get_id()),
+            (clips[1].get_id(), 115, 210),
+            (clips[1].get_id(), 115, 210, '%s.mp4' % clips[1].get_id())])
+                              
+
+        # Check the VideoRenditions for the clips
+        default_renditions = neondata.VideoRendition.search_for_objects(
+            clip_id=default_clip.get_id())
+        self.assertEquals(len(default_renditions), 2)
+        self.assertEquals(default_renditions[0].url,
+                          '%s.mp4' % default_clip.get_id())
+        self.assertEquals(default_renditions[0].width, 640)
+        self.assertEquals(default_renditions[0].height, 480)
+        self.assertEquals(default_renditions[0].codec, 'h264')
+        self.assertEquals(default_renditions[0].container, 'mp4')
+        self.assertAlmostEqual(default_renditions[0].duration, 10.0)
+        self.assertEquals(default_renditions[0].clip_id, default_clip.get_id())
+
+        clip_renditions = neondata.VideoRendition.search_for_objects(
+            clip_id=clips[0].get_id())
+        self.assertEquals(len(clip_renditions), 2)
+        self.assertEquals(clip_renditions[0].url,
+                          '%s.mp4' % clips[0].get_id())
+        self.assertEquals(clip_renditions[0].width, 640)
+        self.assertEquals(clip_renditions[0].height, 480)
+        self.assertEquals(clip_renditions[0].codec, 'h264')
+        self.assertEquals(clip_renditions[0].container, 'mp4')
+        self.assertAlmostEqual(clip_renditions[0].duration, 0.5, 2)
+        self.assertEquals(clip_renditions[0].clip_id, clips[0].get_id())
+
+        clip_renditions = neondata.VideoRendition.search_for_objects(
+            clip_id=clips[1].get_id())
+        self.assertEquals(len(clip_renditions), 2)
 
         # Check the callback
         self.assertDictContainsSubset({

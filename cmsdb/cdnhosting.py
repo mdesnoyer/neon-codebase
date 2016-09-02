@@ -252,29 +252,36 @@ class CDNHosting(object):
             -start integer, start frame
             -end integer, end frame
             -url the url that the file should be put to or None
-                if not provided, then we will build one from ids'''
+                if not provided, then we will build one from ids
 
-        # List of 3-tuple (url, width, height) for each new object.
+        # Results is a list of [url, width, height, container, codec]s.
+        '''
+
+        # List of 3-tuple (url, width, height, container, codec) for
+        # each new object.
         results = []
 
         for size in self.video_rendition_sizes:
 
             # Build a ffmpeg param to scale to the specified size.
-            width = size[0]
-            height = size[1]
-            ffmpeg_params = ['-vf', 'scale=%s:%s' % (width, height)]
+            width = size[0] or cv2.get(CAP_PROP_FRAME_WIDTH)
+            height = size[1] or cv2.get(CAP_PROP_FRAME_HEIGHT)
+            ffmpeg_params = []
+            if size[0] and size[1]:
+                ffmpeg_params = ['-vf', 'scale=%s:%s' % (width, height)]
 
             # Use the specified video container type.
             container_type = size[2]
-            if container_type == neondata.VideoRenditionContainerType.MP4:
+            if container_type == cmsdb.neondata.VideoRenditionContainerType.MP4:
                 suffix = '.mp4'
             else:
-                raise ValueError('Unhandled video container type %s', container_type)
+                raise ValueError('Unhandled video container type %s', 
+                                 container_type)
 
             # Get a writer with a named temporary file with the
             # right file extension.
             with tempfile.NamedTemporaryFile(suffix=suffix) as target:
-                with imageio.get_writer(target.name, 'FFMPEG', fps=29.97) as writer:
+                with imageio.get_writer(target.name, 'FFMPEG', fps=29.97, ffmpeg_params=ffmpeg_params) as writer:
 
                     try:
                         for frame in pycvutils.iterate_video(video, start, end):
@@ -284,7 +291,7 @@ class CDNHosting(object):
                         if cdn_val:
                             # Include container and codec from size.
                             results.append(cdn_val + size[2:2])
-                    except e:
+                    except Exception as e:
                         _log.error('Failed to generate or upload video %s', e)
 
         # Return the new object urls.
