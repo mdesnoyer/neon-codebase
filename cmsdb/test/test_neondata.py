@@ -3105,7 +3105,7 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
             require_async_kw=True)
         self.upload_mock.side_effect = (
           lambda vid, clip_id, start, *args: 
-          [('%i.mp4' % (start), 640, 480, 'mp4', 'h264')])
+          [('%s.mp4' % (start), 640, 480, 'mp4', 'h264')])
         self.upload_image_mock = self._future_wrap_mock(
             self.hosting_mock.create().upload,
             require_async_kw=True)
@@ -3131,7 +3131,8 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
 
         self.clip = neondata.Clip(video_id=self.video_id,
                                   start_frame=190,
-                                  end_frame=250)
+                                  end_frame=250,
+                                  ttype=neondata.ClipType.DEFAULT)
         
         super(TestClip, self).setUp()
 
@@ -3252,7 +3253,62 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
         self.assertEquals(neondata.TagClip.get(tag_id='tag1'),
                           [self.clip.get_id()])
 
-    
+    @tornado.testing.gen_test
+    def test_ingest_video_not_in_db(self):
+        with self.assertRaises(neondata.DBStateError):
+            yield self.clip.ingest('myvideo.mp4', 'unknown_video')
+
+    @tornado.testing.gen_test
+    def test_save_default_clip_none(self):
+        api_request = NeonApiRequest('job1', 'acct1', 'vid1',
+                                     title='title1',
+                                     default_clip=None)
+        api_request.save()
+
+        yield api_request.save_default_clip(None)
+
+        self.assertEquals(self.video_download_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_save_default_clip(self):
+        api_request = NeonApiRequest('job1', 'acct1', 'vid1',
+                                     title='title1',
+                                     default_clip='http://default_clip.mp4')
+        api_request.save()
+
+        clip = yield api_request.save_default_clip(self.cdn)
+
+        self.assertEquals(self.video_download_mock.call_count, 1)
+        self.assertEquals(clip.video_id, self.video_id)
+        self.assertEquals(clip.type, neondata.ClipType.DEFAULT)
+        self.assertIn('http://default_clip.mp4', clip.urls)
+        self.assertEquals(len(clip.urls), 2)
+        self.assertEquals(clip.rank, 0)
+
+        # Check that the video object knows about the clip
+        video_object = neondata.VideoMetadata.get(self.video_id)
+        self.assertEquals(video_object.non_job_clip_ids, [clip.get_id()])
+        self.assertEquals(neondata.TagClip.get(clip_id=clip.get_id()),
+                          [video_object.tag_id])
+
+        self.video_download_mock.reset_mock()
+
+        # Try downloading the default object again, but it's alreayd
+        # there, so it's not replicated
+        clip2 = yield api_request.save_default_clip(self.cdn)
+
+        self.assertFalse(self.video_download_mock.called)
+        self.assertEquals(clip, clip2)
+
+    @tornado.testing.gen_test
+    def test_save_default_clip_missing_video(self):
+        api_request = NeonApiRequest('job1', 'acct1', 'unknownvid',
+                                     title='title1',
+                                     default_clip='http://default_clip.mp4')
+        api_request.save()
+
+        with self.assertRaises(neondata.DBStateError):
+            clip = yield api_request.save_default_clip(self.cdn)
         
 
 class TestVideoRendition(NeonDbTestCase, BasePGNormalObject):

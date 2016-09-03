@@ -5822,6 +5822,8 @@ class Clip(StoredObject):
 
         if video_info is None:
             video_info = yield VideoMetadata.get(self.video_id, async=True)
+            if video_info is None:
+                raise DBStateError('Video %s is not in the db' % self.video_id)
         if cdn_metadata is None:
             cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
 
@@ -5868,6 +5870,14 @@ class Clip(StoredObject):
                     'This video was already ingested from a different url.')
             return
         self.urls.append(url)
+        self.video_id = video_id
+
+        video_meta = None
+        if cdn_metadata is None:
+            video_meta = yield VideoMetadata.get(video_id, async=True)
+            if video_meta is None:
+                raise DBStateError('Video %s was not in the database' %
+                                   video_id)
 
         downloader = utils.video_download.VideoDownloader(url)
         try:
@@ -5875,27 +5885,16 @@ class Clip(StoredObject):
 
             # Upload the clip to our hosting location
             mov = cv2.VideoCapture(downloader.get_local_filename())
-            yield self.add_clip_data(mov, cdn_metadata=cdn_metadata,
+            yield self.add_clip_data(mov, video_info=video_meta,
+                                     cdn_metadata=cdn_metadata,
                                      async=True)
 
             thumb_image = pycvutils.extract_frame(mov, 0)
         finally:
             downloader.close()
 
-        # Do database updates
-        self.video_id = video_id
-
-        # Add the clip to the video object
-        def _add_clip(video_obj):
-            video_obj.non_job_clip_ids.append(self.get_id())
-        video_meta = yield VideoMetadata.modify(video_id, 
-                                                _add_clip, 
-                                                async=True)
-        if video_meta is None:
-            raise DBStateError('Video %s was not in the database' %
-                               video_id)
-
-        # Create the thumbnail object for the thumb that represents this clip
+        # Create the thumbnail object for the thumb that represents
+        # this clip
         thumb = ThumbnailMetadata(
             None,
             self.video_id,
@@ -5912,6 +5911,16 @@ class Clip(StoredObject):
         success = yield self.save(async=True)
         if not success:
             raise DBConnectionError('Could not save clip')
+
+        # Add the clip to the video object
+        def _add_clip(video_obj):
+            video_obj.non_job_clip_ids.append(self.get_id())
+        video_meta = yield VideoMetadata.modify(video_id, 
+                                                _add_clip, 
+                                                async=True)
+        if video_meta is None:
+            raise DBStateError('Video %s was not in the database' %
+                               video_id)
 
         # Finally tag the clip to the video
         ct = yield TagClip.save(
