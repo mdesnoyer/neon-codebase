@@ -6401,6 +6401,7 @@ class TestShareHandler(TestVerifiedControllersBase):
             yield self.http_client.fetch(url)
         self.assertEqual(403, e.exception.code)
 
+    @unittest.skip('TODO: Setup share handling that uses the video tags share tag')
     @tornado.testing.gen_test
     def test_get_clip(self):
         clip = neondata.Clip('u_c0', video_id='u_v0')
@@ -9641,7 +9642,16 @@ class TestClipHandler(TestVerifiedControllersBase):
         # save a few clips 
         clip = neondata.Clip(
             'testa_vid1_1', 
-            video_id='vid1')
+            video_id='testa_vid1',
+            thumbnail_id='tid1',
+            urls=['myclip.mp4'],
+            ttype=neondata.ClipType.NEON,
+            rank=2,
+            model_version='model1',
+            enabled=True,
+            score=0.45,
+            start_frame=47,
+            end_frame=89)
         clip.save() 
         clip = neondata.Clip(
             'testa_vid1_2', 
@@ -9651,8 +9661,29 @@ class TestClipHandler(TestVerifiedControllersBase):
             'testa_vid1_3', 
             video_id='vid1')
         clip.save() 
+
+        neondata.VideoRendition(url='1_640_480.mp4',
+                                width=640,
+                                height=480,
+                                duration=36.6,
+                                codec='h264',
+                                container='mp4',
+                                clip_id='testa_vid1_1',
+                                video_id='testa_vid1').save()
+        neondata.VideoRendition(url='2_300_400.gif',
+                                width=300,
+                                height=400,
+                                duration=36.6,
+                                codec=None,
+                                container='gif',
+                                clip_id='testa_vid1_1',
+                                video_id='testa_vid1').save()
+
+        # Save a few renditions for the first clip
         self.url = self.get_url(
             '/api/v2/%s/clips' % self.account_id)
+        
+        
 
     @tornado.testing.gen_test
     def test_get_clip_does_exist(self): 
@@ -9660,10 +9691,20 @@ class TestClipHandler(TestVerifiedControllersBase):
         url = self.url + '?clip_ids=%s' % clip_ids[0]
         res = yield self.http_client.fetch(url, headers=self.headers)
         rj = json.loads(res.body)
+        self.assertEquals(rj['count'], 1) 
         rv_clip = rj['clips'][0] 
 
-        self.assertEquals(rv_clip['video_id'], 'vid1')  
-        self.assertEquals(rj['count'], 1) 
+        self.assertDictContainsSubset({
+            'video_id' : 'vid1',
+            'rank' : 2,
+            'start_frame' : 47,
+            'end_frame' : 89,
+            'enabled': True,
+            'url': 'myclip.mp4',
+            'type': 'neon',
+            'neon_score': 0.45,
+            'duration' : 1.4},
+            rv_clip)
  
     @tornado.testing.gen_test
     def test_get_clip_does_not_exist(self): 

@@ -2918,7 +2918,7 @@ class ShareHandler(APIV2Handler):
         '''If one of tag_id, video_id, clip_id in args, get it; else raise.'''
 
         _id = None
-        e = BadRequestError('Need exactly one of video_id, tag_id')
+        e = BadRequestError('Need exactly one of video_id, tag_id, clip_id')
 
         if 'video_id' in args:
             _id = neondata.InternalVideoID.generate(
@@ -4000,13 +4000,13 @@ class ClipHandler(APIV2Handler):
     @classmethod
     def _get_default_returned_fields(cls):
         return ['video_id', 'clip_id', 'rank', 'start_frame',
-                'enabled', 'urls', 'renditions', 'end_frame',
-                'created', 'updated']
+                'enabled', 'url', 'end_frame', 'type',
+                'created', 'updated', 'neon_score', 'duration']
 
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['rank', 'start_frame',
-                'enabled', 'urls', 'renditions', 'end_frame',
+        return ['rank', 'start_frame', 'type',
+                'enabled', 'url', 'end_frame',
                 'created', 'updated']
 
     @classmethod
@@ -4017,9 +4017,16 @@ class ClipHandler(APIV2Handler):
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
         elif field == 'clip_id':
             retval = obj.key
-        # TODO neon_score, feature_ids, renditions
         elif field == 'url':
-            retval = obj.urls[0] if obj.urls else []
+            retval = obj.urls[0] if obj.urls else None
+        elif field == 'renditions':
+            # TODO(handle renditions like other endpoints)
+            renditions = yield VideoRenditions.search_for_objects(
+                clip_id=obj.get_id())
+            retval = [x.__dict__ for x in renditions]
+        elif field == 'neon_score':
+            # Do the raw score for now
+            retval = obj.score
         else:
             raise BadRequestError('invalid field %s' % field)
 

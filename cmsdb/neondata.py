@@ -2637,24 +2637,6 @@ class Tag(Searchable, StoredObject):
 
     def get_account_id(self):
         return self.account_id
-
-
-class Clip(StoredObject):
-    '''Stub for gif clips'''
-
-    def __init__(self, clip_id, account_id=None, share_token=None):
-        super(Clip, self).__init__(clip_id)
-        self.account_id = account_id
-        self.share_token = share_token
-
-    @classmethod
-    def _baseclass_name(cls):
-        '''Returns the class name of the base class of the hierarchy.
-        '''
-        return Clip.__name__
-
-    def get_account_id(self):
-        return self.account_id
          
 
 class AbstractHashGenerator(object):
@@ -5748,7 +5730,7 @@ class Clip(StoredObject):
         clip_id = clip_id or uuid.uuid4().hex
         super(Clip,self).__init__(clip_id)
 
-        # interval video id this clip is associated with
+        # Internal video id this clip is associated with
         self.video_id = video_id
         # url for this clip
         self.urls = urls or []
@@ -5960,7 +5942,7 @@ class VideoRendition(StoredObject, Searchable):
 
         # This could be a rendition of either a Clip or a VideoMetadata video
         self.clip_id = clip_id
-        self.video_id = video_id
+        self.video_id = video_id # Internal video id
 
     @classmethod
     def _baseclass_name(cls):
