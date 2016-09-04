@@ -3233,9 +3233,14 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
 
     @tornado.testing.gen_test
     def test_ingest_normal(self):
+        self.clip = neondata.Clip(video_id=self.video_id,
+                                  ttype=neondata.ClipType.DEFAULT)
         yield self.clip.ingest('myvideo.mp4', self.video_id)
         
         self.assertEquals(self.clip, neondata.Clip.get(self.clip.get_id()))
+        self.assertEquals(self.clip.start_frame, 0)
+        self.assertEquals(self.clip.end_frame, 2997)
+        self.assertEquals(self.clip.duration, 100.)
 
         video = VideoMetadata.get(self.video_id)
         self.assertEquals(self.video_id, self.clip.video_id)

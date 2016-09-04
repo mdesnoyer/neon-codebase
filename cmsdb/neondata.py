@@ -5726,7 +5726,8 @@ class Clip(StoredObject):
     '''
     def __init__(self, clip_id=None, video_id=None, thumbnail_id=None, 
                  urls=None, ttype=None, rank=0, model_version=None, 
-                 enabled=True, score=None, start_frame=None, end_frame=None):
+                 enabled=True, score=None, start_frame=None, end_frame=None,
+                 duration=None):
         clip_id = clip_id or uuid.uuid4().hex
         super(Clip,self).__init__(clip_id)
 
@@ -5748,6 +5749,8 @@ class Clip(StoredObject):
         self.start_frame = start_frame
         # what frame this clip ends at
         self.end_frame = end_frame
+        # duration in seconds
+        self.duration = duration
 
         # The score of this clip. Higher is better. Note that this
         # will be a score combined of a raw valence score plus some
@@ -5775,6 +5778,8 @@ class Clip(StoredObject):
             -cdn_metadata a CDNHostingMetadata or None
 
         '''
+        self.end_frame = self.end_frame or clip.get(cv2.CAP_PROP_FRAME_COUNT)
+        self.start_frame = self.start_frame or 0
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         primary_result = yield primary_hoster.upload_video(
@@ -5792,12 +5797,11 @@ class Clip(StoredObject):
 
         # Save primary rendition object.
         fps = float(clip.get(cv2.CAP_PROP_FPS)) or 30.0
-        duration = ((self.end_frame or clip.get(cv2.CAP_PROP_FRAME_COUNT)) - 
-                    (self.start_frame or 0)) / fps
+        self.duration = (self.end_frame - self.start_frame) / fps
         renditions = [VideoRendition(url=primary_url,
                                      width=primary_result[1], 
                                      height=primary_result[2],
-                                     duration=duration, 
+                                     duration=self.duration, 
                                      container=primary_result[3],
                                      codec=primary_result[4],
                                      clip_id=self.get_id())]
@@ -5822,7 +5826,7 @@ class Clip(StoredObject):
                                     height=result[2], 
                                     container=result[3],
                                     codec=result[4], 
-                                    duration=duration,
+                                    duration=self.duration,
                                     clip_id=self.get_id())
                 renditions.append(vr)
 
