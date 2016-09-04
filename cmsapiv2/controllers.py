@@ -4005,8 +4005,8 @@ class ClipHandler(APIV2Handler):
 
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['rank', 'start_frame', 'type',
-                'enabled', 'url', 'end_frame',
+        return ['rank', 'start_frame', 'type', 'duration',
+                'enabled', 'end_frame',
                 'created', 'updated']
 
     @classmethod
@@ -4021,8 +4021,8 @@ class ClipHandler(APIV2Handler):
             retval = obj.urls[0] if obj.urls else None
         elif field == 'renditions':
             # TODO(handle renditions like other endpoints)
-            renditions = yield VideoRenditions.search_for_objects(
-                clip_id=obj.get_id())
+            renditions = yield neondata.VideoRendition.search_for_objects(
+                clip_id=obj.get_id(), async=True)
             retval = [x.__dict__ for x in renditions]
         elif field == 'neon_score':
             # Do the raw score for now

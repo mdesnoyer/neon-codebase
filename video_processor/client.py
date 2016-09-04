@@ -1309,7 +1309,8 @@ class ClipProcessor(VideoProcessor):
             min_len=self.clip_length)
 
         rank = 0
-        for r in results: 
+        for r in results:
+            fps = float(clip.get(cv2.CAP_PROP_FPS)) or 30.0
             cmeta = neondata.Clip(
                 video_id=self.video_metadata.key,
                 ttype=neondata.ClipType.NEON,
@@ -1317,6 +1318,7 @@ class ClipProcessor(VideoProcessor):
                 model_version=self.model_version,
                 start_frame=r.start, 
                 end_frame=r.end,
+                duration=((r.end-r.start)/fps),
                 score=r.score
             )
             self.clips.append(cmeta)

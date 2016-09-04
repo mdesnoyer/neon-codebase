@@ -9651,7 +9651,8 @@ class TestClipHandler(TestVerifiedControllersBase):
             enabled=True,
             score=0.45,
             start_frame=47,
-            end_frame=89)
+            end_frame=89,
+            duration=1.4)
         clip.save() 
         clip = neondata.Clip(
             'testa_vid1_2', 
@@ -9668,22 +9669,18 @@ class TestClipHandler(TestVerifiedControllersBase):
                                 duration=36.6,
                                 codec='h264',
                                 container='mp4',
-                                clip_id='testa_vid1_1',
-                                video_id='testa_vid1').save()
+                                clip_id='testa_vid1_1').save()
         neondata.VideoRendition(url='2_300_400.gif',
                                 width=300,
                                 height=400,
                                 duration=36.6,
                                 codec=None,
                                 container='gif',
-                                clip_id='testa_vid1_1',
-                                video_id='testa_vid1').save()
+                                clip_id='testa_vid1_1').save()
 
         # Save a few renditions for the first clip
         self.url = self.get_url(
             '/api/v2/%s/clips' % self.account_id)
-        
-        
 
     @tornado.testing.gen_test
     def test_get_clip_does_exist(self): 
@@ -9705,6 +9702,29 @@ class TestClipHandler(TestVerifiedControllersBase):
             'neon_score': 0.45,
             'duration' : 1.4},
             rv_clip)
+
+        self.assertNotIn('renditions', rv_clip)
+
+    @tornado.testing.gen_test
+    def test_get_clip_renditions(self): 
+        url = self.url + '?clip_ids=testa_vid1_1&fields=renditions'
+        res = yield self.http_client.fetch(url, headers=self.headers)
+        rj = json.loads(res.body)
+        self.assertEquals(rj['count'], 1) 
+        rv_clip = rj['clips'][0] 
+
+        self.assertEquals(len(rv_clip['renditions']), 2)
+        rends = {x['url']: x for x in rv_clip['renditions']}
+        self.assertEquals(rends['1_640_480.mp4']['width'], 640)
+        self.assertEquals(rends['1_640_480.mp4']['height'], 480)
+        self.assertAlmostEqual(rends['1_640_480.mp4']['duration'], 36.6)
+        self.assertEquals(rends['1_640_480.mp4']['codec'], 'h264')
+        self.assertEquals(rends['1_640_480.mp4']['container'], 'mp4')
+        self.assertEquals(rends['2_300_400.gif']['width'], 300)
+        self.assertEquals(rends['2_300_400.gif']['height'], 400)
+        self.assertAlmostEqual(rends['2_300_400.gif']['duration'], 36.6)
+        self.assertIsNone(rends['2_300_400.gif']['codec'])
+        self.assertEquals(rends['2_300_400.gif']['container'], 'gif')
  
     @tornado.testing.gen_test
     def test_get_clip_does_not_exist(self): 
