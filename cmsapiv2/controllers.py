@@ -1860,6 +1860,7 @@ class VideoHelper(object):
         request.callback_email = args.get('callback_email')
         request.age = args.get('age')
         request.gender = args.get('gender')
+        request.default_clip = args.get('default_clip_url')
 
         # set the requests result type
         result_type = args.get('result_type')
@@ -1964,6 +1965,19 @@ class VideoHelper(object):
                     x.response = {}
                     x.age = args.get('age', None)
                     x.gender = args.get('gender', None)
+
+                    x.result_type = args.get(
+                        'result_type',
+                        x.result_type).lower()
+                    x.n_clips = args.get('n_clips', x.n_clips)
+                    if x.n_clips is not None:
+                        x.n_clips = int(x.n_clips)
+                    x.clip_length = args.get('clip_length', x.clip_length)
+                    if x.clip_length is not None:
+                        x.clip_length = float(request.clip_length)
+                    x.api_param = args.get('n_thumbs', x.api_param)
+                    if x.api_param is not None:
+                        x.api_param = int(x.api_param)
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
                     account_id_api_key,
@@ -2173,12 +2187,14 @@ class VideoHelper(object):
                 # demographic_thumbnails are also required here and
                 # are handled in that section.
                 pass
-            elif field == 'demographic_clip_ids': 
+            elif field == 'demographic_clip_ids':
+                new_video['demographic_clip_ids'] = []
                 for video_result in video.job_results: 
                     cur_entry = { 
                         'gender': video_result.gender, 
                         'age': video_result.age, 
-                        'clip_ids': video_result.clip_ids 
+                        'clip_ids': (video_result.clip_ids + 
+                                     video.non_job_clip_ids)
                     }
                     new_video['demographic_clip_ids'].append(cur_entry)  
             elif field == 'state':
@@ -2259,7 +2275,9 @@ class VideoHandler(ShareableContentHandler):
             'age': In(model.predictor.VALID_AGE_GROUP),
             'n_clips': All(Coerce(int), Range(min=1, max=8)),
             'clip_length': All(Coerce(float), Range(min=0.0)),
-            'result_type': In(neondata.ResultType.ARRAY_OF_TYPES)
+            'result_type': In(neondata.ResultType.ARRAY_OF_TYPES),
+            'default_clip_url': All(Any(Coerce(str), unicode),
+                Length(min=1, max=2048))
         })
 
         args = self.parse_args()

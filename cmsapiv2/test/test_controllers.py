@@ -2295,9 +2295,8 @@ class TestVideoHandler(TestControllersBase):
         self.assertIsNone(job.age)
         self.assertIsNone(job.gender)
 
-    @patch('cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
     @tornado.testing.gen_test
-    def test_post_video_with_clip(self, cmsdb_download_image_mock):
+    def test_post_video_with_clip(self):
         
         url = ('/api/v2/{0}/videos?integration_id={1}'\
                '&external_video_ref=1234ascs'\
@@ -2306,8 +2305,7 @@ class TestVideoHandler(TestControllersBase):
                '&thumbnail_ref=ref1'\
                '&duration=16'\
                '&result_type=clips').format(self.account_id_api_key, self.test_i_id)
-        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mock)
-        cmsdb_download_image_mock.side_effect = [self.random_image]
+        
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -2331,13 +2329,10 @@ class TestVideoHandler(TestControllersBase):
         self.assertIsNone(job.age)
         self.assertIsNone(job.gender)
 
-    @patch('cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
     @tornado.testing.gen_test
-    def test_post_video_with_clip_with_length(self, cmsdb_download_image_mock):
-        
+    def test_post_video_with_clip_with_length(self):
         url = ('/api/v2/{0}/videos?integration_id={1}'\
                '&external_video_ref=1234ascs'\
-               '&default_thumbnail_url=url.invalid'\
                '&title=a_title'\
                '&url=some_url'\
                '&thumbnail_ref=ref1'\
@@ -2345,10 +2340,7 @@ class TestVideoHandler(TestControllersBase):
                '&result_type=clips'\
                '&clip_length=5.3'\
                '&n_clips=3').format(self.account_id_api_key,
-                                          self.test_i_id)
-        cmsdb_download_image_mock = self._future_wrap_mock(
-            cmsdb_download_image_mock)
-        cmsdb_download_image_mock.side_effect = [self.random_image]
+                                    self.test_i_id)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -2371,6 +2363,43 @@ class TestVideoHandler(TestControllersBase):
         self.assertAlmostEquals(job.clip_length, 5.3)
         self.assertIsNone(job.age)
         self.assertIsNone(job.gender)
+
+    @tornado.testing.gen_test
+    def test_post_video_with_default_clip(self):
+        body = {
+                'external_video_ref': '1234ascs33',
+                'url': 'some_url',
+                'title': 'my_clip_video',
+                'gender': 'M',
+                'age': '50+',
+                'result_type': 'clips',
+                'default_clip_url': 'clipurl.mp4'
+            }
+        header = {"Content-Type": "application/json"}
+        url = '/api/v2/%s/videos' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=json.dumps(body),
+            method='POST',
+            headers=header)
+
+        self.assertEquals(response.code, 202)
+        rjson = json.loads(response.body)
+        self.assertNotEquals(rjson['job_id'],'')
+        job = yield neondata.NeonApiRequest.get(rjson['job_id'],
+                                                self.account_id_api_key,
+                                                async=True)
+
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertDictContainsSubset(json.loads(cargs[1]), job.__dict__)
+        self.assertIsNone(cargs[2]) # Unknown duration
+        self.assertIsNone(job.api_param)
+        self.assertEquals(job.default_clip, 'clipurl.mp4')
+        self.assertEquals(job.result_type, neondata.ResultType.CLIPS)
+        self.assertEquals(job.age, '50+')
+        self.assertEquals(job.gender, 'M')
 
     @tornado.testing.gen_test
     def test_post_demographic(self):        
@@ -4157,8 +4186,43 @@ class TestVideoHandler(TestControllersBase):
     def test_post_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/videos' % '1234234'
+        url = '/api/v2/%s/videos' % '1234234'
         self.post_exceptions(url, params, exception_mocker)
+
+    @tornado.testing.gen_test
+    def test_get_video_with_clips(self):
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key, 'vid1'),
+            request_id='job1',
+            non_job_clip_ids=['clip1'],
+            job_results=[
+                neondata.VideoJobThumbnailList(
+                    clip_ids=['clip2'],
+                    model_version='localsearch'),
+                neondata.VideoJobThumbnailList(
+                    gender='F',
+                    age='20-29',
+                    clip_ids=['clip3'],
+                    model_version='localsearch')])
+        vm.save()
+
+        url = ('/api/v2/%s/videos?video_id=vid1&fields=demographic_clip_ids'
+               %(self.account_id_api_key))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        rjson = json.loads(response.body)
+        self.assertEquals(len(rjson['videos'][0]['demographic_clip_ids']), 2)
+        clip_lists = {x['gender']: x for x in 
+                      rjson['videos'][0]['demographic_clip_ids']}
+        self.assertEquals(clip_lists[None]['gender'], None)
+        self.assertEquals(clip_lists[None]['age'], None)
+        self.assertItemsEqual(clip_lists[None]['clip_ids'], ['clip1', 'clip2'])
+
+        self.assertEquals(clip_lists['F']['gender'], 'F')
+        self.assertEquals(clip_lists['F']['age'], '20-29')
+        self.assertItemsEqual(clip_lists['F']['clip_ids'], ['clip1', 'clip3'])
+        
 
 
 class TestThumbnailHandler(TestControllersBase):
