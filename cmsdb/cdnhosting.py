@@ -201,22 +201,15 @@ class CDNHosting(object):
                             cv_im, height, width)
                     im = pycvutils.to_pil(cv_im_r)
 
-                    image_file = StringIO()
-                    im.save(image_file, 'jpeg', quality=90)
-                    image_file.seek(0)
-
-                    cdn_val = yield self._upload_and_check_file(
-                        image_file, 'jpeg', tid, width, height, url, overwrite)
+                    cdn_val = yield self._upload_single_image(
+                        im, tid, width, height, url, overwrite)
                     new_serving_thumbs.append(cdn_val)
             else:
-                image_file = StringIO()
-                image.save(image_file, 'jpeg', quality=90)
-                image_file.seek(0)
                 width = image.size[0]
                 height = image.size[1]
 
-                cdn_val = yield self._upload_and_check_file(
-                    image_file, 'jpeg', tid, width, height, url, overwrite)
+                cdn_val = yield self._upload_single_image(
+                    image, tid, width, height, url, overwrite)
                 new_serving_thumbs.append(cdn_val)
 
         except IOError:
@@ -274,21 +267,32 @@ class CDNHosting(object):
             # Use the specified video container type.
             container_type = size[2]
             if container_type == cmsdb.neondata.VideoRenditionContainerType.MP4:
-                suffix = '.mp4'
+                ext = 'mp4'
+                content_type = 'video/mp4'
+            elif container_type == cmsdb.neondata.VideoRenditionContainerType.GIF:
+                ext = 'gif'
+                content_type = 'image/gif'
             else:
                 raise ValueError('Unhandled video container type %s', 
                                  container_type)
 
+            basename = neondata.VideoRendition.FNAME_FORMAT.format(
+                clip_id=clip_id,
+                width=width,
+                height=height,
+                ext=ext)
+
             # Get a writer with a named temporary file with the
             # right file extension.
-            with tempfile.NamedTemporaryFile(suffix=suffix) as target:
+            with tempfile.NamedTemporaryFile(suffix=('.%s' % ext)) as target:
                 with imageio.get_writer(target.name, 'FFMPEG', fps=fps, ffmpeg_params=ffmpeg_params) as writer:
 
                     try:
                         for frame in pycvutils.iterate_video(video, start, end):
                             writer.append_data(frame[:,:,::-1])
+                        target.seek(0)
                         cdn_val = yield self._upload_and_check_file(
-                            target, 'mp4', clip_id, width, height, url, False)
+                            target, basename, content_type, url, False)
                         if cdn_val:
                             # Include container and codec from size.
                             results.append(cdn_val + size[2:2])
@@ -299,16 +303,29 @@ class CDNHosting(object):
         raise tornado.gen.Return(results)
 
     @tornado.gen.coroutine
-    def _upload_and_check_file(self, _file, _format, key, width, height,
+    def _upload_single_image(self, image, key, width, height, url, overwrite):
+        basename = cmsdb.neondata.ThumbnailServingURLs.create_filename(
+            key, width, height)
+
+        image_file = StringIO()
+        im.save(image_file, 'jpeg', quality=90)
+        image_file.seek(0)
+
+        cdn_url = yield self._upload_and_check_file(image_file, basename,
+                                                    'image/jpg',
+                                                    url, overwrite)
+        raise tornado.gen.Return(cdn_url)
+        
+
+    @tornado.gen.coroutine
+    def _upload_and_check_file(self, _file, basename, content_type
                                url, overwrite):
         '''Returns a tuple of (cdn_url, width, height).'''
 
         cdn_url = yield self._upload_impl(
             _file,
-            _format,
-            key,
-            width,
-            height,
+            basename,
+            content_type,
             url,
             overwrite,
             async=True)
@@ -328,7 +345,7 @@ class CDNHosting(object):
         '''Returns True if we have a valid response from the CDN URL.'''
         request = tornado.httpclient.HTTPRequest(
             url, 'GET',
-            headers={'Accept': 'image/*'})
+            headers={'Accept': 'image/*, video/*'})
         response = yield utils.http.send_request(
             request,
             base_delay=10.0,
@@ -339,28 +356,27 @@ class CDNHosting(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, _file, _format, key, width, height, url=None, overwrite=True):
-        '''Upload the specific image to the CDN service.
-
-        Note that this could be called multiple times for the same
-        image, but they could be different sizes.
+    def _upload_impl(self, _file, basename, content_type, url=None, 
+                     overwrite=True):
+        '''Upload the specific file to the CDN service.
 
         Your implementation must create urls with the same base (all
-        the way up to the last '/') for each thumbnail id. If you use
+        the way up to the last '/') for each file. If you use
         a random number, then, the easiest thing to do is to use
-        rng = random.Random(key)
+        rng = random.Random(basename)
         # Figure out the cdn url using rng
 
         To be implemented by a subclass.
 
         Inputs:
-        @image: PIL image to upload
-        @key: id of the metadata object of this file
+        @_file: A file object that points to the data
+        @basename: Basename of the file that will appear on the CDN
+        @content-type: A MIME content type for this data 
         @url: URL of the image that's already live. This is optional but some
               CDNHosting objects might use this instead of the image.
         @overwrite: If True, an existing file on the CDN will be overwritten
 
-        @returns: The serving url for the image
+        @returns: The serving url for the file
         @raises: IOError if the image couldn't be uploaded
         '''
         raise NotImplementedError()
@@ -439,13 +455,10 @@ class AWSHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, _file, _format, key, width, height, url=None,
+    def _upload_impl(self, _file, basename, content_type, url=None,
                      overwrite=True):
 
-        rng = random.Random(key)
-
-        if _format not in ['mp4', 'jpeg']:
-            raise ValueError('Unknown file upload format %s' % _format)
+        rng = random.Random(basename)
 
         s3bucket = yield self._get_bucket()
 
@@ -463,11 +476,11 @@ class AWSHosting(CDNHosting):
                 rng.choice(string.letters + string.digits)
                 for _ in range(3)))
         if self.make_tid_folders:
-            name_pieces.append("%s.jpg" % re.sub('_', '/', key))
+            splits = basename.split('_')
+            name_pieces.extend(splits[0:3])
+            name_pieces.append('_'.join(splits[3:]))
         else:
-            name_pieces.append(
-                cmsdb.neondata.ThumbnailServingURLs.create_filename(
-                key, width, height))
+            name_pieces.append(basename)
         key_name = '/'.join(name_pieces)
 
         cdn_url = "%s/%s" % (cdn_prefix, key_name)
@@ -494,15 +507,14 @@ class AWSHosting(CDNHosting):
                 if key.size and _file.len == key.size:
                     raise tornado.gen.Return(cdn_url)
 
-            if _format == 'mp4':
-                content_type = {'Content-Type': 'video/mp4'}
-            else:
-                content_type = {'Content-Type': 'image/jpeg'}
+            headers = {}
+            if content_type:
+                headers['Content-Type'] = content_type
 
             yield utils.botoutils.run_async(
                 key.set_contents_from_file,
                 _file,
-                content_type,
+                headers,
                 policy=self.policy,
                 replace=overwrite)
 

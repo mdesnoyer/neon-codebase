@@ -5919,6 +5919,7 @@ class VideoRendition(StoredObject, Searchable):
     '''
     Class schema for a rendition of a video
     '''
+    FNAME_FORMAT = 'neonvr{clip_id}_w{width}_h{height}'
     def __init__(self, rendition_id=None, url=None, width=None,
                  height=None, duration=None, codec=None, container=None,
                  encoding_rate=None, clip_id=None, video_id=None):
