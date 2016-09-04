@@ -1158,8 +1158,7 @@ class ThumbnailProcessor(VideoProcessor):
             self.video_metadata.job_id,
             vid=neondata.InternalVideoID.to_external(self.video_metadata.key),
             fnos=fnos,
-            thumbs=thumbs,
-            s_url=self.video_metadata.get_serving_url(save=False))
+            thumbs=thumbs)
         return cresp.to_dict()
         
 

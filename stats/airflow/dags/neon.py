@@ -475,7 +475,9 @@ def _stage_files(**kwargs):
                                            prefix=staging_prefix)
 
     # Check if this is the first run of the day, if so pull the 
-    # previous day files for processing
+    # previous day files for processing. Because in airflow, this run 
+    # is for data between time 21:00 of previous day and 00:00 of 
+    # current day
     if execution_date.strftime("%H") == '00':
         staging_date = execution_date - timedelta(days=1)
     else:
@@ -630,10 +632,6 @@ def _load_impala_table(**kwargs):
     except:
         statemon.state.increment('impala_table_load_failure')
         raise
-    finally:
-        if is_first_run and is_initial_data_load:
-            _log.info("Bringing down the number of task instances to zero")
-            cluster.change_instance_group_size(group_type='TASK', new_size=0)
 
     return "Impala tables loaded"
 
@@ -687,9 +685,18 @@ def _execution_date_has_input_files(**kwargs):
 
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
 
+    # Check if this is the first run of the day, if so pull the 
+    # previous day files for processing. Because in airflow, this run 
+    # is for data between time 21:00 of previous day and 00:00 of 
+    # current day
+    if execution_date.strftime("%H") == '00':
+        staging_date = execution_date - timedelta(days=1)
+    else:
+        staging_date = execution_date
+
     _log.info(("{task}: checking for input files for the execution date "
-               "{ed}").format(task=task, ed=execution_date))
-    input_files = _get_s3_input_files(dag=dag, execution_date=execution_date,
+               "{ed}").format(task=task, ed=staging_date))
+    input_files = _get_s3_input_files(dag=dag, execution_date=staging_date,
                                       task=task, input_path=input_path)
     if input_files:
         return 'stage_files'
@@ -704,13 +711,16 @@ def _update_table_build_times(**kwargs):
     """
     execution_date = kwargs['execution_date']
 
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+
+    _log.info("Bringing down the number of task instances to zero")
+    cluster.change_instance_group_size(group_type='TASK', new_size=0)
+
     # Do not update this table during backfills to ensure mastermind does not read old stats.
     # This table will be updated when backfill reaches the current day run or during normal processing
     # for current day run
     if execution_date.strftime("%Y/%m/%d") == datetime.utcnow().strftime("%Y/%m/%d"):
-        cluster = ClusterGetter.get_cluster()
-        cluster.connect()
-
         stats.impala_table.update_table_build_times(cluster)
 
 
@@ -914,7 +924,7 @@ has_input_files = BranchPythonOperator(
     python_callable=_execution_date_has_input_files,
     provide_context=True,
     op_kwargs=dict(input_path=options.input_path))
-has_input_files.set_upstream(cloudwatch_metrics)
+has_input_files.set_upstream(quiet_period)
 
 
 # Copy files for the execution date from S3 source location in to an

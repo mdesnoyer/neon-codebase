@@ -49,7 +49,6 @@ simplejson==2.3.2
 stripe==1.32.2
 svmlight==0.4
 thrift==0.9.1
-tornado==4.2.1
 voluptuous==0.8.7
 winpdb==1.4.8
 xlwt==1.0.0
