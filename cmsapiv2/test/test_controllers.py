@@ -2301,7 +2301,6 @@ class TestVideoHandler(TestControllersBase):
         
         url = ('/api/v2/{0}/videos?integration_id={1}'\
                '&external_video_ref=1234ascs'\
-               '&default_thumbnail_url=url.invalid'\
                '&title=a_title'\
                '&url=some_url'\
                '&thumbnail_ref=ref1'\
