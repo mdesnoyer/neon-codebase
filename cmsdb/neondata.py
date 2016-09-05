@@ -670,7 +670,7 @@ class TagType(object):
 class VideoRenditionContainerType(object):
     '''Valid video rendition types'''
     MP4 = 'mp4'
-    GIF = 'gif'  # ffmpeg may only be able to take gif input for gif output
+    GIF = 'gif'
 
 class ExperimentState:
     '''A class that acts like an enum for the state of the experiment.'''
@@ -5919,7 +5919,7 @@ class VideoRendition(StoredObject, Searchable):
     '''
     Class schema for a rendition of a video
     '''
-    FNAME_FORMAT = 'neonvr{clip_id}_w{width}_h{height}'
+    FNAME_FORMAT = 'neonvr{clip_id}_w{width}_h{height}.{ext}'
     def __init__(self, rendition_id=None, url=None, width=None,
                  height=None, duration=None, codec=None, container=None,
                  encoding_rate=None, clip_id=None, video_id=None):

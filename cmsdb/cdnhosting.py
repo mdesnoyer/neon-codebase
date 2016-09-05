@@ -254,24 +254,41 @@ class CDNHosting(object):
         # each new object.
         results = []
 
+        # TODO: FFMPEG can be used to generate all the renditions in
+        # one call using the muxing process. This would be more
+        # efficient, but getting it right is tricky. For now, user
+        # imageio in a loop.
         for size in self.video_rendition_sizes:
 
-            # Build a ffmpeg param to scale to the specified size.
+            # Figure out some details about the desired output
             width = size[0] or cv2.get(CAP_PROP_FRAME_WIDTH)
             height = size[1] or cv2.get(CAP_PROP_FRAME_HEIGHT)
             fps = cv2.get(CAP_PROP_FPS) or 30.0
-            ffmpeg_params = []
-            if size[0] and size[1]:
-                ffmpeg_params = ['-vf', 'scale=%s:%s' % (width, height)]
+            do_resize = False
+                
 
             # Use the specified video container type.
             container_type = size[2]
             if container_type == cmsdb.neondata.VideoRenditionContainerType.MP4:
                 ext = 'mp4'
                 content_type = 'video/mp4'
+                imageio_params = {
+                    'format' : 'FFMPEG',
+                    'fps' : fps,
+                    'ffmpeg_params' : []
+                    }
+                if size[0] and size[1]:
+                    imageio_params['ffmpeg_params'].extend([
+                        '-vf', 'scale=%s:%s' % (width, height)])
             elif container_type == cmsdb.neondata.VideoRenditionContainerType.GIF:
                 ext = 'gif'
                 content_type = 'image/gif'
+                imageio_params = {
+                    'format' : 'GIF',
+                    'fps' : fps,
+                    'quantizer' : 'nq'
+                    }
+                do_resize = size[0] and size[1]
             else:
                 raise ValueError('Unhandled video container type %s', 
                                  container_type)
@@ -285,10 +302,12 @@ class CDNHosting(object):
             # Get a writer with a named temporary file with the
             # right file extension.
             with tempfile.NamedTemporaryFile(suffix=('.%s' % ext)) as target:
-                with imageio.get_writer(target.name, 'FFMPEG', fps=fps, ffmpeg_params=ffmpeg_params) as writer:
+                with imageio.get_writer(target.name, **imageio_params) as writer:
 
                     try:
                         for frame in pycvutils.iterate_video(video, start, end):
+                            if do_resize:
+                                # TODO: resize frame
                             writer.append_data(frame[:,:,::-1])
                         target.seek(0)
                         cdn_val = yield self._upload_and_check_file(
