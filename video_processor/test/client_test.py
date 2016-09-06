@@ -1158,7 +1158,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         cdn = neondata.CDNHostingMetadataList(
             neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
             [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)],
-                                             video_rendition_sizes=[
+                                             video_rendition_formats=[
                                                  (1280, 720, 'mp4', 'h264')])])
         cdn.save()
 

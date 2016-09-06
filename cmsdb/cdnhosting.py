@@ -12,6 +12,7 @@ import api.akamai_api
 import base64
 import boto.exception
 import cmsdb.neondata
+import cv2
 import imageio
 import json
 import hashlib
@@ -56,6 +57,7 @@ statemon.define('upload_error', int)
 statemon.define('s3_upload_error', int)
 statemon.define('akamai_upload_error', int)
 statemon.define('invalid_cdn_url', int)
+statemon.define('video_upload_error', int)
 
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
@@ -123,7 +125,7 @@ class CDNHosting(object):
         self.resize = cdn_metadata.resize
         self.update_serving_urls = cdn_metadata.update_serving_urls
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
-        self.video_rendition_sizes = cdn_metadata.video_rendition_sizes or []
+        self.video_rendition_formats = cdn_metadata.video_rendition_formats or []
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
         self.source_crop = cdn_metadata.source_crop
         self.crop_with_saliency = cdn_metadata.crop_with_saliency
@@ -258,26 +260,30 @@ class CDNHosting(object):
         # one call using the muxing process. This would be more
         # efficient, but getting it right is tricky. For now, user
         # imageio in a loop.
-        for size in self.video_rendition_sizes:
+        for _format in self.video_rendition_formats:
 
             # Figure out some details about the desired output
-            width = size[0] or cv2.get(CAP_PROP_FRAME_WIDTH)
-            height = size[1] or cv2.get(CAP_PROP_FRAME_HEIGHT)
-            fps = cv2.get(CAP_PROP_FPS) or 30.0
+            width = _format[0] or video.get(cv2.CAP_PROP_FRAME_WIDTH)
+            height = _format[1] or video.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            container_type = _format[2]
+            codec = _format[3]
+            fps = video.get(cv2.CAP_PROP_FPS) or 30.0
             do_resize = False
                 
 
             # Use the specified video container type.
-            container_type = size[2]
             if container_type == cmsdb.neondata.VideoRenditionContainerType.MP4:
                 ext = 'mp4'
                 content_type = 'video/mp4'
+                codec = codec or 'libx264'
                 imageio_params = {
                     'format' : 'FFMPEG',
                     'fps' : fps,
+                    'codec' : codec,
+                    'quality' : 8,
                     'ffmpeg_params' : []
                     }
-                if size[0] and size[1]:
+                if _format[0] and _format[1]:
                     do_resize = True
                     # TODO: Use ffmpeg for the cropping & resizing
                     #imageio_params['ffmpeg_params'].extend([
@@ -285,17 +291,19 @@ class CDNHosting(object):
             elif container_type == cmsdb.neondata.VideoRenditionContainerType.GIF:
                 ext = 'gif'
                 content_type = 'image/gif'
+                codec = None
                 imageio_params = {
                     'format' : 'GIF',
                     'fps' : fps,
-                    'quantizer' : 'nq'
+                    'quantizer' : 'nq',
+                    'mode' : 'I'
                     }
-                do_resize = size[0] and size[1]
+                do_resize = _format[0] and _format[1]
             else:
                 raise ValueError('Unhandled video container type %s', 
                                  container_type)
 
-            basename = neondata.VideoRendition.FNAME_FORMAT.format(
+            basename = cmsdb.neondata.VideoRendition.FNAME_FORMAT.format(
                 clip_id=clip_id,
                 width=width,
                 height=height,
@@ -304,24 +312,31 @@ class CDNHosting(object):
             # Get a writer with a named temporary file with the
             # right file extension.
             with tempfile.NamedTemporaryFile(suffix=('.%s' % ext)) as target:
-                with imageio.get_writer(target.name,
-                                        **imageio_params) as writer:
-
-                    try:
+                try:
+                    with imageio.get_writer(target.name,
+                                            **imageio_params) as writer:
                         for frame in pycvutils.iterate_video(
                                 video, start, end):
                             if do_resize:
                                 frame = pycvutils.resize_and_crop(
                                     frame, height, width)
                             writer.append_data(frame[:,:,::-1])
-                        target.seek(0)
+                    # Some of the imageio plugins write to disk via
+                    # the C layer and thus the tempfile in python
+                    # won't see them. So, we make sure we flush and
+                    # then open up a new reader for the file.
+                    target.flush()
+                    with open(target.name, 'rb') as _file:
                         cdn_val = yield self._upload_and_check_file(
-                            target, basename, content_type, url, False)
+                            _file, basename, content_type,
+                            url, False)
                         if cdn_val:
                             # Include container and codec from size.
-                            results.append(cdn_val + size[2:2])
-                    except Exception as e:
-                        _log.error('Failed to generate or upload video %s', e)
+                            results.append((cdn_val, width, 
+                                            height, container_type, codec))
+                except IOError as e:
+                    statemon.state.increment('upload_error')
+                    raise
 
         # Return the new object urls.
         raise tornado.gen.Return(results)

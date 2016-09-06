@@ -3129,7 +3129,7 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
         self.cdn = neondata.CDNHostingMetadataList(
             neondata.CDNHostingMetadataList.create_key('acct1', 'int1'),
             cdns=[neondata.NeonCDNHostingMetadata(
-                video_rendition_sizes=[(500, 600, 'gif', 'gif2')])])
+                video_rendition_formats=[(500, 600, 'gif', 'gif2')])])
         self.cdn.save()
 
         self.clip = neondata.Clip(video_id=self.video_id,
@@ -3173,7 +3173,7 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
         self.assertEquals(calls[0][0][0],
                           neondata.PrimaryNeonHostingMetadata())
         hosting_obj = calls[1][0][0]
-        self.assertEquals(hosting_obj.video_rendition_sizes,
+        self.assertEquals(hosting_obj.video_rendition_formats,
                           [[500, 600, 'gif', 'gif2']])
 
         # Check the calls to upload_video

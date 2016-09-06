@@ -3743,7 +3743,7 @@ class CDNHostingMetadata(UnsaveableStoredObject):
                  crop_with_saliency=True,
                  crop_with_face_detection=True,
                  crop_with_text_detection=True,
-                 video_rendition_sizes=None):
+                 video_rendition_formats=None):
 
         self.key = key
 
@@ -3817,9 +3817,9 @@ class CDNHostingMetadata(UnsaveableStoredObject):
         # @TODO configure clip render.
         # List of 4-element list [width, height, container_type, codec].
         # If height and width are None, no resizing is done
-        self.video_rendition_sizes = video_rendition_sizes or [
-            [160, 90, 'mp4', 'h264'],
-            [320, 180, 'mp4', 'h264'],]
+        self.video_rendition_formats = video_rendition_formats or [
+            [160, 90, 'mp4', 'libx264'],
+            [320, 180, 'mp4', 'libx264'],]
 
     @classmethod
     def _create(cls, key, obj_dict):
@@ -3870,7 +3870,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
                  make_tid_folders=False, rendition_sizes=None, policy=None,
                  source_crop=None, crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True, video_rendition_sizes=None):
+                 crop_with_text_detection=True, video_rendition_formats=None):
         '''
         Create the object
         '''
@@ -3878,7 +3878,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
             key, cdn_prefixes, resize, update_serving_urls, rendition_sizes, 
             source_crop, crop_with_saliency, crop_with_face_detection,
             crop_with_text_detection,
-            video_rendition_sizes=video_rendition_sizes)
+            video_rendition_formats=video_rendition_formats)
         self.access_key = access_key # S3 access key
         self.secret_key = secret_key # S3 secret access key
         self.bucket_name = bucket_name # S3 bucket to host in
@@ -3913,7 +3913,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
                  source_crop=None, crop_with_saliency=True,
                  crop_with_face_detection=True,
                  crop_with_text_detection=True,
-                 video_rendition_sizes=None):
+                 video_rendition_formats=None):
         super(NeonCDNHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -3924,7 +3924,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
             rendition_sizes=rendition_sizes,
-            video_rendition_sizes=video_rendition_sizes,
+            video_rendition_formats=video_rendition_formats,
             policy='public-read',
             source_crop=source_crop,
             crop_with_saliency=crop_with_saliency,
@@ -3957,7 +3957,7 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             crop_with_saliency=crop_with_saliency,
             crop_with_face_detection=crop_with_face_detection,
             crop_with_text_detection=crop_with_text_detection,
-            video_rendition_sizes=[(None, None, 'mp4', 'h264')])
+            video_rendition_formats=[(None, None, 'mp4', 'libx264')])
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
