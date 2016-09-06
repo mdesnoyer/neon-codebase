@@ -1415,12 +1415,13 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertIsNotNone(thumb_info.phash)
         self.assertEqual(thumb_info.type, ThumbnailType.NEON)
         self.assertEqual(thumb_info.rank, 3)
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
         self.assertEqual(thumb_info.urls,
-                         ['http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
-                          re.sub('_', '/', thumb_info.key)])
+                         ['http://s3.amazonaws.com/host-thumbnails/%s/' %
+                          re.sub('_', '/', thumb_info.key) + basename])
 
         # Make sure that the image was uploaded to s3 properly
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
