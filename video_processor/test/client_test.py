@@ -1425,7 +1425,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertIsNotNone(n_thumbs[0].key)
         self.assertEquals(n_thumbs[0].urls, [
-            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
         self.assertEquals(n_thumbs[0].width, 640)
         self.assertEquals(n_thumbs[0].height, 480)
@@ -1451,7 +1451,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             # Check the main archival image
             self.assertIsNotNone(
                 self.s3conn.get_bucket('host-thumbnails').get_key(
-                    re.sub('_', '/', thumb.key) + '.jpg'))
+                    re.sub('_', '/', thumb.key) + '/w640_h480.jpg'))
 
             # Check a serving url
             s_url = neondata.ThumbnailServingURLs.get(thumb.key)
@@ -1504,8 +1504,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         yield self.vprocessor.finalize_response()
 
         video = neondata.VideoMetadata.get(self.video_id)
-        # Get the current tag from the database.
-        tag = neondata.Tag.get(tag.get_id())
+        tag = neondata.Tag.get(video.tag_id)
         self.assertEqual(tag.get_id(), video.tag_id)
         self.assertEqual(tag.name, 'some fun video')
 
@@ -1732,7 +1731,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
-            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])        
 
     @tornado.testing.gen_test
@@ -1894,7 +1893,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
-            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
             re.sub('_', '/', n_thumbs[0].key)]) 
 
     @tornado.testing.gen_test
