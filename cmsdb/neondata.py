@@ -3819,7 +3819,11 @@ class CDNHostingMetadata(UnsaveableStoredObject):
         # If height and width are None, no resizing is done
         self.video_rendition_formats = video_rendition_formats or [
             [160, 90, 'mp4', 'libx264'],
-            [320, 180, 'mp4', 'libx264'],]
+            [320, 180, 'mp4', 'libx264'],
+            [None, 480, 'mp4', 'libx264'],
+            [500, None, 'gif', None],
+            [425, None, 'gif', None]]
+            
 
     @classmethod
     def _create(cls, key, obj_dict):

@@ -15,7 +15,7 @@ from cvutils import smartcrop
 
 _log = logging.getLogger(__name__)
 
-def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
+def resize_and_crop(image, h=None, w=None, interpolation=cv2.INTER_AREA):
     '''Resizes the image and then crops to a new size.
 
     The resize preserves the aspect ratio and then the crop forces the
@@ -26,8 +26,16 @@ def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
     h - desired height
     w - desired width
 
+    if either height or width is None, the aspect ratio is preseved
+
     Returns: The resized and cropped image.
     '''
+    if h is None and w is None:
+        return image
+    elif h is None:
+        h = int(float(w) * image.shape[0] / image.shape[1])
+    elif w is None:
+        w = int(float(h) * image.shape[1] / image.shape[0])
     scaling = max(float(h) / image.shape[0],
                   float(w) / image.shape[1])
 
@@ -101,7 +109,7 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
 
     return grab_sucess, cur_frame
 
-def iterate_video(video, start=0, end=None):
+def iterate_video(video, start=0, end=None, step=1):
     '''Returns an iterator of the frames in a video.
 
     Inputs:
@@ -109,12 +117,13 @@ def iterate_video(video, start=0, end=None):
     start - The first frame number to grab
     end - The frame number of the end of the sequnce.
           This frame is not extracted (None means go to the end)
+    step - Number of frames to step for each frame
     '''
     num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     end = min(end, num_frames)
     if start is None:
         start = 0
-    for frameno in range(start, end):
+    for frameno in range(start, end, step):
         seek_sucess, cur_frame = seek_video(
             video,
             frameno,

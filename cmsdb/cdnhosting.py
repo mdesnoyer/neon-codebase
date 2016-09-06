@@ -263,13 +263,18 @@ class CDNHosting(object):
         for _format in self.video_rendition_formats:
 
             # Figure out some details about the desired output
-            width = _format[0] or video.get(cv2.CAP_PROP_FRAME_WIDTH)
-            height = _format[1] or video.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            do_resize = True
+            width = _format[0]
+            height = _format[1]
+            if width is None and height is None:
+                # Use the original size
+                width = video.get(cv2.CAP_PROP_FRAME_WIDTH)
+                height = video.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                do_resize = False
             container_type = _format[2]
             codec = _format[3]
             fps = video.get(cv2.CAP_PROP_FPS) or 30.0
-            do_resize = False
-                
+            step = 1                
 
             # Use the specified video container type.
             if container_type == cmsdb.neondata.VideoRenditionContainerType.MP4:
@@ -283,22 +288,22 @@ class CDNHosting(object):
                     'quality' : 8,
                     'ffmpeg_params' : []
                     }
-                if _format[0] and _format[1]:
-                    do_resize = True
-                    # TODO: Use ffmpeg for the cropping & resizing
-                    #imageio_params['ffmpeg_params'].extend([
-                    #    '-vf', 'scale=%s:%s' % (width, height)])
+                # TODO: Use ffmpeg for the cropping & resizing
+                #imageio_params['ffmpeg_params'].extend([
+                #    '-vf', 'scale=%s:%s' % (width, height)])
             elif container_type == cmsdb.neondata.VideoRenditionContainerType.GIF:
                 ext = 'gif'
                 content_type = 'image/gif'
                 codec = None
+                new_fps = 6.0
+                step = int(fps/new_fps)
+                new_fps = float(fps)/step
                 imageio_params = {
                     'format' : 'GIF',
-                    'fps' : fps,
+                    'fps' : new_fps,
                     'quantizer' : 'nq',
                     'mode' : 'I'
                     }
-                do_resize = _format[0] and _format[1]
             else:
                 raise ValueError('Unhandled video container type %s', 
                                  container_type)
@@ -316,7 +321,7 @@ class CDNHosting(object):
                     with imageio.get_writer(target.name,
                                             **imageio_params) as writer:
                         for frame in pycvutils.iterate_video(
-                                video, start, end):
+                                video, start, end, step):
                             if do_resize:
                                 frame = pycvutils.resize_and_crop(
                                     frame, height, width)
