@@ -1336,6 +1336,7 @@ class TestThumbnailHelperClass(NeonDbTestCase):
 
 
 class TestAddingImageData(NeonDbTestCase):
+
     '''Test cases that add image data to thumbnails and do uploads'''
     def setUp(self):
         # Mock out s3
@@ -1414,12 +1415,13 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertIsNotNone(thumb_info.phash)
         self.assertEqual(thumb_info.type, ThumbnailType.NEON)
         self.assertEqual(thumb_info.rank, 3)
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
         self.assertEqual(thumb_info.urls,
-                         ['http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
-                          re.sub('_', '/', thumb_info.key)])
+                         ['http://s3.amazonaws.com/host-thumbnails/%s/' %
+                          re.sub('_', '/', thumb_info.key) + basename])
 
         # Make sure that the image was uploaded to s3 properly
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
@@ -1457,12 +1459,13 @@ class TestAddingImageData(NeonDbTestCase):
 
         yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
                                        save_objects=True, async=True)
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
 
         self.assertEqual(thumb_info.video_id, video_info.key)
         self.assertGreater(len(thumb_info.urls), 0) # verify url insertion
         self.assertEqual(thumb_info.urls[0],
-                'http://s3.amazonaws.com/host-thumbnails/%s' %\
+                'http://s3.amazonaws.com/host-thumbnails/%s' %
                 primary_hosting_key)
 
         self.assertIsNotNone(thumb_info.key)
@@ -1513,7 +1516,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         # Check cloudinary
@@ -1567,7 +1571,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
@@ -1612,7 +1617,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
 
@@ -1655,7 +1661,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertIsNotNone(tmeta.phash)
 
         # Make sure the image is hosted in s3
-        primary_hosting_key = re.sub('_', '/', tmeta.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (tmeta.width, tmeta.height)
+        primary_hosting_key = re.sub('_', '/', tmeta.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
 
