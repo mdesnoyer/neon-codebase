@@ -1504,6 +1504,8 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         yield self.vprocessor.finalize_response()
 
         video = neondata.VideoMetadata.get(self.video_id)
+        # Get the current tag from the database.
+        tag = neondata.Tag.get(tag.get_id())
         self.assertEqual(tag.get_id(), video.tag_id)
         self.assertEqual(tag.name, 'some fun video')
 
