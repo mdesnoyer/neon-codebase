@@ -1457,12 +1457,14 @@ class TestAddingImageData(NeonDbTestCase):
 
         yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
                                        save_objects=True, async=True)
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
 
         self.assertEqual(thumb_info.video_id, video_info.key)
         self.assertGreater(len(thumb_info.urls), 0) # verify url insertion
+        import pdb; pdb.set_trace()
         self.assertEqual(thumb_info.urls[0],
-                'http://s3.amazonaws.com/host-thumbnails/%s' %\
+                'http://s3.amazonaws.com/host-thumbnails/%s' %
                 primary_hosting_key)
 
         self.assertIsNotNone(thumb_info.key)
@@ -1655,7 +1657,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertIsNotNone(tmeta.phash)
 
         # Make sure the image is hosted in s3
-        primary_hosting_key = re.sub('_', '/', tmeta.key)+'/w%s_h%s.jpg' % (480, 360)
+        basename = 'w%s_h%s.jpg' % (tmeta.width, tmeta.height)
+        primary_hosting_key = re.sub('_', '/', tmeta.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
 
