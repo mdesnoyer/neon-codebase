@@ -1336,6 +1336,7 @@ class TestThumbnailHelperClass(NeonDbTestCase):
 
 
 class TestAddingImageData(NeonDbTestCase):
+
     '''Test cases that add image data to thumbnails and do uploads'''
     def setUp(self):
         # Mock out s3
@@ -1616,7 +1617,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
 
