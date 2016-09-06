@@ -74,7 +74,8 @@ class ClipFinder(object):
                 processing_strategy.custom_predictor)
         else:
             self.custom_predictor = None
-        self.weight_dict['custom'] = self.custom_predictor_weight
+        self.weight_dict['custom'] = \
+          processing_strategy.custom_predictor_weight
 
     def reset(self):
         self.scene_cut_generator.reset()
