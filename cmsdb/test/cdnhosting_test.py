@@ -180,9 +180,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         urls = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
             urls[0][0],
-            "http://s3.amazonaws.com/hosting-bucket/acct1/vid1/tid1.jpg")
+            "http://s3.amazonaws.com/hosting-bucket/acct1/vid1/tid1/w640_h480.jpg")
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
-        s3_key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3_key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
         self.assertEqual(s3_key.policy, 'public-read')
@@ -202,9 +202,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         urls = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
             urls[0][0],
-            "http://s3.amazonaws.com/hosting-bucket/my/folder/path/acct1/vid1/tid1.jpg")
+            "http://s3.amazonaws.com/hosting-bucket/my/folder/path/acct1/vid1/tid1/w640_h480.jpg")
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
-        s3_key = self.bucket.get_key('my/folder/path/acct1/vid1/tid1.jpg')
+        s3_key = self.bucket.get_key('my/folder/path/acct1/vid1/tid1/w640_h480.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
         self.assertEqual(s3_key.policy, 'public-read')
@@ -217,7 +217,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         # Do initial upload
         url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
-        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         orig_etag = s3key.etag
 
         # Now upload, but don't overwrite
@@ -226,7 +226,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                             async=True)
 
         # Check the file contents
-        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         self.assertIsNotNone(s3key)
         self.assertEquals(s3key.etag, orig_etag)
 
@@ -234,7 +234,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         yield hoster.upload(new_image, 'acct1_vid1_tid1', async=True)
             
         buf = StringIO()
-        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         self.assertNotEquals(s3key.etag, orig_etag)
             
 
@@ -377,7 +377,7 @@ class TestCloudinaryHosting(test_utils.neontest.AsyncTestCase):
           lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 502, buffer=StringIO("gateway error"))
         with self.assertLogExists(logging.ERROR,
-                'Failed to upload file to cloudinary for key %s' % tid):
+                'Failed to upload file to cloudinary .*%s' % tid):
             with self.assertRaises(IOError):
                 url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 1)
@@ -700,7 +700,7 @@ class TestAkamaiHosting(CDNTestBase):
         # check fails, then the python random module had changed
         self.assertEquals(
             base_urls[0],
-            'http://cdn1.akamai.com/customeraccountnamelabel/G/l/l')
+            'http://cdn1.akamai.com/customeraccountnamelabel/i/E/O')
 
     @tornado.testing.gen_test
     def test_with_folder_prefix(self):
@@ -807,7 +807,7 @@ class TestAkamaiHosting(CDNTestBase):
         tid = 'akamai_vid1_tid2'
         
         with self.assertLogExists(logging.ERROR, 
-                'Error uploading file to akamai for key %s' % tid):
+                'Error uploading file to akamai.*%s' % tid):
             with self.assertRaises(IOError):
                 yield self.hoster.upload(self.image, tid, async=True)
         

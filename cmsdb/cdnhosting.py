@@ -278,8 +278,10 @@ class CDNHosting(object):
                     'ffmpeg_params' : []
                     }
                 if size[0] and size[1]:
-                    imageio_params['ffmpeg_params'].extend([
-                        '-vf', 'scale=%s:%s' % (width, height)])
+                    do_resize = True
+                    # TODO: Use ffmpeg for the cropping & resizing
+                    #imageio_params['ffmpeg_params'].extend([
+                    #    '-vf', 'scale=%s:%s' % (width, height)])
             elif container_type == cmsdb.neondata.VideoRenditionContainerType.GIF:
                 ext = 'gif'
                 content_type = 'image/gif'
@@ -302,12 +304,15 @@ class CDNHosting(object):
             # Get a writer with a named temporary file with the
             # right file extension.
             with tempfile.NamedTemporaryFile(suffix=('.%s' % ext)) as target:
-                with imageio.get_writer(target.name, **imageio_params) as writer:
+                with imageio.get_writer(target.name,
+                                        **imageio_params) as writer:
 
                     try:
-                        for frame in pycvutils.iterate_video(video, start, end):
+                        for frame in pycvutils.iterate_video(
+                                video, start, end):
                             if do_resize:
-                                # TODO: resize frame
+                                frame = pycvutils.resize_and_crop(
+                                    frame, height, width)
                             writer.append_data(frame[:,:,::-1])
                         target.seek(0)
                         cdn_val = yield self._upload_and_check_file(
@@ -327,17 +332,17 @@ class CDNHosting(object):
             key, width, height)
 
         image_file = StringIO()
-        im.save(image_file, 'jpeg', quality=90)
+        image.save(image_file, 'jpeg', quality=90)
         image_file.seek(0)
 
         cdn_url = yield self._upload_and_check_file(image_file, basename,
-                                                    'image/jpg',
+                                                    'image/jpeg',
                                                     url, overwrite)
-        raise tornado.gen.Return(cdn_url)
+        raise tornado.gen.Return((cdn_url, width, height))
         
 
     @tornado.gen.coroutine
-    def _upload_and_check_file(self, _file, basename, content_type
+    def _upload_and_check_file(self, _file, basename, content_type,
                                url, overwrite):
         '''Returns a tuple of (cdn_url, width, height).'''
 
@@ -356,7 +361,7 @@ class CDNHosting(object):
             statemon.state.increment('invalid_cdn_url')
             raise IOError(msg)
         elif cdn_url is not None:
-            raise tornado.gen.Return((cdn_url, width, height))
+            raise tornado.gen.Return(cdn_url)
         raise tornado.gen.Return(None)
 
     @tornado.gen.coroutine
@@ -477,7 +482,7 @@ class AWSHosting(CDNHosting):
     def _upload_impl(self, _file, basename, content_type, url=None,
                      overwrite=True):
 
-        rng = random.Random(basename)
+        rng = random.Random(''.join(basename.split('_')[:3]))
 
         s3bucket = yield self._get_bucket()
 
@@ -495,7 +500,12 @@ class AWSHosting(CDNHosting):
                 rng.choice(string.letters + string.digits)
                 for _ in range(3)))
         if self.make_tid_folders:
-            splits = basename.split('_')
+            if basename.startswith('neon'):
+                # Get rid of the neontn for backwards compatibility
+                base = basename[6:]
+            else:
+                base = basename
+            splits = base.split('_')
             name_pieces.extend(splits[0:3])
             name_pieces.append('_'.join(splits[3:]))
         else:
@@ -590,7 +600,7 @@ class CloudinaryHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, _file, _format, key, width, height, url=None,
+    def _upload_impl(self, _file, basename, content_type, url=None,
                      overwrite=True):
         '''
         Upload the image to cloudinary.
@@ -603,7 +613,7 @@ class CloudinaryHosting(CDNHosting):
                              "the url")
 
         # 0, 0 indicates original (base image size)
-        img_name = "neontn%s_w%s_h%s.jpg" % (key, "0", "0")
+        img_name = "neontn%s_w%s_h%s.jpg" % (basename, "0", "0")
 
         params = {}
         params['timestamp'] = int(time.time())
@@ -617,8 +627,8 @@ class CloudinaryHosting(CDNHosting):
         params['file'] = url
         response = yield self.make_request(params, None, headers, async=True)
         if response.error:
-            msg = ("Failed to upload file to cloudinary for key %s: %s" %
-                   (key, response.error))
+            msg = ("Failed to upload file to cloudinary %s: %s" %
+                   (basename, response.error))
             _log.error_n(msg)
             raise IOError(msg)
 
@@ -684,9 +694,11 @@ class AkamaiHosting(CDNHosting):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def _upload_impl(self, _file, _format, key, width, height, url=None,
+    def _upload_impl(self, _file, basename, content_type, url=None,
             overwrite=True):
-        rng = random.Random(key)
+        if content_type.startswith('video'):
+            raise NotImplementedError('File stream upload to akamai not implemented')
+        rng = random.Random(''.join(basename.split('_')[:3]))
 
         cdn_prefix = rng.choice(self.cdn_prefixes)
 
@@ -709,14 +721,12 @@ class AkamaiHosting(CDNHosting):
         if self.folder_prefix:
             name_pieces.extend(self.folder_prefix.split('/'))
 
-        name_pieces.append(key[:24])
+        name_pieces.append(basename[6:30])
         for _ in range(3):
             name_pieces.append(rng.choice(string.ascii_letters))
 
         # Add the filename
-        name_pieces.append(
-            cmsdb.neondata.ThumbnailServingURLs.create_filename(
-                key, width, height))
+        name_pieces.append(basename)
 
         path = '/'.join(name_pieces)
 
@@ -735,8 +745,8 @@ class AkamaiHosting(CDNHosting):
                                              ntries=self.ntries,
                                              async=True)
         if response.error:
-            msg = ("Error uploading file to akamai for key %s: %s"
-                   % (key, response.error))
+            msg = ("Error uploading file to akamai %s: %s"
+                   % (basename, response.error))
             _log.error_n(msg)
             statemon.state.increment('akamai_upload_error')
             raise IOError(str(msg))
