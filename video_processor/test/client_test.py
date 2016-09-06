@@ -2382,13 +2382,20 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         # Check that the clips were uploaded, both a primary and a rendition
         upload_args = [x[0][1:] for x in self.video_upload_mock.call_args_list]
         self.assertItemsEqual(upload_args, [
-            (default_clip.get_id(), None, None),
-            (default_clip.get_id(),None,None,'%s.mp4' % default_clip.get_id()),
+            (
+                default_clip.get_id(),
+                default_clip.start_frame,
+                default_clip.end_frame
+            ), (
+                default_clip.get_id(),
+                default_clip.start_frame,
+                default_clip.end_frame,
+                '%s.mp4' % default_clip.get_id()
+            ),
             (clips[0].get_id(), 15, 30),
             (clips[0].get_id(), 15, 30, '%s.mp4' % clips[0].get_id()),
             (clips[1].get_id(), 115, 210),
             (clips[1].get_id(), 115, 210, '%s.mp4' % clips[1].get_id())])
-                              
 
         # Check the VideoRenditions for the clips
         default_renditions = neondata.VideoRendition.search_for_objects(
