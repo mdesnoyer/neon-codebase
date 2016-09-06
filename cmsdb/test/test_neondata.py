@@ -1655,7 +1655,7 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertIsNotNone(tmeta.phash)
 
         # Make sure the image is hosted in s3
-        primary_hosting_key = re.sub('_', '/', tmeta.key)+'.jpg'
+        primary_hosting_key = re.sub('_', '/', tmeta.key)+'/w%s_h%s.jpg' % (480, 360)
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
 
