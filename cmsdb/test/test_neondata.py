@@ -3147,8 +3147,9 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
         super(TestClip, self).setUp()
 
     def tearDown(self):
-        self.cv_patcher.stop
+        self.cv_patcher.stop()
         self.hosting_patcher.stop()
+        self.video_download_patcher.stop()
         super(TestClip, self).tearDown()
 
     @classmethod
