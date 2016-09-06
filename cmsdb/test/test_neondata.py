@@ -1464,7 +1464,6 @@ class TestAddingImageData(NeonDbTestCase):
 
         self.assertEqual(thumb_info.video_id, video_info.key)
         self.assertGreater(len(thumb_info.urls), 0) # verify url insertion
-        import pdb; pdb.set_trace()
         self.assertEqual(thumb_info.urls[0],
                 'http://s3.amazonaws.com/host-thumbnails/%s' %
                 primary_hosting_key)
