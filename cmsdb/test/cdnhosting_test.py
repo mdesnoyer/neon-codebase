@@ -944,6 +944,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         gif_image = PIL.Image.open(buf)
 
         self.assertEquals(gif_image.size, (320, 240))
+        self.assertAlmostEqual(np.round(1000./gif_image.info['duration']), 6)
         
         
 if __name__ == '__main__':
