@@ -1309,7 +1309,7 @@ class ClipProcessor(VideoProcessor):
 
         rank = 0
         for r in results:
-            fps = float(clip.get(cv2.CAP_PROP_FPS)) or 30.0
+            fps = float(mov.get(cv2.CAP_PROP_FPS)) or 30.0
             cmeta = neondata.Clip(
                 video_id=self.video_metadata.key,
                 ttype=neondata.ClipType.NEON,
