@@ -4980,7 +4980,7 @@ class TestThumbnailHandler(TestControllersBase):
     def test_post_thumbnail_limit_counter_increments(self):
         pass
 
-    def test_post_thumbnail_limit_counter_resets(self);
+    def test_post_thumbnail_limit_counter_resets(self):
         pass
 
     def test_post_thumbnail_exceed_limit_fails(self):
