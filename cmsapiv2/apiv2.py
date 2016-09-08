@@ -133,6 +133,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.account = None
         self.account_limits = None
         self.adjust_limits = True
+        self.get_limits_args = []
         self.origin = self.request.headers.get("Origin") or\
             options.frontend_base_url
         self.executor = concurrent.futures.ThreadPoolExecutor(5)
@@ -593,15 +594,17 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     @tornado.gen.coroutine
     def _handle_limit_inc_dec(self):
 
+        import pdb; pdb.set_trace()
         if self.account_limits is None or not self.adjust_limits:
             return
         if self.get_status() not in [ResponseCode.HTTP_OK,
                                      ResponseCode.HTTP_ACCEPTED]:
             return
 
-        defined_limits_dict = self.get_limits()
+
+        defined_limits_dict = self.get_limits(*self.get_limit_args)
         if defined_limits_dict is None:
-            defined_limits_dict = self.get_limits_after_prepare()
+            defined_limits_dict = self.get_limits_after_prepare(*self.get_limit_args)
             if defined_limits_dict is None: 
                 return  
 

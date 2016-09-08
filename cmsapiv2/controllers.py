@@ -1483,6 +1483,7 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
         try:
             yield self.check_account_limits(
                 self.get_limits_after_prepare(len(self.images))[HTTPVerbs.POST])
+            self.get_limit_args = [len(self.images)]
         except KeyError:
             pass
 

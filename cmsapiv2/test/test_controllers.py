@@ -4977,12 +4977,38 @@ class TestThumbnailHandler(TestControllersBase):
         url = '/api/v2/%s/thumbnails' % '1234234'
         self.post_exceptions(url, params, exception_mocker)
 
+    @tornado.testing.gen_test
     def test_post_thumbnail_limit_counter_increments(self):
-        pass
 
+        # Sanity check.
+        neondata.AccountLimits(
+            self.account_id_api_key,
+            refresh_time_image_posts=datetime(2050,1,1)).save()
+        limit = neondata.AccountLimits.get(self.account_id_api_key)
+        self.assertEqual(0, limit.image_posts)
+
+        # Post one.
+        thumbnail_ref = 'kevin'
+        image_filename = 'blah.jpg'
+        _url = '/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}&url={}&tag_id={}'
+        url = self.get_url(_url.format(
+            self.account_id_api_key,
+            self.video_id,
+            thumbnail_ref,
+            image_filename,
+            'tag_0,tag_1,tag_2'))
+        response = yield self.http_client.fetch(url, body='', method='POST')
+        self.assertEqual(response.code, 202)
+        
+        # Validate.
+        limit = neondata.AccountLimits.get(self.account_id_api_key)
+        self.assertEqual(1, limit.image_posts)
+
+    @tornado.testing.gen_test
     def test_post_thumbnail_limit_counter_resets(self):
         pass
 
+    @tornado.testing.gen_test
     def test_post_thumbnail_exceed_limit_fails(self):
         pass
 
