@@ -3114,8 +3114,8 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
             self.hosting_mock.create().upload_video,
             require_async_kw=True)
         self.upload_mock.side_effect = (
-          lambda vid, clip_id, start, *args: 
-          [('%s.mp4' % (start), 640, 480, 'mp4', 'h264')])
+          lambda vid, clip, *args: 
+          [('%s.mp4' % clip.get_id(), 640, 480, 'mp4', 'h264')])
         self.upload_image_mock = self._future_wrap_mock(
             self.hosting_mock.create().upload,
             require_async_kw=True)

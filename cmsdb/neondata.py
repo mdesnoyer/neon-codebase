@@ -5798,22 +5798,22 @@ class Clip(StoredObject):
         else:
             raise IOError('Primary file was not uploaded %s' % self.key)
 
-        # Save primary rendition object.
+        # Keep primary rendition object.
         fps = float(video.get(cv2.CAP_PROP_FPS)) or 30.0
         self.duration = (self.end_frame - self.start_frame) / fps
+        if video_info is None:
+            video_info = yield VideoMetadata.get(self.video_id, async=True)
+            if video_info is None:
+                raise DBStateError('Video %s is not in the db' % self.video_id)
         renditions = [VideoRendition(url=primary_url,
                                      width=primary_result[1], 
                                      height=primary_result[2],
                                      duration=self.duration, 
                                      container=primary_result[3],
                                      codec=primary_result[4],
-                                     video_id=video.get_id(),
+                                     video_id=video_info.get_id(),
                                      clip_id=self.get_id())]
 
-        if video_info is None:
-            video_info = yield VideoMetadata.get(self.video_id, async=True)
-            if video_info is None:
-                raise DBStateError('Video %s is not in the db' % self.video_id)
         if cdn_metadata is None:
             cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
 
@@ -5830,7 +5830,7 @@ class Clip(StoredObject):
                                     container=result[3],
                                     codec=result[4], 
                                     duration=self.duration,
-                                    video_id=video.get_id(),
+                                    video_id=video_info.get_id(),
                                     clip_id=self.get_id())
                 renditions.append(vr)
 
