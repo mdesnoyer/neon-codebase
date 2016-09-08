@@ -4962,20 +4962,29 @@ class TestThumbnailHandler(TestControllersBase):
 
     def test_get_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.get')
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.get_exceptions(url, exception_mocker)
 
     def test_put_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.put')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.put_exceptions(url, params, exception_mocker)
 
     def test_post_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.post_exceptions(url, params, exception_mocker)
+
+    def test_post_thumbnail_limit_counter_increments(self):
+        pass
+
+    def test_post_thumbnail_limit_counter_resets(self);
+        pass
+
+    def test_post_thumbnail_exceed_limit_fails(self):
+        pass
 
 
 class TestHealthCheckHandler(TestControllersBase):
