@@ -5790,7 +5790,6 @@ class Clip(StoredObject):
         primary_result = yield primary_hoster.upload_video(
             video,
             self,
-            None,
             async=True)
         if len(primary_result) == 1:
             primary_result = primary_result[0]

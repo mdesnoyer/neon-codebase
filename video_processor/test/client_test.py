@@ -2229,7 +2229,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.video_upload_mock = self._future_wrap_mock(
             self.video_upload_patcher.start())
         self.video_upload_mock.side_effect = \
-          lambda v, clip, *args: [('%s.mp4' % clip,
+          lambda v, clip, *args: [('%s.mp4' % clip.get_id(),
                                    640, 480, 'mp4', 'h264')]
 
         # populate some data
@@ -2318,6 +2318,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(len(job_result.clip_ids), 2)
         self.assertEquals(job_result.thumbnail_ids, [])
         self.assertEquals(job_result.bad_thumbnail_ids, [])
+        self.maxDiff = None
 
         # Check the default clip
         default_clip = neondata.Clip.get(video_data.non_job_clip_ids[0])
@@ -2381,21 +2382,30 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
 
         # Check that the clips were uploaded, both a primary and a rendition
         upload_args = [x[0][1:] for x in self.video_upload_mock.call_args_list]
-        self.assertItemsEqual(upload_args, [
+
+        # Check the portion of the arguments that is used in the upload.
+        checks = []
+        for a in upload_args:
+            url = a[1] if len(a) > 1 else None
+            checks.append((a[0].get_id(), a[0].start_frame, a[0].end_frame, url))
+        self.assertItemsEqual(checks,  [
             (
                 default_clip.get_id(),
                 default_clip.start_frame,
-                default_clip.end_frame
-            ), (
+                default_clip.end_frame, 
+                None
+            ),
+            (
                 default_clip.get_id(),
                 default_clip.start_frame,
-                default_clip.end_frame,
+                default_clip.end_frame, 
                 '%s.mp4' % default_clip.get_id()
             ),
-            (clips[0].get_id(), 15, 30),
+            (clips[0].get_id(), 15, 30, None),
             (clips[0].get_id(), 15, 30, '%s.mp4' % clips[0].get_id()),
-            (clips[1].get_id(), 115, 210),
-            (clips[1].get_id(), 115, 210, '%s.mp4' % clips[1].get_id())])
+            (clips[1].get_id(), 115, 210, None),
+            (clips[1].get_id(), 115, 210, '%s.mp4' % clips[1].get_id()),
+        ])
 
         # Check the VideoRenditions for the clips
         default_renditions = neondata.VideoRendition.search_for_objects(
