@@ -3187,10 +3187,8 @@ class TestClip(NeonDbTestCase, BasePGNormalObject):
         # Check the calls to upload_video
         calls = self.upload_mock.call_args_list
         self.assertEquals(len(calls), 2)
-        self.upload_mock.assert_any_call(mov_mock, self.clip.get_id(),
-                                         190, 250)
-        self.upload_mock.assert_any_call(mov_mock, self.clip.get_id(),
-                                         190, 250, 'primary.mp4')
+        self.upload_mock.assert_any_call(mov_mock, self.clip)
+        self.upload_mock.assert_any_call(mov_mock, self.clip, 'primary.mp4')
 
         # Check the resulting rendition objects.
         renditions = neondata.VideoRendition.search_for_objects(

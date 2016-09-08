@@ -5772,25 +5772,25 @@ class Clip(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def add_clip_data(self, clip, video_info=None, cdn_metadata=None):
+    def add_clip_data(self, video, video_info=None, cdn_metadata=None):
         '''Put the clip to CDN. 
 
-        Does not save the Clip object to the database.
+        Does not save the Clip object to the database. Does save
+        the VideoRendition objects for the new cdn files.
 
-        Inputs- clip a cv2 VideoCapture
+        Inputs- video a cv2 VideoCapture
             -video_info a VideoMetadata or None
             -cdn_metadata a CDNHostingMetadata or None
 
         '''
-        self.end_frame = self.end_frame or clip.get(cv2.CAP_PROP_FRAME_COUNT)
+        self.end_frame = self.end_frame or video.get(cv2.CAP_PROP_FRAME_COUNT)
         self.start_frame = self.start_frame or 0
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         primary_result = yield primary_hoster.upload_video(
-            clip,
-            self.get_id(),
-            self.start_frame,
-            self.end_frame,
+            video,
+            self,
+            None,
             async=True)
         if len(primary_result) == 1:
             primary_result = primary_result[0]
@@ -5800,7 +5800,7 @@ class Clip(StoredObject):
             raise IOError('Primary file was not uploaded %s' % self.key)
 
         # Save primary rendition object.
-        fps = float(clip.get(cv2.CAP_PROP_FPS)) or 30.0
+        fps = float(video.get(cv2.CAP_PROP_FPS)) or 30.0
         self.duration = (self.end_frame - self.start_frame) / fps
         renditions = [VideoRendition(url=primary_url,
                                      width=primary_result[1], 
@@ -5819,9 +5819,8 @@ class Clip(StoredObject):
 
         hosts = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
         for host in hosts:
-            results = yield host.upload_video(clip, self.key, self.start_frame,
-                                              self.end_frame, primary_url,
-                                              async=True)
+            results = yield host.upload_video(video, self,
+                                              primary_url, async=True)
 
             # Results is a list of [url, width, height, container, codec]s.
             for result in results:
@@ -5923,7 +5922,10 @@ class VideoRendition(StoredObject, Searchable):
     '''
     Class schema for a rendition of a video
     '''
-    FNAME_FORMAT = 'neonvr{clip_id}_w{width}_h{height}.{ext}'
+
+    # video_id is the full video id: e.g., accountid0_externalvidid0.
+    FNAME_FORMAT = 'neonvr{video_id}_{clip_id}_w{width}_h{height}.{ext}'
+
     def __init__(self, rendition_id=None, url=None, width=None,
                  height=None, duration=None, codec=None, container=None,
                  encoding_rate=None, clip_id=None, video_id=None):
