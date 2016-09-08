@@ -42,7 +42,6 @@ pyleargist==2.0.5
 pylint==1.1.0
 queries==1.7.5
 requests-toolbelt==0.6.2
-scikit-learn==0.17.1
 scipy==0.9.0
 shortuuid==0.3
 simplejson==2.3.2
@@ -53,3 +52,5 @@ voluptuous==0.8.7
 winpdb==1.4.8
 xlwt==1.0.0
 youtube_dl>=2016.07.13
+# scikit-learn must follow scipy
+scikit-learn==0.17.1
