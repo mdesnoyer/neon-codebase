@@ -162,7 +162,7 @@ class MCMH(object):
             self._up_next = None
             return self._sf2fno[sample]
         if not len(self._sample_queue):
-            _log.debug('Sampling complete.')
+            _log.debug_n('Sampling complete.')
             return None  # there is nothing left to sample.
         while True:
             sf = int(np.random.choice(self._sample_queue))

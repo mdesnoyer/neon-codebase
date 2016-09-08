@@ -25,6 +25,7 @@ import random
 import socket
 import string
 import subprocess
+import test_utils.opencv
 import test_utils.neontest
 import time
 import threading
@@ -37,6 +38,7 @@ from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 import utils.neon
 from utils.options import options
+import utils.video_download
 from cvutils.imageutils import PILImageUtils
 import unittest
 import uuid
@@ -94,7 +96,7 @@ class NeonDbTestCase(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         self.postgresql.clear_all_tables()
-        super(NeonDbTestCase, self).setUp()
+        super(NeonDbTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -114,6 +116,27 @@ class TestNeondataDataSpecific(NeonDbTestCase):
     def setUp(self):
         self.maxDiff = 5000
         super(TestNeondataDataSpecific, self).setUp()
+
+    def test_get_many_with_pattern_for_injection(self):
+        injection = 'abcd\' ; SELECT 1;'
+        # If the method were not safe, this would raise a syntax error.
+        result = neondata.Tag.get_many_with_pattern(injection)
+        self.assertFalse(result)
+
+    def test_get_many_with_raw_keys_for_injection(self):
+        injection = ['abcd\' ; SELECT 1;']
+        result = neondata.Tag._get_many_with_raw_keys(injection)
+        self.assertFalse(result[0])
+
+    def test_get_for_injection(self):
+        injection = 'abcd\' ; SELECT 1;'
+        result = neondata.Tag.get(injection)
+        self.assertFalse(result)
+
+    def test_modify_many_for_injection(self):
+        injection = ['abcd\' ; SELECT 1;']
+        result = neondata.Tag.modify_many(injection, lambda _: _)
+        self.assertFalse(result[injection[0]])
 
     def test_default_bcplatform_settings(self):
         ''' override from base due to saving
@@ -1313,6 +1336,7 @@ class TestThumbnailHelperClass(NeonDbTestCase):
 
 
 class TestAddingImageData(NeonDbTestCase):
+
     '''Test cases that add image data to thumbnails and do uploads'''
     def setUp(self):
         # Mock out s3
@@ -1391,12 +1415,13 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertIsNotNone(thumb_info.phash)
         self.assertEqual(thumb_info.type, ThumbnailType.NEON)
         self.assertEqual(thumb_info.rank, 3)
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
         self.assertEqual(thumb_info.urls,
-                         ['http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
-                          re.sub('_', '/', thumb_info.key)])
+                         ['http://s3.amazonaws.com/host-thumbnails/%s/' %
+                          re.sub('_', '/', thumb_info.key) + basename])
 
         # Make sure that the image was uploaded to s3 properly
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
@@ -1434,12 +1459,13 @@ class TestAddingImageData(NeonDbTestCase):
 
         yield video_info.add_thumbnail(thumb_info, self.image, [cdn_metadata],
                                        save_objects=True, async=True)
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
 
         self.assertEqual(thumb_info.video_id, video_info.key)
         self.assertGreater(len(thumb_info.urls), 0) # verify url insertion
         self.assertEqual(thumb_info.urls[0],
-                'http://s3.amazonaws.com/host-thumbnails/%s' %\
+                'http://s3.amazonaws.com/host-thumbnails/%s' %
                 primary_hosting_key)
 
         self.assertIsNotNone(thumb_info.key)
@@ -1490,7 +1516,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         # Check cloudinary
@@ -1544,7 +1571,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
         self.assertIsNotNone(self.s3conn.get_bucket('customer-bucket').
@@ -1589,7 +1617,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEqual(video_info.thumbnail_ids, [thumb_info.key])
 
         # Check that the images are in S3
-        primary_hosting_key = re.sub('_', '/', thumb_info.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (thumb_info.width, thumb_info.height)
+        primary_hosting_key = re.sub('_', '/', thumb_info.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
 
@@ -1632,7 +1661,8 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertIsNotNone(tmeta.phash)
 
         # Make sure the image is hosted in s3
-        primary_hosting_key = re.sub('_', '/', tmeta.key)+'.jpg'
+        basename = 'w%s_h%s.jpg' % (tmeta.width, tmeta.height)
+        primary_hosting_key = re.sub('_', '/', tmeta.key) + '/' + basename
         self.assertIsNotNone(self.s3conn.get_bucket('host-thumbnails').
                              get_key(primary_hosting_key))
 
@@ -2396,6 +2426,22 @@ class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
         self.assertEqual(1, len(videos))
 
     @tornado.testing.gen_test
+    def test_base_search_for_hidden_videos(self):
+        # this function is tested more thoroughly
+        # in the api tests, this is here as a sanity
+        # check. not going to double up the tests at this point
+        request = NeonApiRequest('r1', 'acct1')
+        request.video_title="pie ala mode"
+        yield request.save(async=True)
+        video_info = VideoMetadata('acct1_vid1', request_id='r1', hidden=True)
+        yield video_info.save(async=True)
+
+        video_ids = yield neondata.VideoMetadata.search_for_keys(async=True)
+        self.assertEqual(1, len(video_ids))
+        videos = yield neondata.VideoMetadata.search_for_objects(async=True, show_hidden=False)
+        self.assertEqual(0, len(videos))
+
+    @tornado.testing.gen_test
     def test_video_results_list(self):
         orig = neondata.VideoMetadata(
             'a1_vid1',
@@ -2420,9 +2466,8 @@ class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
         self.assertEquals(found.job_results[1].gender, 'M')
         self.assertEquals(found.job_results[1].model_version, 'model_vers')
         self.assertItemsEqual(found.job_results[1].bad_thumbnail_ids, ['bad1'])
-
         self.assertEquals(orig, found)
-
+        self.assertEqual([u'tid4', u'tid1', u'bad1', u'tid3', u'tid2'], found.get_all_thumbnail_ids())
 
 class TestAccountLimits(NeonDbTestCase, BasePGNormalObject):
     @classmethod
@@ -2476,10 +2521,15 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.state = neondata.RequestState.SERVING
         x.http_callback='http://some.where'
         x.response['framenos'] = [34, 61]
-        x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
       neondata.VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
                            winner_tid='key1_vid1_t2').save()
+      vid = VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2'])
+      vid.serving_url = vid.get_serving_url(save=False)
+      vid.save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
       yield request.send_callback(async=True)
 
@@ -2491,7 +2541,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
          'video_id' : 'vid1',
          'error': None,
          'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
+         'serving_url' : vid.get_serving_url(save=False),
          'processing_state' : neondata.ExternalRequestState.SERVING,
          'experiment_state' : neondata.ExperimentState.COMPLETE,
          'winner_thumbnail' : 'key1_vid1_t2'}
@@ -2515,8 +2565,13 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.state = neondata.RequestState.SERVING
         x.http_callback='http://some.where'
         x.response['framenos'] = [34, 61]
-        x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      vid = VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2'])
+      vid.serving_url = vid.get_serving_url(save=False)
+      vid.save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
       yield request.send_callback(async=True)
 
@@ -2528,7 +2583,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
          'video_id' : 'vid1',
          'error': None,
          'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
+         'serving_url' : vid.get_serving_url(save=False),
          'processing_state' : neondata.ExternalRequestState.SERVING,
          'experiment_state' : neondata.ExperimentState.UNKNOWN,
          'winner_thumbnail' : None}
@@ -2552,8 +2607,13 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.state = neondata.RequestState.FINISHED
         x.http_callback='http://some.where'
         x.response['framenos'] = [34, 61]
-        x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      vid = VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2'])
+      vid.serving_url = vid.get_serving_url(save=False)
+      vid.save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
 
       yield request.send_callback(async=True)
 
@@ -2565,7 +2625,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
          'video_id' : 'vid1',
          'error': None,
          'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
+         'serving_url' : vid.get_serving_url(save=False),
          'processing_state' : neondata.ExternalRequestState.PROCESSED,
          'experiment_state' : neondata.ExperimentState.UNKNOWN,
          'winner_thumbnail' : None}
@@ -2629,6 +2689,10 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.response['framenos'] = [34, 61]
         x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      VideoMetadata('key1_vid1', tids=['key1_vid1_t1',
+                                       'key1_vid1_t2']).save()
+      ThumbnailMetadata('key1_vid1_t1', ttype='neon', frameno=34).save()
+      ThumbnailMetadata('key1_vid1_t2', ttype='neon', frameno=61).save()
       NeonUserAccount('acct1', 'key1',
                       callback_states_ignored=[
                         neondata.CallbackState.PROCESSED_SENT]).save()
@@ -2648,6 +2712,7 @@ class TestNeonRequest(NeonDbTestCase, BasePGNormalObject):
         x.response['framenos'] = [34, 61]
         x.response['serving_url'] = 'http://some_serving_url.com'
       request = NeonApiRequest.modify('j1', 'key1', _mod_request)
+      VideoMetadata('key1_vid1').save()
 
       self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, code=500)
 
@@ -2888,11 +2953,14 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         Tag(account_id='someone else', name='BCD').save()
         result = yield Tag.search_for_keys(query='A', async=True)
         self.assertEqual(2, len(result))
-        result = yield Tag.search_for_objects(query='A', account_id=self.account_id, async=True)
+        result = yield Tag.search_for_objects(
+            query='A', account_id=self.account_id, async=True)
         self.assertEqual(1, len(result))
-        result = yield Tag.search_for_objects(query='BC', account_id=self.account_id, async=True)
+        result = yield Tag.search_for_objects(
+            query='BC', account_id=self.account_id, async=True)
         self.assertEqual(2, len(result))
-        result = yield Tag.search_for_objects(name='BCD', account_id=self.account_id, async=True)
+        result = yield Tag.search_for_objects(
+            name='BCD', account_id=self.account_id, async=True)
         self.assertEqual(1, len(result))
 
     @tornado.testing.gen_test
@@ -3024,11 +3092,272 @@ class TestFeature(test_utils.neontest.AsyncTestCase):
         f1 = fs[0]
         f2 = fs[1] 
         self.assertEquals(f1.index, 1)  
-        self.assertEquals(f2.index, 2)  
+        self.assertEquals(f2.index, 2)
+
+class TestClip(NeonDbTestCase, BasePGNormalObject):
+
+    def setUp(self):
+        # Mock out the clip download
+        dl_error = utils.video_download.VideoDownloadError
+        self.video_download_patcher = patch(
+            'cmsdb.neondata.utils.video_download')
+        self.video_download_mod_mock = self.video_download_patcher.start()
+        self.video_download_mock = self._future_wrap_mock(
+            self.video_download_mod_mock.VideoDownloader().download_video_file)
+        self.video_download_mod_mock.VideoDownloadError = dl_error
+        
+        # Mock out the video upload
+        self.hosting_patcher = patch(
+            'cmsdb.neondata.cmsdb.cdnhosting.CDNHosting')
+        self.hosting_mock = self.hosting_patcher.start()
+        self.upload_mock = self._future_wrap_mock(
+            self.hosting_mock.create().upload_video,
+            require_async_kw=True)
+        self.upload_mock.side_effect = (
+          lambda vid, clip, *args: 
+          [('%s.mp4' % clip.get_id(), 640, 480, 'mp4', 'h264')])
+        self.upload_image_mock = self._future_wrap_mock(
+            self.hosting_mock.create().upload,
+            require_async_kw=True)
+        self.hosting_mock.create.reset_mock()
+
+        # Mock out the VideoCapture object
+        self.cv_patcher = patch('cmsdb.neondata.cv2.VideoCapture')
+        self.cv_mock = self.cv_patcher.start()
+        self.cv_mock.side_effect = [test_utils.opencv.VideoCaptureMock(
+            h=480, w=640, frame_count=2997)]
+
+        # Make some database objects
+        self.video_id = 'acct1_vid1'
+        self.video = neondata.VideoMetadata(self.video_id,
+                                            i_id='int1',
+                                            tag_id='tag1')
+        self.video.save()
+        self.cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key('acct1', 'int1'),
+            cdns=[neondata.NeonCDNHostingMetadata(
+                video_rendition_formats=[(500, 600, 'gif', 'gif2')])])
+        self.cdn.save()
+
+        self.clip = neondata.Clip(video_id=self.video_id,
+                                  start_frame=190,
+                                  end_frame=250,
+                                  ttype=neondata.ClipType.DEFAULT)
+        
+        super(TestClip, self).setUp()
+
+    def tearDown(self):
+        self.cv_patcher.stop()
+        self.hosting_patcher.stop()
+        self.video_download_patcher.stop()
+        super(TestClip, self).tearDown()
+
+    @classmethod
+    def _get_object_type(cls):
+        return neondata.Clip
+
+    def test_properties(self):
+        clip = neondata.Clip('cid',
+                             video_id='acct1_vid',
+                             urls=None)
+        self.assertEquals(clip.account_id, 'acct1')
+        self.assertEquals(clip.get_id(), 'cid')
+        self.assertEquals(clip.urls, [])
+
+    @tornado.testing.gen_test
+    def test_add_clip_data(self):
+        mov_mock = test_utils.opencv.VideoCaptureMock(
+            h=200, w=300, frame_count=600, fps=15.0)
+        self.upload_mock.side_effect = [
+            [('primary.mp4', 300, 200, 'mp4', 'h264')],
+            [('one.mp4', 160, 90, 'mp4', 'h264'),
+             ('two.gif', 320, 240, 'gif', 'gif2')]]
+        
+        yield self.clip.add_clip_data(mov_mock, async=True)
+
+        # Test the hosting objects that were created
+        calls = self.hosting_mock.create.call_args_list
+        self.assertEquals(len(calls), 2) # Primary and hosting object
+        self.assertEquals(calls[0][0][0],
+                          neondata.PrimaryNeonHostingMetadata())
+        hosting_obj = calls[1][0][0]
+        self.assertEquals(hosting_obj.video_rendition_formats,
+                          [[500, 600, 'gif', 'gif2']])
+
+        # Check the calls to upload_video
+        calls = self.upload_mock.call_args_list
+        self.assertEquals(len(calls), 2)
+        self.upload_mock.assert_any_call(mov_mock, self.clip)
+        self.upload_mock.assert_any_call(mov_mock, self.clip, 'primary.mp4')
+
+        # Check the resulting rendition objects.
+        renditions = neondata.VideoRendition.search_for_objects(
+            clip_id=self.clip.get_id())
+        self.assertEquals(len(renditions), 3)
+        rend_map = {x.url: x for x in renditions}
+        self.assertEquals(rend_map['primary.mp4'].width, 300)
+        self.assertEquals(rend_map['primary.mp4'].height, 200)
+        self.assertEquals(rend_map['primary.mp4'].container, 'mp4')
+        self.assertEquals(rend_map['primary.mp4'].codec, 'h264')
+        self.assertEquals(rend_map['primary.mp4'].duration, 4.0)
+        self.assertEquals(rend_map['primary.mp4'].clip_id, self.clip.get_id())
+        self.assertEquals(rend_map['one.mp4'].width, 160)
+        self.assertEquals(rend_map['one.mp4'].height, 90)
+        self.assertEquals(rend_map['one.mp4'].container, 'mp4')
+        self.assertEquals(rend_map['one.mp4'].codec, 'h264')
+        self.assertEquals(rend_map['one.mp4'].duration, 4.0)
+        self.assertEquals(rend_map['one.mp4'].clip_id, self.clip.get_id())
+        self.assertEquals(rend_map['two.gif'].width, 320)
+        self.assertEquals(rend_map['two.gif'].height, 240)
+        self.assertEquals(rend_map['two.gif'].container, 'gif')
+        self.assertEquals(rend_map['two.gif'].codec, 'gif2')
+        self.assertEquals(rend_map['two.gif'].duration, 4.0)
+        self.assertEquals(rend_map['two.gif'].clip_id, self.clip.get_id())
+
+    @tornado.testing.gen_test
+    def test_add_clip_data_primary_upload_error(self):
+        self.upload_mock.side_effect = [
+            []]
+
+        mov_mock = test_utils.opencv.VideoCaptureMock(
+            h=200, w=300, frame_count=600, fps=15.0)
+
+        with self.assertRaises(IOError):
+            yield self.clip.add_clip_data(mov_mock, async=True)
+
+    @tornado.testing.gen_test
+    def test_ingest_already_done(self):
+        self.clip.urls = ['myvideo.mp4']
+        yield self.clip.ingest('myvideo.mp4', self.video_id)
+
+        self.assertEquals(self.video_download_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_ingest_new_location(self):
+        self.clip.urls = ['myvideo.mp4']
+        with self.assertRaises(ValueError):
+            yield self.clip.ingest('new_loc.mp4', self.video_id)
+
+        self.assertEquals(self.video_download_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_ingest_normal(self):
+        self.clip = neondata.Clip(video_id=self.video_id,
+                                  ttype=neondata.ClipType.DEFAULT)
+        yield self.clip.ingest('myvideo.mp4', self.video_id)
+        
+        self.assertEquals(self.clip, neondata.Clip.get(self.clip.get_id()))
+        self.assertEquals(self.clip.start_frame, 0)
+        self.assertEquals(self.clip.end_frame, 2997)
+        self.assertEquals(self.clip.duration, 100.)
+
+        video = VideoMetadata.get(self.video_id)
+        self.assertEquals(self.video_id, self.clip.video_id)
+        self.assertEquals(video.non_job_clip_ids, [self.clip.get_id()])
+
+        # Check the thumb that represents the clip
+        thumb = ThumbnailMetadata.get(self.clip.thumbnail_id)
+        self.assertEquals(thumb.type, neondata.ThumbnailType.CLIP)
+        self.assertEquals(thumb.video_id, video.get_id())
+        self.assertTrue(thumb.enabled)
+        self.assertIsNotNone(thumb.get_id())
+        self.assertEquals(self.upload_image_mock.call_count, 2)
+
+        # Check the tag connection
+        self.assertEquals(neondata.TagClip.get(tag_id='tag1'),
+                          [self.clip.get_id()])
+
+    @tornado.testing.gen_test
+    def test_ingest_video_not_in_db(self):
+        with self.assertRaises(neondata.DBStateError):
+            yield self.clip.ingest('myvideo.mp4', 'unknown_video')
+
+    @tornado.testing.gen_test
+    def test_save_default_clip_none(self):
+        api_request = NeonApiRequest('job1', 'acct1', 'vid1',
+                                     title='title1',
+                                     default_clip=None)
+        api_request.save()
+
+        yield api_request.save_default_clip(None)
+
+        self.assertEquals(self.video_download_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_save_default_clip(self):
+        api_request = NeonApiRequest('job1', 'acct1', 'vid1',
+                                     title='title1',
+                                     default_clip='http://default_clip.mp4')
+        api_request.save()
+
+        clip = yield api_request.save_default_clip(self.cdn)
+
+        self.assertEquals(self.video_download_mock.call_count, 1)
+        self.assertEquals(clip.video_id, self.video_id)
+        self.assertEquals(clip.type, neondata.ClipType.DEFAULT)
+        self.assertIn('http://default_clip.mp4', clip.urls)
+        self.assertEquals(len(clip.urls), 2)
+        self.assertEquals(clip.rank, 0)
+
+        # Check that the video object knows about the clip
+        video_object = neondata.VideoMetadata.get(self.video_id)
+        self.assertEquals(video_object.non_job_clip_ids, [clip.get_id()])
+        self.assertEquals(neondata.TagClip.get(clip_id=clip.get_id()),
+                          [video_object.tag_id])
+
+        self.video_download_mock.reset_mock()
+
+        # Try downloading the default object again, but it's alreayd
+        # there, so it's not replicated
+        clip2 = yield api_request.save_default_clip(self.cdn)
+
+        self.assertFalse(self.video_download_mock.called)
+        self.assertEquals(clip, clip2)
+
+    @tornado.testing.gen_test
+    def test_save_default_clip_missing_video(self):
+        api_request = NeonApiRequest('job1', 'acct1', 'unknownvid',
+                                     title='title1',
+                                     default_clip='http://default_clip.mp4')
+        api_request.save()
+
+        with self.assertRaises(neondata.DBStateError):
+            clip = yield api_request.save_default_clip(self.cdn)
+        
+
+class TestVideoRendition(NeonDbTestCase, BasePGNormalObject):
+
+    @classmethod
+    def _get_object_type(cls):
+        return neondata.VideoRendition
+
+    def test_search(self):
+        neondata.VideoRendition(url='clip1.mp4', video_id='vid1',
+                                clip_id='clip1').save()
+        neondata.VideoRendition(url='clip2.mp4', video_id='vid1',
+                                clip_id='clip2').save()
+        neondata.VideoRendition(url='clip3.mp4', video_id='vid3',
+                                clip_id='clip3').save()
+
+        results = neondata.VideoRendition.search_for_objects(clip_id='clip2')
+        self.assertEquals(len(results), 1)
+        self.assertEquals(results[0].url, 'clip2.mp4')
+
+        results = neondata.VideoRendition.search_for_objects(
+            clip_id='unknown_clip')
+        self.assertEquals(len(results), 0)
+
+        results = neondata.VideoRendition.search_for_objects(video_id='vid1')
+        self.assertEquals(len(results), 2)
+        self.assertItemsEqual([x.url for x in results],
+                              ['clip2.mp4', 'clip1.mp4'])
+
+        results = neondata.VideoRendition.search_for_objects(
+            video_id='unknownvid')
+        self.assertEquals(len(results), 0)
 
 
 class TestStoredObject(test_utils.neontest.AsyncTestCase):
-
 
     def test_to_json_utf8(self):
 

@@ -65,6 +65,8 @@ define('max_log_file_size', default=104857600L, #100MB
 define('access_log_file', default=None, type=str,
        help='File to write the access logs to')
 
+_log = logging.getLogger(__name__)
+
 
 ### Typical configuration options that will be applied to multiple loggers ###
 define('loggly_base_url',
@@ -98,8 +100,13 @@ def currentframe():
 if hasattr(sys, '_getframe'): currentframe = lambda: sys._getframe(3)
 # done filching
 
+_added_configured_logger = False
 def AddConfiguredLogger():
     '''Adds a root logger defined by the config parameters.'''
+    global _added_configured_logger
+    if _added_configured_logger:
+        _log.warning('Already added logging')
+        return
     stdout_stream = None
     if options.do_stdout:
         stdout_stream = sys.stdout
@@ -127,6 +134,7 @@ def AddConfiguredLogger():
     logging.getLogger('tornado.access').propagate = False
 
     logging.captureWarnings(True)
+    _added_configured_logger = True
 
 def CreateLogger(name=None,
                  stream=None,

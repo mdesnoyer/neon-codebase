@@ -35,17 +35,19 @@ class Client(object):
                  username=None, 
                  password=None, 
                  access_token=None,
-                 refresh_token=None):
+                 refresh_token=None,
+                 skip_auth=None):
         '''Create the client that will connect with the given user/pass.'''
         self.username = username
         self.password = password
         
         self.access_token = access_token
         self.refresh_token = refresh_token
+        self.skip_auth = skip_auth
 
     @tornado.gen.coroutine
     def _authenticate(self):
-        while self.access_token is None:
+        while self.skip_auth is None and self.access_token is None:
             if self.refresh_token is None and \
                self.username is not None and \
                self.password is not None:

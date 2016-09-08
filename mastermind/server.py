@@ -1634,8 +1634,10 @@ class DirectivePublisher(threading.Thread):
             yield tornado.gen.sleep(options.serving_update_delay)
 
             # Now do the database updates
+            @tornado.gen.coroutine
             def _set_serving_url(x):
-                x.serving_url = x.get_serving_url(save=False)
+                x.serving_url = yield x.get_serving_url(save=False,
+                                                        async=True)
             yield neondata.VideoMetadata.modify(
                 video_id, 
                 _set_serving_url, 

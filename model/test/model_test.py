@@ -7,6 +7,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import cv2
+from model.local_video_searcher import LocalSearcher
 from model.features import GistGenerator
 from model.predictor import KFlannPredictor
 import unittest
@@ -48,7 +49,7 @@ class TestSaveModel(unittest.TestCase):
     def test_kflann_model(self):
         predictor = KFlannPredictor(GistGenerator(), seed=20472)
 
-        mod = model.Model(predictor, None)
+        mod = model.Model(predictor, vid_searcher=1)
 
         self.trainPredictor(predictor)
 
@@ -65,7 +66,7 @@ class TestSaveModel(unittest.TestCase):
     def test_kflann_untrained(self):
         predictor = KFlannPredictor(GistGenerator(), seed=20472)
 
-        mod = model.Model(predictor, None)
+        mod = model.Model(predictor, vid_searcher=1)
         model.save_model(mod, 'test.model')
         loaded = model.load_model('test.model')
 
