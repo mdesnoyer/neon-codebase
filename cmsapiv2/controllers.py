@@ -1479,6 +1479,13 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
         # Set self.images.
         yield self._load_images_from_request()
 
+        # Ensure that limits are not exceed by this request.
+        try:
+            yield self.check_account_limits(
+                self.get_limits_after_prepare(len(self.images))[HTTPVerbs.POST])
+        except KeyError:
+            pass
+
         # Build common objects for all thubmails.
         if self.video:
             video_id = self.video.get_id()
@@ -1715,6 +1722,27 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
+
+    @classmethod
+    def get_limits_after_prepare(self, image_ct):
+        '''Limit the post of images
+
+        This is after prepare because the image posts is incremented by
+        the number of images in the request.'''
+        post_list = [{ 'left_arg': 'image_posts',
+                       'right_arg': 'max_image_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_image_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_image_posts',
+                           'timer_resets': [ ('image_posts', 0) ]
+                       },
+                       'values_to_increase': [ ('image_posts', image_ct) ],
+                       'values_to_decrease': []
+        }]
+        return {
+                   HTTPVerbs.POST: post_list
+               }
 
     @classmethod
     def get_access_levels(self):
