@@ -520,11 +520,12 @@ class RegionScore(object):
         return cscore / wsum
 
     def _check_filters_passed(self, prop_dict):
-        if not self._filters:
-            return True
-        for cfilter in self._filters:
-            if not cfilter(prop_dict):
-                return False
+        try:
+            for cfilter in self._filters:
+                if not cfilter(prop_dict):
+                    return False
+        except AttributeError:
+            pass
         return True
 
     def _get_region_score(self, region_n):
