@@ -5807,6 +5807,7 @@ class Clip(StoredObject):
                                      duration=self.duration, 
                                      container=primary_result[3],
                                      codec=primary_result[4],
+                                     video_id=video.get_id(),
                                      clip_id=self.get_id())]
 
         if video_info is None:
@@ -5829,6 +5830,7 @@ class Clip(StoredObject):
                                     container=result[3],
                                     codec=result[4], 
                                     duration=self.duration,
+                                    video_id=video.get_id(),
                                     clip_id=self.get_id())
                 renditions.append(vr)
 
