@@ -410,7 +410,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                         refresh_time = timer_dict['refresh_time']
                         # check to see if we should refresh
                         if dateutil.parser.parse(refresh_time) <= \
-                           datetime.utcnow():
+                                datetime.utcnow():
                             request.account_limits = yield \
                                 request._reset_rate_limit(
                                       request.account_id,
@@ -594,7 +594,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     @tornado.gen.coroutine
     def _handle_limit_inc_dec(self):
 
-        import pdb; pdb.set_trace()
         if self.account_limits is None or not self.adjust_limits:
             return
         if self.get_status() not in [ResponseCode.HTTP_OK,
@@ -602,9 +601,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             return
 
 
-        defined_limits_dict = self.get_limits(*self.get_limit_args)
+        defined_limits_dict = self.get_limits()
         if defined_limits_dict is None:
-            defined_limits_dict = self.get_limits_after_prepare(*self.get_limit_args)
+            defined_limits_dict = self.get_limits_after_prepare()
             if defined_limits_dict is None: 
                 return  
 
@@ -623,9 +622,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 pass
  
         self.account_limits = yield neondata.AccountLimits.modify(
-           self.account_limits.key, 
-           _modify_limits, 
-           async=True) 
+            self.account_limits.key, 
+            _modify_limits, 
+            async=True) 
 
     def write_error(self, status_code, **kwargs):
         def get_exc_message(exception):

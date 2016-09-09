@@ -6365,7 +6365,8 @@ class AccountLimits(StoredObject):
                  seconds_to_refresh_email_posts=3600.0,
                  image_posts=0,
                  max_image_posts=1000,
-                 refresh_time_image_posts=datetime.datetime(2000,1,1)):
+                 refresh_time_image_posts=datetime.datetime(2000,1,1),
+                 seconds_to_refresh_image_posts=2592000.0):
  
         super(AccountLimits, self).__init__(account_id)
         
@@ -6386,6 +6387,7 @@ class AccountLimits(StoredObject):
 
         # amount of seconds to add to now() when resetting the timer 
         self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+        self.seconds_to_refresh_image_posts = seconds_to_refresh_image_posts
 
         # maximum video length we will process in seconds 
         self.max_video_size = max_video_size
@@ -6414,7 +6416,7 @@ class AccountLimits(StoredObject):
         self.max_video_posts = bp.max_video_posts
         self.max_image_posts = bp.max_image_posts
         self.seconds_to_refresh_video_posts = sref
-        self.seconds_to_refresh_video_posts = img_sref
+        self.seconds_to_refresh_image_posts = img_sref
         self.max_video_size = bp.max_video_size 
         self.refresh_time_video_posts = \
             (datetime.datetime.utcnow() +\
