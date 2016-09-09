@@ -133,7 +133,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.account = None
         self.account_limits = None
         self.adjust_limits = True
-        self.get_limits_args = []
         self.origin = self.request.headers.get("Origin") or\
             options.frontend_base_url
         self.executor = concurrent.futures.ThreadPoolExecutor(5)
