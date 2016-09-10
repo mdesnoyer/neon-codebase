@@ -114,6 +114,19 @@ CREATE TABLE cdnhostingmetadatalist (
 ALTER TABLE cdnhostingmetadatalist OWNER TO pgadmin;
 
 --
+-- Name: clipmetadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+--
+
+CREATE TABLE clip (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp,
+    updated_time timestamp DEFAULT current_timestamp
+);
+
+ALTER TABLE clip OWNER to pgadmin;
+ 
+--
 -- Name: experimentstrategy; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 
@@ -237,6 +250,17 @@ CREATE TABLE tag (
 
 ALTER TABLE tag OWNER TO pgadmin;
 --
+-- Name: tag_clip; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+--
+
+
+CREATE TABLE tag_clip (
+    tag_id character varying(128) NOT NULL,
+    clip_id character varying(32) NOT NULL
+);
+
+ALTER TABLE tag_clip OWNER TO pgadmin;
+--
 -- Name: tag_thumbnail; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 
@@ -348,6 +372,20 @@ CREATE TABLE videometadata (
 
 
 ALTER TABLE videometadata OWNER TO pgadmin;
+
+--
+-- Name: videorendition; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+--
+
+CREATE TABLE videorendition (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp,
+    updated_time timestamp DEFAULT current_timestamp
+);
+
+
+ALTER TABLE videorendition OWNER TO pgadmin;
 
 --
 -- Name: videostatus; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
@@ -523,6 +561,7 @@ CREATE UNIQUE INDEX abstractplatform_key ON abstractplatform USING btree (((_dat
 CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX brightcoveplayer_key ON brightcoveplayer USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX cdnhostingmetadatalist_key ON cdnhostingmetadatalist USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX clip_key ON clip USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX feature_key ON feature USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX accountlimits_key ON accountlimits USING btree (((_data ->> 'key'::text)));
@@ -534,12 +573,14 @@ CREATE UNIQUE INDEX processingstrategy_key ON processingstrategy USING btree (((
 CREATE UNIQUE INDEX request_key ON request USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX tag_key ON tag USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX tag_thumbnail_key ON tag_thumbnail (tag_id, thumbnail_id);
+CREATE UNIQUE INDEX tag_clip_key ON tag_clip (tag_id, clip_id);
 CREATE UNIQUE INDEX thumbnailmetadata_key ON thumbnailmetadata USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX thumbnailservingurls_key ON thumbnailservingurls USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX thumbnailstatus_key ON thumbnailstatus USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX trackeraccountidmapper_key ON trackeraccountidmapper USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX users_key ON users USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videometadata_key ON videometadata USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX videorendition_key ON videorendition USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videostatus_key ON videostatus USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX verification_key ON verification USING btree (((_data ->> 'key'::text)));
 
@@ -562,10 +603,13 @@ CREATE INDEX neonapirequest_video_id ON neonapirequest USING btree (((_data ->> 
 CREATE INDEX neonapirequest_video_title ON neonapirequest USING btree (((_data ->> 'video_title'::text)));
 CREATE INDEX tag_account_id_index ON tag ((_data ->> 'account_id'::text));
 CREATE INDEX thumbnail_id_tag_id ON tag_thumbnail (thumbnail_id, tag_id);
+CREATE INDEX clip_id_tag_id ON tag_clip (clip_id, tag_id);
 CREATE INDEX thumbnailmetadata_video_id ON thumbnailmetadata USING btree (((_data ->> 'video_id'::text)));
 CREATE INDEX videometadata_job_id ON videometadata USING btree (((_data ->> 'job_id'::text)));
 CREATE INDEX videometadata_integration_id ON videometadata USING btree (((_data ->> 'integration_id'::text)));
 CREATE INDEX videometadata_thumbnail_ids ON videometadata USING gin (((_data->'thumbnail_ids')));
+CREATE INDEX videorendition_clip_id ON videometadata USING btree (((_data ->> 'clip_id'::text)));
+CREATE INDEX videorendition_video_id ON videometadata USING btree (((_data ->> 'video_id'::text)));
 
 -- Text pattern ops indexes, for places we do a lot of text comps
 

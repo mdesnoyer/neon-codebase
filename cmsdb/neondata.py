@@ -29,6 +29,7 @@ import code
 from collections import OrderedDict, defaultdict
 import concurrent.futures
 import copy
+import cv2
 import cv.imhash_index
 import datetime
 import dateutil.parser
@@ -59,6 +60,7 @@ import cvutils.imageutils
 from cvutils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
+from utils import pycvutils
 from utils import statemon
 import utils.sync
 import utils.s3
@@ -124,6 +126,7 @@ statemon.define('postgres_pools', int)
 statemon.define('postgres_pool_full', int)
 
 class ThumbDownloadError(IOError):pass
+class VideoDownloadError(IOError):pass
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
 
@@ -651,11 +654,23 @@ class ThumbnailType(object):
     FILTERED    = "filtered"
     DEFAULT     = "default" #sent via api request
     CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
+    CLIP        = "clip" # from the front of a clip
+
+class ClipType(object):
+    '''Clip type enumeration.'''
+    NEON        = "neon"
+    DEFAULT     = "default" #sent via api request
+    CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
 
 class TagType(object):
     '''All valid Tag types'''
     VIDEO = 'video'
     COLLECTION = 'col'
+
+class VideoRenditionContainerType(object):
+    '''Valid video rendition types'''
+    MP4 = 'mp4'
+    GIF = 'gif'
 
 class ExperimentState:
     '''A class that acts like an enum for the state of the experiment.'''
@@ -708,6 +723,13 @@ class AccessLevels(object):
     EVERYTHING = ALL_NORMAL_RIGHTS |\
                  ACCOUNT_EDITOR | INTERNAL_ONLY_USER |\
                  GLOBAL_ADMIN
+
+class ResultType(object):
+    THUMBNAILS = 'thumbnails'
+    CLIPS = 'clips'
+
+    # Helpers 
+    ARRAY_OF_TYPES = [ THUMBNAILS, CLIPS ]
 
 class PythonNaNStrings(object): 
     INF = 'Infinite' 
@@ -1735,11 +1757,12 @@ class Searchable(object):
         raise NotImplementedError('Add list of valid args in subclass')
 
     @staticmethod
-    def _get_where_part(key, args):
+    def _get_where_part(key, args={}):
         '''Support custom "query" searches
 
-        This funcion should return a string that implements a custom query in the where
-        for whichever data fields make sense for your subclass.
+        This funcion should return a string that implements a custom
+        query in the where for whichever data fields make sense for
+        your subclass.
 
         For example, Tag having _name uses:
 
@@ -2407,9 +2430,8 @@ class MappingObject(object):
         ):
             return
         raise ValueError(
-            'Called with long list, int or object left:%s right:%s',
-            values0,
-            values1)
+            'Called with long list, int or object left:%s right:%s' %
+            (values0, values1))
 
     @classmethod
     def _validate_keys(cls, keys):
@@ -2536,6 +2558,17 @@ class TagThumbnail(MappingObject):
     def _get_keys():
         return ['tag_id', 'thumbnail_id']
 
+class TagClip(MappingObject):
+    '''TagClip represents an association of a tag to a clip.'''
+
+    @staticmethod
+    def _get_table():
+        return 'tag_clip'
+
+    @staticmethod
+    def _get_keys():
+        return ['tag_id', 'clip_id']
+
 
 class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
@@ -2564,13 +2597,17 @@ class Tag(Searchable, StoredObject):
         '''Overrides parent to also delete associations of tag.'''
 
         # Delete associations.
-        thumbnail_ids = yield TagThumbnail.get(
-            tag_id=key,
-            async=True)
+        thumbnail_ids = yield TagThumbnail.get(tag_id=key, async=True)
         if thumbnail_ids:
             yield TagThumbnail.delete_many(
                 tag_id=key,
                 thumbnail_id=thumbnail_ids,
+                async=True)
+        clip_ids = yield TagClip.get(tag_id=key, async=True)
+        if clip_ids:
+            yield TagClip.delete_many(
+                tag_id=key,
+                clip_id=clip_ids,
                 async=True)
         # Delete tag itself.
         yield super(Tag, cls).delete(key, async=True)
@@ -2599,23 +2636,7 @@ class Tag(Searchable, StoredObject):
 
     def get_account_id(self):
         return self.account_id
-
-
-class Clip(StoredObject):
-    '''Stub for gif clips'''
-
-    def __init__(self, clip_id, account_id=None, share_token=None):
-        super(Clip, self).__init__(clip_id)
-        self.account_id = account_id
-        self.share_token = share_token
-
-    @staticmethod
-    def _baseclass_name():
-        return Tag.__name__
-
-    def get_account_id(self):
-        return self.account_id
-
+         
 
 class AbstractHashGenerator(object):
     '''Abstract Hash Generator'''
@@ -2763,6 +2784,11 @@ class InternalVideoID(object):
 
         vid = "_".join(internal_vid.split('_')[1:])
         return vid
+
+    @staticmethod
+    def get_account_id(internal_vid):
+        '''Gets the acocunt id from the video id.'''
+        return internal_vid.rpartition('_')[0]
 
 class TrackerAccountID(object):
     ''' Tracker Account ID generation '''
@@ -3361,11 +3387,16 @@ class ProcessingStrategy(DefaultedStoredObject):
     more elaborate documentation.
     '''
     def __init__(self, account_id, processing_time_ratio=2.0,
+                 clip_processing_time_ratio=1.2,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
                  filter_text=True, text_filter_params=None, 
-                 filter_text_thresh=0.04, m_thumbs=6):
+                 filter_text_thresh=0.04, m_thumbs=6,
+                 clip_cross_scene_boundary=True,
+                 min_scene_piece=15, scene_threshold=30.0,
+                 custom_predictor_weight=0.5,
+                 custom_predictor=None):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -3374,6 +3405,7 @@ class ProcessingStrategy(DefaultedStoredObject):
         # max_processing_time = (length of video in seconds * 
         #                        processing_time_ratio)
         self.processing_time_ratio = processing_time_ratio
+        self.clip_processing_time_ratio = clip_processing_time_ratio
 
         # (this should rarely need to be changed)
         # Local search width is the size of the local search regions. If the
@@ -3496,6 +3528,26 @@ class ProcessingStrategy(DefaultedStoredObject):
         # the entire image. If the ratio is greater than this, and
         # filter_text is true, the frame will be filtered.
         self.filter_text_thresh = filter_text_thresh
+
+        # Can a clip cross a scene boundary?
+        self.clip_cross_scene_boundary = clip_cross_scene_boundary
+
+        # Minimum number of frames from a scene to grab when making clips
+        self.min_scene_piece = min_scene_piece
+
+        # Threshold for scene detection
+        self.scene_threshold = scene_threshold
+
+        # Name of the custom predictor. This must be a file in the
+        # model_data directory. It must be an object that has a
+        # predict() function, which, if given a valence feature
+        # vector, predicts some kind of score. In other words, like a
+        # scikit-learn object.
+        self.custom_predictor = custom_predictor
+
+        # The weight to assign to a custom predictor relative to the
+        # other features
+        self.custom_predictor_weight = custom_predictor_weight
 
     @classmethod
     def _baseclass_name(cls):
@@ -3672,6 +3724,7 @@ class CDNHostingMetadataList(DefaultedStoredObject):
         '''
         return CDNHostingMetadataList.__name__
 
+
 class CDNHostingMetadata(UnsaveableStoredObject):
     '''
     Specify how to host the the images with one CDN platform.
@@ -3689,7 +3742,8 @@ class CDNHostingMetadata(UnsaveableStoredObject):
                  source_crop=None,
                  crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True):
+                 crop_with_text_detection=True,
+                 video_rendition_formats=None):
 
         self.key = key
 
@@ -3760,8 +3814,16 @@ class CDNHostingMetadata(UnsaveableStoredObject):
             [875, 500],
             [1280, 720]]
 
-        # the created and updated on these objects
-        # self.created = self.updated = str(datetime.datetime.utcnow())
+        # @TODO configure clip render.
+        # List of 4-element list [width, height, container_type, codec].
+        # If height and width are None, no resizing is done
+        self.video_rendition_formats = video_rendition_formats or [
+            [160, 90, 'mp4', 'libx264'],
+            [320, 180, 'mp4', 'libx264'],
+            [None, 480, 'mp4', 'libx264'],
+            [500, None, 'gif', None],
+            [425, None, 'gif', None]]
+            
 
     @classmethod
     def _create(cls, key, obj_dict):
@@ -3770,7 +3832,7 @@ class CDNHostingMetadata(UnsaveableStoredObject):
         # Normalize the CDN prefixes
         obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
                                obj.cdn_prefixes)
-        
+
         return obj
 
     @staticmethod
@@ -3789,10 +3851,21 @@ class CDNHostingMetadata(UnsaveableStoredObject):
         prefix_split[2] = path_split[1]
       scheme_added = urlparse.urlunparse(prefix_split)
       return scheme_added.strip('/')
-      
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def get_by_video(video):
+        cdn_key = CDNHostingMetadataList.create_key(
+            video.get_account_id(),
+            video.integration_id)
+        cdn_metadata = yield CDNHostingMetadataList.get(cdn_key, async=True)
+        # Default to hosting on the Neon CDN if we don't know about it
+        raise tornado.gen.Return(cdn_metadata or [NeonCDNHostingMetadata()])
+
+
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
-    If the images are to be uploaded to S3 bucket use this formatter  
+    If the images are to be uploaded to S3 bucket use this formatter
 
     '''
     def __init__(self, key=None, access_key=None, secret_key=None, 
@@ -3801,14 +3874,15 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
                  make_tid_folders=False, rendition_sizes=None, policy=None,
                  source_crop=None, crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True):
+                 crop_with_text_detection=True, video_rendition_formats=None):
         '''
         Create the object
         '''
         super(S3CDNHostingMetadata, self).__init__(
             key, cdn_prefixes, resize, update_serving_urls, rendition_sizes, 
             source_crop, crop_with_saliency, crop_with_face_detection,
-            crop_with_text_detection)
+            crop_with_text_detection,
+            video_rendition_formats=video_rendition_formats)
         self.access_key = access_key # S3 access key
         self.secret_key = secret_key # S3 secret access key
         self.bucket_name = bucket_name # S3 bucket to host in
@@ -3842,7 +3916,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
                  rendition_sizes=None,
                  source_crop=None, crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True):
+                 crop_with_text_detection=True,
+                 video_rendition_formats=None):
         super(NeonCDNHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -3853,6 +3928,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
             rendition_sizes=rendition_sizes,
+            video_rendition_formats=video_rendition_formats,
             policy='public-read',
             source_crop=source_crop,
             crop_with_saliency=crop_with_saliency,
@@ -3884,7 +3960,8 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             source_crop=source_crop,
             crop_with_saliency=crop_with_saliency,
             crop_with_face_detection=crop_with_face_detection,
-            crop_with_text_detection=crop_with_text_detection)
+            crop_with_text_detection=crop_with_text_detection,
+            video_rendition_formats=[(None, None, 'mp4', 'libx264')])
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -4846,7 +4923,11 @@ class NeonApiRequest(NamespacedStoredObject):
             callback_state=CallbackState.NOT_SENT, 
             callback_email=None,
             age=None,
-            gender=None):
+            gender=None, 
+            result_type=None, 
+            n_clips=None,
+            clip_length=None,
+            default_clip=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -4893,6 +4974,19 @@ class NeonApiRequest(NamespacedStoredObject):
         # Demographic parameters for the video processing
         self.age = age
         self.gender= gender
+
+        # what result type (currently tnails or clips) we would like 
+        self.result_type = result_type 
+
+        # number of clips that would be desired if clips are chosen 
+        self.n_clips = n_clips
+
+        # desired length of clip in seconds
+        self.clip_length = clip_length
+
+        # url of the default clip
+        self.default_clip = default_clip
+        
 
     @classmethod
     def key2id(cls, key):
@@ -5104,9 +5198,55 @@ class NeonApiRequest(NamespacedStoredObject):
                                                cdn_metadata,
                                                save_objects=True,
                                                async=True)
-        raise tornado.gen.Return(thumb) 
-        # Push a thumbnail serving directive to Kinesis so that it can
-        # be served quickly.
+        raise tornado.gen.Return(thumb)
+
+    @tornado.gen.coroutine
+    def save_default_clip(self, cdn_metadata=None):
+        '''Save the default clip by attaching it to a video. The video
+        metadata for this request must be in the database already.
+
+        Inputs:
+        cdn_metadata - If known, the metadata to save to the cdn.
+                       Otherwise it will be looked up.
+        '''
+        if not self.default_clip:
+            # No default clip to ingest
+            return
+
+        # Check to see if there is already a default clip that the system
+        # knows about (and thus was already uploaded)
+        video = yield tornado.gen.Task(
+            VideoMetadata.get,
+            InternalVideoID.generate(self.api_key,
+                                     self.video_id))
+        if video is None:
+            msg = ('VideoMetadata for job %s is missing. '
+                   'Cannot add clip' % self.job_id)
+            _log.error(msg)
+            raise DBStateError(msg)
+
+        known_clips = yield tornado.gen.Task(
+            Clip.get_many,
+            video.non_job_clip_ids)
+        min_rank = 1
+        for clip in known_clips:
+            if clip.type == ClipType.DEFAULT:
+                if self.default_clip in clip.urls:
+                    # The exact thumbnail is already there
+                    raise tornado.gen.Return(clip)
+            
+                if clip.rank < min_rank:
+                    min_rank = clip.rank
+        cur_rank = min_rank - 1
+
+        # Ingest the new clip
+        clip = Clip(ttype=ClipType.DEFAULT,
+                    enabled=True,
+                    rank=cur_rank)
+        yield clip.ingest(self.default_clip,
+                          video.get_id(), 
+                          cdn_metadata=cdn_metadata)
+        raise tornado.gen.Return(clip)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -5582,6 +5722,254 @@ class ThumbnailURLMapper(NamespacedStoredObject):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
+class Clip(StoredObject): 
+    '''
+    Class schema for Clip information.
+
+    Keyed by clip_id
+    '''
+    def __init__(self, clip_id=None, video_id=None, thumbnail_id=None, 
+                 urls=None, ttype=None, rank=0, model_version=None, 
+                 enabled=True, score=None, start_frame=None, end_frame=None,
+                 duration=None):
+        clip_id = clip_id or uuid.uuid4().hex
+        super(Clip,self).__init__(clip_id)
+
+        # Internal video id this clip is associated with
+        self.video_id = video_id
+        # url for this clip
+        self.urls = urls or []
+        # The thumbnail that can be used to represent this clip
+        self.thumbnail_id = thumbnail_id
+        # the type of this clip. Uses ClipType
+        self.type = ttype
+        # where this clip ranks amongst the other clips of this type
+        self.rank = rank or 0
+        # is this clip enabled for mastermind A/B testing
+        self.enabled = enabled
+        # what version of the model generated this clip
+        self.model_version = model_version
+        # what frame this clip starts at
+        self.start_frame = start_frame
+        # what frame this clip ends at
+        self.end_frame = end_frame
+        # duration in seconds
+        self.duration = duration
+
+        # The score of this clip. Higher is better. Note that this
+        # will be a score combined of a raw valence score plus some
+        # other stuff (like motion analysis)
+        self.score = score
+
+    @property
+    def account_id(self):
+        return InternalVideoID.get_account_id(self.video_id)
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.'''
+        return Clip.__name__
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def add_clip_data(self, video, video_info=None, cdn_metadata=None):
+        '''Put the clip to CDN. 
+
+        Does not save the Clip object to the database. Does save
+        the VideoRendition objects for the new cdn files.
+
+        Inputs- video a cv2 VideoCapture
+            -video_info a VideoMetadata or None
+            -cdn_metadata a CDNHostingMetadata or None
+
+        '''
+        self.end_frame = self.end_frame or video.get(cv2.CAP_PROP_FRAME_COUNT)
+        self.start_frame = self.start_frame or 0
+        primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
+            PrimaryNeonHostingMetadata())
+        primary_result = yield primary_hoster.upload_video(
+            video,
+            self,
+            async=True)
+        if len(primary_result) == 1:
+            primary_result = primary_result[0]
+            primary_url = primary_result[0]
+            self.urls.insert(0, primary_url)
+        else:
+            raise IOError('Primary file was not uploaded %s' % self.key)
+
+        # Keep primary rendition object.
+        fps = float(video.get(cv2.CAP_PROP_FPS)) or 30.0
+        self.duration = (self.end_frame - self.start_frame) / fps
+        if video_info is None:
+            video_info = yield VideoMetadata.get(self.video_id, async=True)
+            if video_info is None:
+                raise DBStateError('Video %s is not in the db' % self.video_id)
+        renditions = [VideoRendition(url=primary_url,
+                                     width=primary_result[1], 
+                                     height=primary_result[2],
+                                     duration=self.duration, 
+                                     container=primary_result[3],
+                                     codec=primary_result[4],
+                                     video_id=video_info.get_id(),
+                                     clip_id=self.get_id())]
+
+        if cdn_metadata is None:
+            cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
+
+        hosts = [cmsdb.cdnhosting.CDNHosting.create(c) for c in cdn_metadata]
+        for host in hosts:
+            results = yield host.upload_video(video, self,
+                                              primary_url, async=True)
+
+            # Results is a list of [url, width, height, container, codec]s.
+            for result in results:
+                vr = VideoRendition(url=result[0], 
+                                    width=result[1],
+                                    height=result[2], 
+                                    container=result[3],
+                                    codec=result[4], 
+                                    duration=self.duration,
+                                    video_id=video_info.get_id(),
+                                    clip_id=self.get_id())
+                renditions.append(vr)
+
+        yield VideoRendition.save_all(renditions, async=True)
+
+
+    @tornado.gen.coroutine
+    def ingest(self, url, video_id, cdn_metadata=None):
+        '''Ingests a clip from a given url.
+
+        Also associates it with a VideoMetadata object.
+
+        Saves the Clip object to the database
+
+        The video is downloaded locally and any renditions are created
+        as necessary.
+
+        Inputs:
+        url - url of the clip to download
+        video_id - Internal video id
+        cdn_metadata - If known, the metadata to save to the cdn.
+                       Otherwise it will be looked up.
+        '''
+        if len(self.urls) > 0:
+            if url not in self.urls:
+                raise ValueError(
+                    'This video was already ingested from a different url.')
+            return
+        self.urls.append(url)
+        self.video_id = video_id
+
+        video_meta = None
+        if cdn_metadata is None:
+            video_meta = yield VideoMetadata.get(video_id, async=True)
+            if video_meta is None:
+                raise DBStateError('Video %s was not in the database' %
+                                   video_id)
+
+        downloader = utils.video_download.VideoDownloader(url)
+        try:
+            yield downloader.download_video_file()
+
+            # Upload the clip to our hosting location
+            mov = cv2.VideoCapture(downloader.get_local_filename())
+            yield self.add_clip_data(mov, video_info=video_meta,
+                                     cdn_metadata=cdn_metadata,
+                                     async=True)
+
+            thumb_image = pycvutils.extract_frame(mov, 0)
+        finally:
+            downloader.close()
+
+        # Create the thumbnail object for the thumb that represents
+        # this clip
+        thumb = ThumbnailMetadata(
+            None,
+            self.video_id,
+            ttype=ThumbnailType.CLIP,
+            enabled=True)
+        yield thumb.add_image_data(pycvutils.to_pil(thumb_image), video_meta,
+                                   cdn_metadata, async=True)
+        self.thumbnail_id = thumb.get_id()
+
+        success = yield thumb.save(async=True)
+        if not success:
+            raise DBConnectionError('Could not save thumbnail')
+
+        success = yield self.save(async=True)
+        if not success:
+            raise DBConnectionError('Could not save clip')
+
+        # Add the clip to the video object
+        def _add_clip(video_obj):
+            video_obj.non_job_clip_ids.append(self.get_id())
+        video_meta = yield VideoMetadata.modify(video_id, 
+                                                _add_clip, 
+                                                async=True)
+        if video_meta is None:
+            raise DBStateError('Video %s was not in the database' %
+                               video_id)
+
+        # Finally tag the clip to the video
+        ct = yield TagClip.save(
+            tag_id=video_meta.tag_id,
+            clip_id=self.get_id(),
+            async=True)
+
+
+class VideoRendition(StoredObject, Searchable):
+    '''
+    Class schema for a rendition of a video
+    '''
+
+    # video_id is the full video id: e.g., accountid0_externalvidid0.
+    FNAME_FORMAT = 'neonvr{video_id}_{clip_id}_w{width}_h{height}.{ext}'
+
+    def __init__(self, rendition_id=None, url=None, width=None,
+                 height=None, duration=None, codec=None, container=None,
+                 encoding_rate=None, clip_id=None, video_id=None):
+        rendition_id = rendition_id or uuid.uuid4().hex
+        super(VideoRendition, self).__init__(rendition_id)
+
+        # Url where the video is available
+        self.url = url
+
+        # Size of the rendition
+        self.width = width
+        self.height = height
+
+        # Duration of the video in seconds
+        self.duration = duration
+
+        # Codec used to encode the video
+        self.codec = codec
+
+        # Container type for the video (e.g. 'mp4', 'gif')
+        self.container = container
+
+        # Average encoding rate in kpbs
+        self.encoding_rate = encoding_rate
+
+        # This could be a rendition of either a Clip or a VideoMetadata video
+        self.clip_id = clip_id
+        self.video_id = video_id # Internal video id
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return VideoRendition.__name__
+
+    @staticmethod
+    def _get_search_arguments():
+        return ['clip_id', 'video_id']
+
+    @staticmethod
+    def _get_where_part(key, args={}):
+        return ''
+    
 class ThumbnailMetadata(StoredObject):
     '''
     Class schema for Thumbnail information.
@@ -5718,30 +6106,31 @@ class ThumbnailMetadata(StoredObject):
                        images. If this is None, it is looked up, which is
                        slow. If a source_crop is requested, the image is also
                        cropped here.'''
+
         image = PILImageUtils.convert_to_rgb(image)
+
         # Update the image metadata
         self.width = image.size[0]
         self.height = image.size[1]
         self.update_phash(image)
 
-        # Convert the image to JPG
+        # Save the image as jpeg, then generate the key from its hash.
         fmt = 'jpeg'
         filestream = StringIO()
         image.save(filestream, fmt, quality=90)
         filestream.seek(0)
         imgdata = filestream.read()
-
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
         # Host the primary copy of the image
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload(
-            image, self.key, async=True,
+            image,
+            self.key,
+            async=True,
             do_source_crop=self.do_source_crop,
             do_smart_crop=self.do_smart_crop)
-
-        # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
         s3_url = None
@@ -5750,19 +6139,10 @@ class ThumbnailMetadata(StoredObject):
             self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
+        if video_info is None:
+            video_info = yield VideoMetadata.get(self.video_id, async=True)
         if cdn_metadata is None:
-            # Lookup the cdn metadata
-            if video_info is None:
-                video_info = yield tornado.gen.Task(VideoMetadata.get,
-                                                    self.video_id)
-
-            cdn_key = CDNHostingMetadataList.create_key(
-                video_info.get_account_id(), video_info.integration_id)
-            cdn_metadata = yield tornado.gen.Task(CDNHostingMetadataList.get,
-                                                  cdn_key)
-            if cdn_metadata is None:
-                # Default to hosting on the Neon CDN if we don't know about it
-                cdn_metadata = [NeonCDNHostingMetadata()]
+            cdn_metadata = yield CDNHostingMetadata.get_by_video(video_info)
 
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
         yield [x.upload(image, self.key, s3_url, async=True,
@@ -6081,10 +6461,12 @@ class VideoJobThumbnailList(UnsaveableStoredObject):
     '''Represents the list of thumbnails from a video processing job.'''
     def __init__(self, age=None, gender=None, thumbnail_ids=None,
                  bad_thumbnail_ids=None,
-                 model_version=None):
+                 model_version=None,
+                 clip_ids=None):
         self.model_version = model_version
         self.thumbnail_ids = thumbnail_ids or []
         self.bad_thumbnail_ids = bad_thumbnail_ids or []
+        self.clip_ids = clip_ids or []
 
         # WARNING: If anything is added here, make sure to update
         # _merge_video_data in video_processor/client.py
@@ -6109,6 +6491,7 @@ class VideoMetadata(Searchable, StoredObject):
                  serving_enabled=True, custom_data=None,
                  publish_date=None, hidden=None, share_token=None,
                  job_results=None, non_job_thumb_ids=None,
+                 non_job_clip_ids=None, 
                  bad_tids=None, tag_id=None):
         super(VideoMetadata, self).__init__(video_id)
         # DEPRECATED in favour of job_results and non_job_thumb_ids. Will
@@ -6123,6 +6506,10 @@ class VideoMetadata(Searchable, StoredObject):
         # A list of thumbnail ids that are not associated with a
         # specific run of the job (e.g. default thumb)
         self.non_job_thumb_ids = non_job_thumb_ids or []
+
+        # A list of clip ids that are not associated with a specific
+        # run of the job (e.g. default clip)
+        self.non_job_clip_ids = non_job_clip_ids or []
 
         self.url = video_url
         self.duration = duration # in seconds
@@ -6159,6 +6546,14 @@ class VideoMetadata(Searchable, StoredObject):
 
         # Tag ids associate lists of thumbnails to the video.
         self.tag_id = tag_id
+
+    @property
+    def clip_ids(self):
+        '''Returns a unique list of clip ids associated with this video.'''
+        return reduce(
+            lambda x,y: x | y,
+            [set(x.clip_ids) for x in self.job_results],
+            set())
 
     @staticmethod
     def _get_search_arguments():
@@ -6254,8 +6649,8 @@ class VideoMetadata(Searchable, StoredObject):
         # to the two objects are atomic. For now, put in the thumbnail
         # data and then update the video metadata.
         if save_objects:
-            sucess = yield thumb.save(async=True)
-            if not sucess:
+            success = yield thumb.save(async=True)
+            if not success:
                 raise IOError("Could not save thumbnail")
 
             updated_video = yield self.modify(
@@ -6274,10 +6669,11 @@ class VideoMetadata(Searchable, StoredObject):
 
             # Tag the thumbnail with the video's tag.
             if self.tag_id:
-                yield TagThumbnail.save(
+                success = yield TagThumbnail.save(
                     tag_id=self.tag_id,
                     thumbnail_id=thumb.get_id(),
                     async=True)
+                    
         else:
             _add_thumb_to_video_object(self)
 
@@ -6549,7 +6945,7 @@ class VideoCallbackResponse(AbstractJsonResponse):
                  s_url=None, err=None,
                  processing_state=RequestState.UNKNOWN,
                  experiment_state=ExperimentState.UNKNOWN,
-                 winner_thumbnail=None):
+                 winner_thumbnail=None,  clip_ids=None):
         self.job_id = jid
         self.video_id = vid
         self.framenos = fnos if fnos is not None else []
@@ -6560,6 +6956,7 @@ class VideoCallbackResponse(AbstractJsonResponse):
         self.set_processing_state(processing_state)
         self.experiment_state = experiment_state
         self.winner_thumbnail = winner_thumbnail
+        self.clip_ids = clip_ids or []
 
     def set_processing_state(self, internal_state):
         self.processing_state = ExternalRequestState.from_internal_state(

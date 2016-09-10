@@ -1295,7 +1295,6 @@ class LocalSearcher(object):
         # sampling vs. searching.
         # the number of workers to use -- set it to the maximum number of
         # requests the predictor is allowed to issue.
-        self.num_workers = self.predictor.concurrency
         self.done_sampling = False
         self.done_searching = False
 
@@ -1446,7 +1445,7 @@ class LocalSearcher(object):
         # start up the threads
         self._inq = Queue(maxsize=2)
         threads = [threading.Thread(target=self._worker, args=(x,))
-                   for x in range(self.num_workers)]
+                   for x in range(self.predictor.concurrency)]
         for t in threads:
             t.start()
         # instantiate the statistics objects required
@@ -1655,7 +1654,7 @@ class LocalSearcher(object):
                 except Exception, e:
                     start = args[0]
                     stop = args[2]
-                    _log.error('Problem local searching %i <---> %i: %s',
+                    _log.exception('Problem local searching %i <---> %i: %s',
                         start, stop, e.message)
                     statemon.state.increment('searching_problem')
 

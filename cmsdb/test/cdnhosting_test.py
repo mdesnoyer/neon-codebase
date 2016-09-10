@@ -12,6 +12,7 @@ import boto.exception
 from cStringIO import StringIO
 import cmsdb.cdnhosting
 from cmsdb import neondata
+import cv2
 from cvutils.imageutils import PILImageUtils
 from cvutils import smartcrop
 import json
@@ -21,8 +22,10 @@ import numpy as np
 import PIL
 import random
 import re
+import tempfile
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
+import test_utils.opencv
 import test_utils.postgresql
 import tornado.testing
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
@@ -180,9 +183,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         urls = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
             urls[0][0],
-            "http://s3.amazonaws.com/hosting-bucket/acct1/vid1/tid1.jpg")
+            "http://s3.amazonaws.com/hosting-bucket/acct1/vid1/tid1/w640_h480.jpg")
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
-        s3_key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3_key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
         self.assertEqual(s3_key.policy, 'public-read')
@@ -202,9 +205,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         urls = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
         self.assertEqual(
             urls[0][0],
-            "http://s3.amazonaws.com/hosting-bucket/my/folder/path/acct1/vid1/tid1.jpg")
+            "http://s3.amazonaws.com/hosting-bucket/my/folder/path/acct1/vid1/tid1/w640_h480.jpg")
         self.bucket = self.s3conn.get_bucket('hosting-bucket')
-        s3_key = self.bucket.get_key('my/folder/path/acct1/vid1/tid1.jpg')
+        s3_key = self.bucket.get_key('my/folder/path/acct1/vid1/tid1/w640_h480.jpg')
         self.assertIsNotNone(s3_key)
         self.assertEqual(s3_key.content_type, 'image/jpeg')
         self.assertEqual(s3_key.policy, 'public-read')
@@ -217,7 +220,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         # Do initial upload
         url = yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
-        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         orig_etag = s3key.etag
 
         # Now upload, but don't overwrite
@@ -226,7 +229,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                             async=True)
 
         # Check the file contents
-        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         self.assertIsNotNone(s3key)
         self.assertEquals(s3key.etag, orig_etag)
 
@@ -234,7 +237,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         yield hoster.upload(new_image, 'acct1_vid1_tid1', async=True)
             
         buf = StringIO()
-        s3key = self.bucket.get_key('acct1/vid1/tid1.jpg')
+        s3key = self.bucket.get_key('acct1/vid1/tid1/w640_h480.jpg')
         self.assertNotEquals(s3key.etag, orig_etag)
             
 
@@ -242,7 +245,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     def test_permissions_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().get_key.side_effect = [None]
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3PermissionsError('Permission error')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3PermissionsError('Permission error')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
@@ -258,7 +261,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     def test_create_error_uploading_image(self):
         self.s3conn.get_bucket = MagicMock()
         self.s3conn.get_bucket().get_key.side_effect = [None]
-        self.s3conn.get_bucket().new_key().set_contents_from_string.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
+        self.s3conn.get_bucket().new_key().set_contents_from_file.side_effect = [boto.exception.S3CreateError('oops', 'seriously, oops')]
         
         metadata = neondata.S3CDNHostingMetadata(None,
             'access_key', 'secret_key',
@@ -334,6 +337,12 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                 yield cmsdb.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
+class TestCloudinaryHosting(test_utils.neontest.AsyncTestCase):
+
+    def setUp(self):
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestCloudinaryHosting, self).setUp()
+
     @patch('cmsdb.cdnhosting.utils.http.send_request')
     def test_cloudinary_hosting(self, mock_http):
         mock_http = self._future_wrap_mock(mock_http)
@@ -350,7 +359,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mock_http.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 200,buffer=StringIO(mock_response))
-        url = cd.upload(None, tid, url)
+        url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 2)
         self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
         self.assertEqual(mock_http._mock_call_args_list[0][0][0].url,
@@ -371,9 +380,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
           lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 502, buffer=StringIO("gateway error"))
         with self.assertLogExists(logging.ERROR,
-                'Failed to upload image to cloudinary for tid %s' % tid):
+                'Failed to upload file to cloudinary .*%s' % tid):
             with self.assertRaises(IOError):
-                url = cd.upload(None, tid, url)
+                url = cd.upload(self.image, tid, url)
         self.assertEquals(mock_http.call_count, 1)
 
 
@@ -694,7 +703,7 @@ class TestAkamaiHosting(CDNTestBase):
         # check fails, then the python random module had changed
         self.assertEquals(
             base_urls[0],
-            'http://cdn1.akamai.com/customeraccountnamelabel/G/l/l')
+            'http://cdn1.akamai.com/customeraccountnamelabel/i/E/O')
 
     @tornado.testing.gen_test
     def test_with_folder_prefix(self):
@@ -801,7 +810,7 @@ class TestAkamaiHosting(CDNTestBase):
         tid = 'akamai_vid1_tid2'
         
         with self.assertLogExists(logging.ERROR, 
-                'Error uploading image to akamai for tid %s' % tid):
+                'Error uploading file to akamai.*%s' % tid):
             with self.assertRaises(IOError):
                 yield self.hoster.upload(self.image, tid, async=True)
         
@@ -834,6 +843,175 @@ class TestAkamaiHosting(CDNTestBase):
             
         # Make sure there are no serving urls
         self.assertIsNone(neondata.ThumbnailServingURLs.get(tid))
+
+class TestVideoUploading(test_utils.neontest.AsyncTestCase):
+    ''' 
+    Test the ability to host images on an aws cdn (aka S3)
+    '''
+    def setUp(self):
+        self.s3conn = boto_mock.MockConnection()
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
+        self.mock_conn = self.s3_patcher.start()
+        self.mock_conn.return_value = self.s3conn
+        self.s3conn.create_bucket('hosting-bucket')
+        self.bucket = self.s3conn.get_bucket('hosting-bucket')
+
+        # Mock out the cdn url check
+        self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
+        self.mock_cdn_url = self._future_wrap_mock(
+            self.cdn_check_patcher.start().send_request)
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+
+        self.mov = test_utils.opencv.VideoCaptureMock(frame_count=60, fps=30.0)
+        self.account_id = 'aid0'
+        self.video_id = 'aid0_extvid0'
+        self.clip = neondata.Clip(
+            'cid0',
+            video_id=self.video_id,
+            start_frame=15,
+            end_frame=20,)
+        self.key_name_format = 'folder1/neonvr{}_{}_w%i_h%i.mp4'.format(
+            self.video_id,
+            self.clip.get_id())
+        
+        random.seed(1654984)
+
+        self.image = PILImageUtils.create_random_image(480, 640)
+        super(TestVideoUploading, self).setUp()
+
+    def tearDown(self):
+        self.s3_patcher.stop()
+        self.cdn_check_patcher.stop()
+        super(TestVideoUploading, self).tearDown()
+
+    def _get_mp4_hoster(self, **kwargs):
+
+        # Merge kwargs over a default set of args.
+        init_args = {
+            'key':None,
+            'access_key':'access_key',
+            'secret_key':'secret_key',
+            'bucket_name':'hosting-bucket',
+            'cdn_prefixes':['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder_prefix':'folder1',
+            'resize':False,
+            'update_serving_urls':False,
+            'do_salt':False,
+            'make_tid_folders':False,
+            'video_rendition_formats':[(None, None, 'mp4', None),
+                                     (400, 304, 'mp4', 'libx264')]}
+        init_args.update(kwargs)
+        metadata = neondata.S3CDNHostingMetadata(**init_args)
+
+        # Return a hosting created from the merged metadata.
+        return cmsdb.cdnhosting.CDNHosting.create(metadata)
+
+    @tornado.testing.gen_test
+    def test_upload_mp4(self):
+
+        hoster = self._get_mp4_hoster()
+
+        upload_results = yield hoster.upload_video(
+            self.mov, self.clip, async=True)
+
+        self.assertItemsEqual([x[1:] for x in upload_results], 
+                               [(640, 480, 'mp4', 'libx264'),
+                                (400, 304, 'mp4', 'libx264')])
+        # Check the rendition files
+        for url, w, h, container, codec in upload_results:
+
+            s3key = self.bucket.get_key(self.key_name_format % (w, h))
+            self.assertIsNotNone(s3key)
+
+            with tempfile.NamedTemporaryFile(suffix='.mp4') as target:
+                s3key.get_contents_to_file(target)
+                target.flush()
+                found_mov = cv2.VideoCapture(target.name)
+
+                self.assertEquals(found_mov.get(cv2.CAP_PROP_FRAME_WIDTH), w)
+                self.assertEquals(found_mov.get(cv2.CAP_PROP_FRAME_HEIGHT), h)
+                self.assertEquals(found_mov.get(cv2.CAP_PROP_FRAME_COUNT), 5)
+                self.assertEquals(found_mov.get(cv2.CAP_PROP_FPS), 30.0)
+            
+            re = 'http://cdn[1-2].cdn.com/%s' % self.key_name_format % (w, h)
+            self.assertRegexpMatches(url, re)
+
+    @tornado.testing.gen_test
+    def test_mp4_key_with_make_tid_folders(self):
+
+        hoster = self._get_mp4_hoster(make_tid_folders=True)
+        # Ensure the path is constructed correctly with tid folders and
+        # filename has fewer parts.
+        upload_results = yield hoster.upload_video(
+            self.mov, self.clip, async=True)
+
+        # Check the rendition urls 
+        for url, w, h, _, _ in upload_results:
+
+            external_ref = neondata.InternalVideoID.to_external(self.video_id)
+            key_name = 'folder1/%s/%s/%s/w%i_h%i.mp4' % (
+                self.account_id,
+                external_ref,
+                self.clip.get_id(),
+                w,
+                h)
+            s3key = self.bucket.get_key(key_name)
+            self.assertIsNotNone(s3key)
+
+            re = 'http://cdn[1-2].cdn.com/' + key_name
+            self.assertRegexpMatches(url, re)
+
+    @tornado.testing.gen_test
+    def test_mp4_width_or_height_is_none(self):
+
+        hoster = self._get_mp4_hoster(
+            video_rendition_formats=[
+                (None, 100, 'mp4', None),
+                (200, None, 'mp4', None)])
+
+        # Ensure the basename has the implicitly scaled dimension.
+        upload_results = yield hoster.upload_video(
+            self.mov, self.clip, async=True)
+        for url, w, h, _, _ in upload_results:
+            re = 'http://cdn[1-2].cdn.com/%s' % self.key_name_format % (w, h)
+            self.assertRegexpMatches(url, re)
+
+
+    @tornado.testing.gen_test
+    def test_upload_gif(self):
+        metadata = neondata.S3CDNHostingMetadata(None,
+            'access_key', 'secret_key',
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', False, False, False,
+            video_rendition_formats=[(320, 240, 'gif', None)])
+
+        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+
+        upload_results = yield self.hoster.upload_video(
+            self.mov, self.clip, async=True)
+        self.assertEquals(len(upload_results), 1)
+
+        url, w, h, container, codec = upload_results[0]
+        self.assertEquals(container, 'gif')
+        self.assertIsNone(codec)
+        self.assertEquals(w, 320)
+        self.assertEquals(h, 240)
+
+        
+        key_name = 'folder1/neonvraid0_extvid0_cid0_w320_h240.gif'
+        s3key = self.bucket.get_key(key_name)
+        self.assertIsNotNone(s3key)
+        self.assertRegexpMatches(
+                url, 'http://cdn[1-2].cdn.com/%s' % key_name)
+
+        buf = StringIO()
+        s3key.get_contents_to_file(buf)
+        buf.seek(0)
+        gif_image = PIL.Image.open(buf)
+
+        self.assertEquals(gif_image.size, (320, 240))
+        self.assertAlmostEqual(np.round(1000./gif_image.info['duration']), 6)
+        
         
 if __name__ == '__main__':
     utils.neon.InitNeon()

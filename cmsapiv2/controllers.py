@@ -1711,6 +1711,8 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
                 obj,
                 age=age,
                 gender=gender)
+        elif field == 'features':
+            retval = list(obj.features)
         else:
             raise BadRequestError('invalid field %s' % field)
 
@@ -1845,22 +1847,35 @@ class VideoHelper(object):
         account_id_api_key -- the account_id/api_key
         """
         job_id = uuid.uuid1().hex
-        integration_id = args.get('integration_id', None)
+        integration_id = args.get('integration_id')
 
         request = neondata.NeonApiRequest(job_id, api_key=account_id_api_key)
         request.video_id = args['external_video_ref']
         if integration_id:
             request.integration_id = integration_id
-        request.video_url = args.get('url', None)
-        request.callback_url = args.get('callback_url', None)
-        request.video_title = args.get('title', None)
-        request.default_thumbnail = args.get('default_thumbnail_url', None)
-        request.external_thumbnail_ref = args.get('thumbnail_ref', None)
-        request.publish_date = args.get('publish_date', None)
-        request.api_param = int(args.get('n_thumbs', 5))
-        request.callback_email = args.get('callback_email', None)
-        request.age = args.get('age', None)
-        request.gender = args.get('gender', None)
+        request.video_url = args.get('url')
+        request.callback_url = args.get('callback_url')
+        request.video_title = args.get('title')
+        request.default_thumbnail = args.get('default_thumbnail_url')
+        request.external_thumbnail_ref = args.get('thumbnail_ref')
+        request.publish_date = args.get('publish_date')
+        request.callback_email = args.get('callback_email')
+        request.age = args.get('age')
+        request.gender = args.get('gender')
+        request.default_clip = args.get('default_clip_url')
+
+        # set the requests result type
+        result_type = args.get('result_type')
+        if result_type and result_type.lower() == neondata.ResultType.CLIPS:
+            request.n_clips = int(args.get('n_clips', 1))
+            request.result_type = result_type
+            request.clip_length = args.get('clip_length')
+            if request.clip_length is not None:
+                request.clip_length = float(request.clip_length)
+        else:
+            request.result_type = neondata.ResultType.THUMBNAILS
+            request.api_param = int(args.get('n_thumbs', 5))
+
         yield request.save(async=True)
 
         if request:
@@ -1952,6 +1967,19 @@ class VideoHelper(object):
                     x.response = {}
                     x.age = args.get('age', None)
                     x.gender = args.get('gender', None)
+
+                    x.result_type = args.get(
+                        'result_type',
+                        x.result_type).lower()
+                    x.n_clips = args.get('n_clips', x.n_clips)
+                    if x.n_clips is not None:
+                        x.n_clips = int(x.n_clips)
+                    x.clip_length = args.get('clip_length', x.clip_length)
+                    if x.clip_length is not None:
+                        x.clip_length = float(request.clip_length)
+                    x.api_param = args.get('n_thumbs', x.api_param)
+                    if x.api_param is not None:
+                        x.api_param = int(x.api_param)
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
                     account_id_api_key,
@@ -2161,6 +2189,16 @@ class VideoHelper(object):
                 # demographic_thumbnails are also required here and
                 # are handled in that section.
                 pass
+            elif field == 'demographic_clip_ids':
+                new_video['demographic_clip_ids'] = []
+                for video_result in video.job_results: 
+                    cur_entry = { 
+                        'gender': video_result.gender, 
+                        'age': video_result.age, 
+                        'clip_ids': (video_result.clip_ids + 
+                                     video.non_job_clip_ids)
+                    }
+                    new_video['demographic_clip_ids'].append(cur_entry)  
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -2208,7 +2246,6 @@ class VideoHelper(object):
 
         raise tornado.gen.Return(new_video)
 
-
 '''*********************************************************************
 VideoHandler
 *********************************************************************'''
@@ -2237,11 +2274,20 @@ class VideoHandler(ShareableContentHandler):
             'callback_email': All(Coerce(str), Length(min=1, max=2048)),
             'n_thumbs': All(Coerce(int), Range(min=1, max=32)),
             'gender': In(model.predictor.VALID_GENDER),
-            'age': In(model.predictor.VALID_AGE_GROUP)
+            'age': In(model.predictor.VALID_AGE_GROUP),
+            'n_clips': All(Coerce(int), Range(min=1, max=8)),
+            'clip_length': All(Coerce(float), Range(min=0.0)),
+            'result_type': In(neondata.ResultType.ARRAY_OF_TYPES),
+            'default_clip_url': All(Any(Coerce(str), unicode),
+                Length(min=1, max=2048))
         })
 
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
+        result_type = args.get('result_type')
+        if not result_type:
+            args['result_type'] = neondata.ResultType.THUMBNAILS
+
         schema(args)
 
         # Make sure that the external_video_ref is of a form we can handle
@@ -2895,7 +2941,7 @@ class ShareHandler(APIV2Handler):
         '''If one of tag_id, video_id, clip_id in args, get it; else raise.'''
 
         _id = None
-        e = BadRequestError('Need exactly one of video_id, tag_id')
+        e = BadRequestError('Need exactly one of video_id, tag_id, clip_id')
 
         if 'video_id' in args:
             _id = neondata.InternalVideoID.generate(
@@ -2920,8 +2966,13 @@ class ShareHandler(APIV2Handler):
             raise e
 
         resource = yield _class.get(_id, async=True)
-        if resource and resource.get_account_id() != args['account_id']:
-            raise ForbiddenError()
+        if resource:
+            try:
+                account_id = resource.get_account_id()
+            except AttributeError:
+                account_id = resource.account_id
+            if account_id != args['account_id']:
+                raise ForbiddenError()
         if not resource:
             raise NotFoundError('Resource not found for id')
 
@@ -3942,6 +3993,71 @@ class SocialImageHandler(ShareableContentHandler):
     def get_access_levels(cls):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
+class ClipHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            'clip_ids': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+        })
+
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        clip_ids = args['clip_ids'].split(',')
+        fields = args.get('fields')
+        if fields:
+            fields = fields.split(',')
+
+        _clips = yield neondata.Clip.get_many(
+            clip_ids,
+            create_default=False,
+            log_missing=False,
+            async=True)
+        clips_dict = {}
+        clips = yield [self.db2api(obj, fields) for obj in _clips]
+        clips_dict['clips'] = clips
+        clips_dict['count'] = len(clips)
+        self.success(clips_dict)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['video_id', 'clip_id', 'rank', 'start_frame',
+                'enabled', 'url', 'end_frame', 'type',
+                'created', 'updated', 'neon_score', 'duration']
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['rank', 'start_frame', 'type', 'duration',
+                'enabled', 'end_frame',
+                'created', 'updated']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field, age=None, gender=None):
+        if field == 'video_id':
+            retval = neondata.InternalVideoID.to_external(
+                neondata.InternalVideoID.from_thumbnail_id(obj.key))
+        elif field == 'clip_id':
+            retval = obj.key
+        elif field == 'url':
+            retval = obj.urls[0] if obj.urls else None
+        elif field == 'renditions':
+            # TODO(handle renditions like other endpoints)
+            renditions = yield neondata.VideoRendition.search_for_objects(
+                clip_id=obj.get_id(), async=True)
+            retval = [x.__dict__ for x in renditions]
+        elif field == 'neon_score':
+            # Do the raw score for now
+            retval = obj.score
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
+
+    @classmethod
+    def get_access_levels(self):
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
 '''*********************************************************************
 Endpoints
@@ -3953,7 +4069,6 @@ application = tornado.web.Application([
     (r'/api/v2/videos/search/?$', VideoSearchInternalHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler),
     (r'/api/v2/email/support/?$', EmailSupportHandler),
-
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$', BillingAccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
@@ -3984,11 +4099,11 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/tags/share/?$', ShareHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/clips/?$', ClipHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', ShareHandler),
-
     (r'/healthcheck/?$', HealthCheckHandler)
 ], gzip=True)
 
