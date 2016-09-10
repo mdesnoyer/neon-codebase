@@ -20,6 +20,7 @@ if sys.path[0] != __base_path__:
 import concurrent.futures
 import cv2
 import logging
+import hashlib
 import model.predictor
 import pandas as pd
 import re
@@ -32,6 +33,8 @@ define('input', default=None,
        help='Input file with image filenames, one per line')
 define('output', default=None,
        help='Output file, which will be a pandas pickle')
+define('cache_dir', default=None,
+       help='Directory to store cached results')
 define('aq_groups', default='AquilaOnDemandTest,AquilaTestSpot',
        help=('Comma separated list of autoscaling groups to talk to for '
              'aquilla'))
@@ -40,7 +43,7 @@ define('prefix', default=None, type=str,
 define('n_workers', default=4, 
        help='Number of parallel workers to use')
 
-def get_features(filename, predictor):
+def _get_features_impl(filename, predictor):
     image = cv2.imread(filename)
 
     score, features, model = predictor.predict(image)
@@ -50,6 +53,24 @@ def get_features(filename, predictor):
         name = re.sub(options.prefix, '', filename)
 
     return pd.Series(features, name=name)
+
+def get_features(filename, predictor):
+    cache_file = 'aqfeats_%s.pkl' % hashlib.md5(filename).hexdigest()
+    if options.cache_dir is not None:
+        full_cache_fn = os.path.join(options.cache_dir, cache_file)
+        if os.path.exists(full_cache_fn):
+            data = pandas.read_pickle(full_cache_fn)
+            return data
+
+    data = _get_features_impl(filename, predictor)
+
+    if options.cache_dir is not None:
+        full_cache_fn = os.path.join(options.cache_dir, cache_file)
+        if not os.path.exists(options.cache_dir):
+            os.makedirs(options.cache_dir)
+        data.to_pickle(full_cache_fn)
+
+    return data
 
 def image_file_iterator():
     _log.info('Reading image files from %s' % options.input)
