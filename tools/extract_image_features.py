@@ -44,6 +44,7 @@ define('n_workers', default=4,
        help='Number of parallel workers to use')
 
 def _get_features_impl(filename, predictor):
+    _log.debug('Opening %s' % filename)
     image = cv2.imread(filename)
 
     score, features, model = predictor.predict(image)
@@ -59,7 +60,7 @@ def get_features(filename, predictor):
     if options.cache_dir is not None:
         full_cache_fn = os.path.join(options.cache_dir, cache_file)
         if os.path.exists(full_cache_fn):
-            data = pandas.read_pickle(full_cache_fn)
+            data = pd.read_pickle(full_cache_fn)
             return data
 
     data = _get_features_impl(filename, predictor)
