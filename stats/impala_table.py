@@ -642,12 +642,7 @@ class ImpalaTable(object):
         select DISTINCT {columns} 
         from corner_cases_input_{dt}
         where 
-        thumbnail_id is null and
-        imloadservertime is null and
-        imvisservertime is null and
-        imclickservertime is null and
-        adplayservertime is null and
-        videoplayservertime is null
+        thumbnail_id is null
         ) 
         overall_cleaned
         """.format(columns=','.join(x.name for x in self.avro_schema.fields),
@@ -672,7 +667,7 @@ class ImpalaTable(object):
             serverTime > {epoch_previous_day}
             """.format(columns=','.join(x.name for x in self.avro_schema.fields),
                        dt=execution_date.strftime("%Y%m%d%H"),
-                       epoch_previous_day=calendar.timegm((execution_date - timedelta(days=1)).timetuple()))
+                       epoch_previous_day=calendar.timegm((execution_date.date() - timedelta(days=1)).timetuple()))
 
             _log.info('Moving data to s3: {sql}'.format(sql=sql))
 
