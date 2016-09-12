@@ -6844,6 +6844,9 @@ class VideoMetadata(Searchable, StoredObject):
         for tid in vmeta.thumbnail_ids:
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
+        if vmeta.tag_id is not None:
+            yield Tag.delete(vmeta.tag_id, async=True)
+
         yield VideoMetadata.delete(key, async=True)
 
 
