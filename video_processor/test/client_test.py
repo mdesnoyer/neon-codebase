@@ -1425,7 +1425,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertIsNotNone(n_thumbs[0].key)
         self.assertEquals(n_thumbs[0].urls, [
-            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
         self.assertEquals(n_thumbs[0].width, 640)
         self.assertEquals(n_thumbs[0].height, 480)
@@ -1451,7 +1451,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             # Check the main archival image
             self.assertIsNotNone(
                 self.s3conn.get_bucket('host-thumbnails').get_key(
-                    re.sub('_', '/', thumb.key) + '.jpg'))
+                    re.sub('_', '/', thumb.key) + '/w640_h480.jpg'))
 
             # Check a serving url
             s_url = neondata.ThumbnailServingURLs.get(thumb.key)
@@ -1504,6 +1504,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         yield self.vprocessor.finalize_response()
 
         video = neondata.VideoMetadata.get(self.video_id)
+        tag = neondata.Tag.get(video.tag_id)
         self.assertEqual(tag.get_id(), video.tag_id)
         self.assertEqual(tag.name, 'some fun video')
 
@@ -1730,7 +1731,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
-            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])        
 
     @tornado.testing.gen_test
@@ -1892,7 +1893,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertIsNotNone(n_thumbs[0].phash)
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
-            'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
+            'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
             re.sub('_', '/', n_thumbs[0].key)]) 
 
     @tornado.testing.gen_test
@@ -2228,7 +2229,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.video_upload_mock = self._future_wrap_mock(
             self.video_upload_patcher.start())
         self.video_upload_mock.side_effect = \
-          lambda v, clip, *args: [('%s.mp4' % clip,
+          lambda v, clip, *args: [('%s.mp4' % clip.get_id(),
                                    640, 480, 'mp4', 'h264')]
 
         # populate some data
@@ -2317,6 +2318,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(len(job_result.clip_ids), 2)
         self.assertEquals(job_result.thumbnail_ids, [])
         self.assertEquals(job_result.bad_thumbnail_ids, [])
+        self.maxDiff = None
 
         # Check the default clip
         default_clip = neondata.Clip.get(video_data.non_job_clip_ids[0])
@@ -2380,14 +2382,30 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
 
         # Check that the clips were uploaded, both a primary and a rendition
         upload_args = [x[0][1:] for x in self.video_upload_mock.call_args_list]
-        self.assertItemsEqual(upload_args, [
-            (default_clip.get_id(), None, None),
-            (default_clip.get_id(),None,None,'%s.mp4' % default_clip.get_id()),
-            (clips[0].get_id(), 15, 30),
+
+        # Check the portion of the arguments that is used in the upload.
+        checks = []
+        for a in upload_args:
+            url = a[1] if len(a) > 1 else None
+            checks.append((a[0].get_id(), a[0].start_frame, a[0].end_frame, url))
+        self.assertItemsEqual(checks,  [
+            (
+                default_clip.get_id(),
+                default_clip.start_frame,
+                default_clip.end_frame, 
+                None
+            ),
+            (
+                default_clip.get_id(),
+                default_clip.start_frame,
+                default_clip.end_frame, 
+                '%s.mp4' % default_clip.get_id()
+            ),
+            (clips[0].get_id(), 15, 30, None),
             (clips[0].get_id(), 15, 30, '%s.mp4' % clips[0].get_id()),
-            (clips[1].get_id(), 115, 210),
-            (clips[1].get_id(), 115, 210, '%s.mp4' % clips[1].get_id())])
-                              
+            (clips[1].get_id(), 115, 210, None),
+            (clips[1].get_id(), 115, 210, '%s.mp4' % clips[1].get_id()),
+        ])
 
         # Check the VideoRenditions for the clips
         default_renditions = neondata.VideoRendition.search_for_objects(

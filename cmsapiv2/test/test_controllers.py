@@ -4611,6 +4611,18 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertLess(int(splits[1]), 1024)
 
     @tornado.testing.gen_test
+    def test_feature_values(self):
+        thumbnail_id = '%s_vid0_testingtid' % self.account_id_api_key
+        url = '/api/v2/%s/thumbnails?thumbnail_id=%s&fields=%s' % (
+            self.account_id_api_key, thumbnail_id, 'thumbnail_id,features')
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)['thumbnails'][0]
+
+        feature_vals = rjson['features']
+        self.assertEqual(len(feature_vals), 1024)
+        self.assertEquals(feature_vals, list(self.thumb.features))
+
+    @tornado.testing.gen_test
     def test_share_token_allows_get(self):
         payload = {
             'content_type': 'VideoMetadata',

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import unittest
 import numpy as np
@@ -11,6 +11,7 @@ import cv2
 from glob import glob
 
 from utils.pycvutils import ImagePrep
+from utils import pycvutils
 from PIL import Image
 
 dimtol = 1.      # dimension:        tolerance = dimtol
@@ -18,8 +19,6 @@ areatol = .01    # area:             tolerance = areatol * max(area1, area2)
 asptol = .01     # aspect ratio:     tolerance = asptol * max(asp1, asp2)
 
 TEST_IMAGE = os.path.join(os.path.dirname(__file__), 'im480x360.jpg')
-
-np.random.seed(42)
 
 def _is_CV(image):
     return type(image).__module__ == np.__name__
@@ -133,6 +132,7 @@ class TestImagePrep(unittest.TestCase):
     def setUp(self):
         self._image_cv = cv2.imread(TEST_IMAGE)
         self._image_pil = Image.open(TEST_IMAGE)
+        np.random.seed(42)
 
     @property
     def image_cv(self):
@@ -425,6 +425,27 @@ class TestImagePrep(unittest.TestCase):
             imageSeq = run_imageprep_seq(self.image_cv, config)
             imageEns = ip(self.image_cv)
             self.assertTrue(np.array_equiv(imageSeq, imageEns))
+
+class TestResizeAndCrop(unittest.TestCase):
+    '''
+    Tests the atomic operations of ImagePrep, to ensure that they are
+    valid. Once we know the atomic operations are valid, we can check
+    ensembles of operations by performing them sequentially.
+    '''
+    def setUp(self):
+        super(TestResizeAndCrop, self).setUp()
+        # Test image is 480x360
+        self._image_cv = cv2.imread(TEST_IMAGE)
+        self._image_pil = Image.open(TEST_IMAGE)
+        np.random.seed(42)
+
+    def test_resize_and_crop_preseve_aspect_ratio(self):
+        self.assertEquals(
+            pycvutils.resize_and_crop(self._image_cv, w=240).shape,
+            (180,240,3))
+        self.assertEquals(
+            pycvutils.resize_and_crop(self._image_cv, h=120).shape,
+            (120,160,3))
 
 if __name__=='__main__':
     unittest.main()

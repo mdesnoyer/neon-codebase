@@ -74,7 +74,8 @@ class ClipFinder(object):
                 processing_strategy.custom_predictor)
         else:
             self.custom_predictor = None
-        self.weight_dict['custom'] = self.custom_predictor_weight
+        self.weight_dict['custom'] = \
+          processing_strategy.custom_predictor_weight
 
     def reset(self):
         self.scene_cut_generator.reset()
@@ -519,9 +520,12 @@ class RegionScore(object):
         return cscore / wsum
 
     def _check_filters_passed(self, prop_dict):
-        for cfilter in self._filters:
-            if not cfilter(prop_dict):
-                return False
+        try:
+            for cfilter in self._filters:
+                if not cfilter(prop_dict):
+                    return False
+        except AttributeError:
+            pass
         return True
 
     def _get_region_score(self, region_n):

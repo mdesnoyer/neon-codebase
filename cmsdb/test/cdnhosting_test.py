@@ -863,6 +863,16 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         self.mov = test_utils.opencv.VideoCaptureMock(frame_count=60, fps=30.0)
+        self.account_id = 'aid0'
+        self.video_id = 'aid0_extvid0'
+        self.clip = neondata.Clip(
+            'cid0',
+            video_id=self.video_id,
+            start_frame=15,
+            end_frame=20,)
+        self.key_name_format = 'folder1/neonvr{}_{}_w%i_h%i.mp4'.format(
+            self.video_id,
+            self.clip.get_id())
         
         random.seed(1654984)
 
@@ -874,28 +884,43 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         self.cdn_check_patcher.stop()
         super(TestVideoUploading, self).tearDown()
 
+    def _get_mp4_hoster(self, **kwargs):
+
+        # Merge kwargs over a default set of args.
+        init_args = {
+            'key':None,
+            'access_key':'access_key',
+            'secret_key':'secret_key',
+            'bucket_name':'hosting-bucket',
+            'cdn_prefixes':['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder_prefix':'folder1',
+            'resize':False,
+            'update_serving_urls':False,
+            'do_salt':False,
+            'make_tid_folders':False,
+            'video_rendition_formats':[(None, None, 'mp4', None),
+                                     (400, 304, 'mp4', 'libx264')]}
+        init_args.update(kwargs)
+        metadata = neondata.S3CDNHostingMetadata(**init_args)
+
+        # Return a hosting created from the merged metadata.
+        return cmsdb.cdnhosting.CDNHosting.create(metadata)
+
     @tornado.testing.gen_test
     def test_upload_mp4(self):
-        metadata = neondata.S3CDNHostingMetadata(None,
-            'access_key', 'secret_key',
-            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
-            'folder1', False, False, False,
-            video_rendition_formats=[(None, None, 'mp4', None),
-                                     (400, 304, 'mp4', 'libx264')])
 
-        self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        hoster = self._get_mp4_hoster()
 
-        upload_results = yield self.hoster.upload_video(
-            self.mov, 'acct1_vid1_clip1', 15, 20, async=True)
+        upload_results = yield hoster.upload_video(
+            self.mov, self.clip, async=True)
 
         self.assertItemsEqual([x[1:] for x in upload_results], 
                                [(640, 480, 'mp4', 'libx264'),
                                 (400, 304, 'mp4', 'libx264')])
-
         # Check the rendition files
         for url, w, h, container, codec in upload_results:
-            key_name = 'folder1/neonvracct1_vid1_clip1_w%i_h%i.mp4' % (w, h)
-            s3key = self.bucket.get_key(key_name)
+
+            s3key = self.bucket.get_key(self.key_name_format % (w, h))
             self.assertIsNotNone(s3key)
 
             with tempfile.NamedTemporaryFile(suffix='.mp4') as target:
@@ -908,8 +933,49 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
                 self.assertEquals(found_mov.get(cv2.CAP_PROP_FRAME_COUNT), 5)
                 self.assertEquals(found_mov.get(cv2.CAP_PROP_FPS), 30.0)
             
-            self.assertRegexpMatches(
-                url, 'http://cdn[1-2].cdn.com/%s' % key_name)
+            re = 'http://cdn[1-2].cdn.com/%s' % self.key_name_format % (w, h)
+            self.assertRegexpMatches(url, re)
+
+    @tornado.testing.gen_test
+    def test_mp4_key_with_make_tid_folders(self):
+
+        hoster = self._get_mp4_hoster(make_tid_folders=True)
+        # Ensure the path is constructed correctly with tid folders and
+        # filename has fewer parts.
+        upload_results = yield hoster.upload_video(
+            self.mov, self.clip, async=True)
+
+        # Check the rendition urls 
+        for url, w, h, _, _ in upload_results:
+
+            external_ref = neondata.InternalVideoID.to_external(self.video_id)
+            key_name = 'folder1/%s/%s/%s/w%i_h%i.mp4' % (
+                self.account_id,
+                external_ref,
+                self.clip.get_id(),
+                w,
+                h)
+            s3key = self.bucket.get_key(key_name)
+            self.assertIsNotNone(s3key)
+
+            re = 'http://cdn[1-2].cdn.com/' + key_name
+            self.assertRegexpMatches(url, re)
+
+    @tornado.testing.gen_test
+    def test_mp4_width_or_height_is_none(self):
+
+        hoster = self._get_mp4_hoster(
+            video_rendition_formats=[
+                (None, 100, 'mp4', None),
+                (200, None, 'mp4', None)])
+
+        # Ensure the basename has the implicitly scaled dimension.
+        upload_results = yield hoster.upload_video(
+            self.mov, self.clip, async=True)
+        for url, w, h, _, _ in upload_results:
+            re = 'http://cdn[1-2].cdn.com/%s' % self.key_name_format % (w, h)
+            self.assertRegexpMatches(url, re)
+
 
     @tornado.testing.gen_test
     def test_upload_gif(self):
@@ -922,7 +988,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         self.hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
 
         upload_results = yield self.hoster.upload_video(
-            self.mov, 'acct1_vid1_clip1', 15, 20, async=True)
+            self.mov, self.clip, async=True)
         self.assertEquals(len(upload_results), 1)
 
         url, w, h, container, codec = upload_results[0]
@@ -932,7 +998,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         self.assertEquals(h, 240)
 
         
-        key_name = 'folder1/neonvracct1_vid1_clip1_w320_h240.gif'
+        key_name = 'folder1/neonvraid0_extvid0_cid0_w320_h240.gif'
         s3key = self.bucket.get_key(key_name)
         self.assertIsNotNone(s3key)
         self.assertRegexpMatches(
@@ -944,6 +1010,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         gif_image = PIL.Image.open(buf)
 
         self.assertEquals(gif_image.size, (320, 240))
+        self.assertAlmostEqual(np.round(1000./gif_image.info['duration']), 6)
         
         
 if __name__ == '__main__':

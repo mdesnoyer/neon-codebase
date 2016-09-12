@@ -239,20 +239,18 @@ class CDNHosting(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def upload_video(self, video, clip_id, start, end, url=None):
+    def upload_video(self, video, clip, url=None):
         '''Render renditions. Put them to CDN
 
         Inputs- video a cv2.VideoCapture
-            -clip_id id of the containing Clip
-            -start integer, start frame
-            -end integer, end frame
+            -clip the associated Clip metadata object
             -url the url that the file should be put to or None
                 if not provided, then we will build one from ids
 
         # Results is a list of [url, width, height, container, codec]s.
         '''
 
-        # List of 3-tuple (url, width, height, container, codec) for
+        # List of 5-tuple (url, width, height, container, codec) for
         # each new object.
         results = []
 
@@ -263,13 +261,18 @@ class CDNHosting(object):
         for _format in self.video_rendition_formats:
 
             # Figure out some details about the desired output
-            width = _format[0] or video.get(cv2.CAP_PROP_FRAME_WIDTH)
-            height = _format[1] or video.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            do_resize = True
+            width = _format[0]
+            height = _format[1]
+            if width is None and height is None:
+                # Use the original size
+                width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                do_resize = False
             container_type = _format[2]
             codec = _format[3]
             fps = video.get(cv2.CAP_PROP_FPS) or 30.0
-            do_resize = False
-                
+            step = 1                
 
             # Use the specified video container type.
             if container_type == cmsdb.neondata.VideoRenditionContainerType.MP4:
@@ -283,31 +286,25 @@ class CDNHosting(object):
                     'quality' : 8,
                     'ffmpeg_params' : []
                     }
-                if _format[0] and _format[1]:
-                    do_resize = True
-                    # TODO: Use ffmpeg for the cropping & resizing
-                    #imageio_params['ffmpeg_params'].extend([
-                    #    '-vf', 'scale=%s:%s' % (width, height)])
+                # TODO: Use ffmpeg for the cropping & resizing
+                #imageio_params['ffmpeg_params'].extend([
+                #    '-vf', 'scale=%s:%s' % (width, height)])
             elif container_type == cmsdb.neondata.VideoRenditionContainerType.GIF:
                 ext = 'gif'
                 content_type = 'image/gif'
                 codec = None
+                new_fps = 6.0
+                step = int(fps/new_fps)
+                new_fps = float(fps)/step
                 imageio_params = {
                     'format' : 'GIF',
-                    'fps' : fps,
+                    'fps' : new_fps,
                     'quantizer' : 'nq',
                     'mode' : 'I'
                     }
-                do_resize = _format[0] and _format[1]
             else:
                 raise ValueError('Unhandled video container type %s', 
                                  container_type)
-
-            basename = cmsdb.neondata.VideoRendition.FNAME_FORMAT.format(
-                clip_id=clip_id,
-                width=width,
-                height=height,
-                ext=ext)
 
             # Get a writer with a named temporary file with the
             # right file extension.
@@ -316,17 +313,30 @@ class CDNHosting(object):
                     with imageio.get_writer(target.name,
                                             **imageio_params) as writer:
                         for frame in pycvutils.iterate_video(
-                                video, start, end):
+                                video, clip.start_frame, clip.end_frame, step):
                             if do_resize:
                                 frame = pycvutils.resize_and_crop(
                                     frame, height, width)
                             writer.append_data(frame[:,:,::-1])
+
+                    # In case width or height was None, and
+                    # we were scaling to the other. The last
+                    # frame has the same shape as any.
+                    height, width, _ = frame.shape
+
                     # Some of the imageio plugins write to disk via
                     # the C layer and thus the tempfile in python
                     # won't see them. So, we make sure we flush and
                     # then open up a new reader for the file.
                     target.flush()
                     with open(target.name, 'rb') as _file:
+                        basename = cmsdb.neondata.VideoRendition.FNAME_FORMAT.format(
+                            video_id=clip.video_id,
+                            clip_id=clip.get_id(),
+                            width=width,
+                            height=height,
+                            ext=ext)
+
                         cdn_val = yield self._upload_and_check_file(
                             _file, basename, content_type,
                             url, False)
@@ -516,13 +526,15 @@ class AWSHosting(CDNHosting):
                 for _ in range(3)))
         if self.make_tid_folders:
             if basename.startswith('neon'):
-                # Get rid of the neontn for backwards compatibility
+                # Get rid of the neon[tn|vr] for backwards compatibility
                 base = basename[6:]
             else:
                 base = basename
             splits = base.split('_')
             name_pieces.extend(splits[0:3])
-            name_pieces.append('_'.join(splits[3:]))
+
+            if len(splits) > 3:
+                name_pieces.append('_'.join(splits[3:]))
         else:
             name_pieces.append(basename)
         key_name = '/'.join(name_pieces)

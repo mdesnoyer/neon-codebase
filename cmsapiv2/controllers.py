@@ -1711,6 +1711,8 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
                 obj,
                 age=age,
                 gender=gender)
+        elif field == 'features':
+            retval = list(obj.features)
         else:
             raise BadRequestError('invalid field %s' % field)
 
