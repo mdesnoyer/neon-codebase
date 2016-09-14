@@ -5918,6 +5918,18 @@ class Clip(StoredObject):
             clip_id=self.get_id(),
             async=True)
 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_related_data(cls, key):
+        rendition_keys = yield VideoRendition.search_for_keys(clip_id=key,
+                                                              async=True)
+
+        if rendition_keys:
+            yield VideoRendition.delete_many(rendition_keys, async=True)
+
+        yield Clip.delete(key, async=True)
+
 
 class VideoRendition(StoredObject, Searchable):
     '''
@@ -6551,9 +6563,9 @@ class VideoMetadata(Searchable, StoredObject):
     def clip_ids(self):
         '''Returns a unique list of clip ids associated with this video.'''
         return reduce(
-            lambda x,y: x | y,
+            lambda a,b: a | b,
             [set(x.clip_ids) for x in self.job_results],
-            set())
+            set(self.non_job_clip_ids))
 
     @staticmethod
     def _get_search_arguments():
@@ -6848,11 +6860,20 @@ class VideoMetadata(Searchable, StoredObject):
                                     vmeta.get_account_id(), 
                                     async=True)
 
-        for tid in vmeta.thumbnail_ids:
-            yield ThumbnailMetadata.delete_related_data(tid, async=True)
-
         if vmeta.tag_id is not None:
             yield Tag.delete(vmeta.tag_id, async=True)
+
+        thumb_ids = reduce(
+            lambda a,b: a | b,
+            [set(x.thumbnail_ids) for x in vmeta.job_results] +
+            [set(vmeta.non_job_thumb_ids)] +
+            [set(x.bad_thumbnail_ids) for x in vmeta.job_results],
+            set(vmeta.thumbnail_ids))
+        for tid in thumb_ids:
+            yield ThumbnailMetadata.delete_related_data(tid, async=True)
+
+        for clip_id in vmeta.clip_ids:
+            yield Clip.delete_related_data(clip_id, async=True)
 
         yield VideoMetadata.delete(key, async=True)
 

@@ -53,6 +53,7 @@ from cmsdb.neondata import (
     BrightcovePlatform,
     CDNHostingMetadata,
     CDNHostingMetadataList,
+    Clip,
     CloudinaryCDNHostingMetadata,
     ExperimentState,
     ExperimentStrategy,
@@ -419,27 +420,41 @@ class TestNeondataDataSpecific(NeonDbTestCase):
         req = NeonApiRequest('job1', na.neon_api_key, 'vid1', 't', 't', 'r', 'h')
         i_vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
         tid = i_vid + "_t1"
-        thumb = ThumbnailMetadata(tid, i_vid, ['t1.jpg'], None, None, None,
-                              None, None, None)
-        vid = VideoMetadata(i_vid, [thumb.key],
-                           'job1', 'v0.mp4', 0, 0, None, '0')
+        thumbs = [ThumbnailMetadata(i_vid + "_t1", i_vid, ['t1.jpg']),
+                  ThumbnailMetadata(i_vid + "_bad", i_vid, ['t1.jpg']),
+                  ThumbnailMetadata(i_vid + "_t2", i_vid, ['t1.jpg']),
+                  ThumbnailMetadata(i_vid + "_def", i_vid, ['t1.jpg'])]
+        clip = Clip(video_id=i_vid)
+        vid = VideoMetadata(i_vid, [thumbs[0].key],
+                           'job1', 'v0.mp4', 0, 0, None, '0',
+            job_results=[neondata.VideoJobThumbnailList(
+                thumbnail_ids=[thumbs[2].key],
+                bad_thumbnail_ids=[thumbs[1].key],
+                clip_ids=[clip.get_id()])],
+            non_job_thumb_ids=[thumbs[3].key])
+        tag = Tag(video_id=i_vid, tag_type=neondata.TagType.VIDEO)
+        vid.tag_id = tag.get_id()
         req.save()
-        ThumbnailMetadata.save_all([thumb])
+        ThumbnailMetadata.save_all(thumbs)
+        clip.save()
         VideoMetadata.save_all([vid])
+        tag.save()
+        TagThumbnail.save_many(tag_id=tag.get_id(),
+                               thumbnail_id=[x.key for x in thumbs])
         def modify_me(x):
             x.add_video('dummyv', 'dummyjob')
             x.add_video('vid1', 'job1')
-        #NeonPlatform.modify(na.neon_api_key, '0', modify_me)
-        #                    lambda x: x.add_video('dummyv', 'dummyjob'))
         np = NeonPlatform.modify(na.neon_api_key, '0', modify_me)
-#                                 lambda x: x.add_video('vid1', 'job1'))
         np = NeonPlatform.get(na.neon_api_key, '0')
         np.delete_all_video_related_data('vid1', really_delete_keys=True)
 
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
-        self.assertIsNone(ThumbnailMetadata.get(thumb.key))
+        for thumb in thumbs:
+            self.assertIsNone(ThumbnailMetadata.get(thumb.key))
         self.assertIsNone(VideoMetadata.get(i_vid))
+        self.assertIsNone(Tag.get(tag.get_id()))
+        self.assertIsNone(Clip.get(clip.get_id()))
 
         # verify account
         np = NeonPlatform.get(na.neon_api_key, '0')
