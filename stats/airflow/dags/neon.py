@@ -474,19 +474,10 @@ def _stage_files(**kwargs):
                                            execution_date=execution_date,
                                            prefix=staging_prefix)
 
-    # Check if this is the first run of the day, if so pull the 
-    # previous day files for processing. Because in airflow, this run 
-    # is for data between time 21:00 of previous day and 00:00 of 
-    # current day
-    if execution_date.strftime("%H") == '00':
-        staging_date = execution_date - timedelta(days=1)
-    else:
-        staging_date = execution_date
-
-    _log.info('Staging date is %s' % staging_date.strftime('%Y/%m/%d'))
+    _log.info('Staging date is %s' % execution_date.strftime('%Y/%m/%d'))
 
     input_files = _get_s3_input_files(dag=dag,
-                                      execution_date=staging_date,
+                                      execution_date=execution_date,
                                       task=task,
                                       input_path=kwargs['input_path'])
 
@@ -685,18 +676,9 @@ def _execution_date_has_input_files(**kwargs):
 
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
 
-    # Check if this is the first run of the day, if so pull the 
-    # previous day files for processing. Because in airflow, this run 
-    # is for data between time 21:00 of previous day and 00:00 of 
-    # current day
-    if execution_date.strftime("%H") == '00':
-        staging_date = execution_date - timedelta(days=1)
-    else:
-        staging_date = execution_date
-
     _log.info(("{task}: checking for input files for the execution date "
-               "{ed}").format(task=task, ed=staging_date))
-    input_files = _get_s3_input_files(dag=dag, execution_date=staging_date,
+               "{ed}").format(task=task, ed=execution_date))
+    input_files = _get_s3_input_files(dag=dag, execution_date=execution_date,
                                       task=task, input_path=input_path)
     if input_files:
         return 'stage_files'
