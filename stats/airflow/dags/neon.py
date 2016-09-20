@@ -454,7 +454,7 @@ def _quiet_period(**kwargs):
     if execution_date.strftime("%H") == '21' and \
        execution_date.strftime("%Y/%m/%d") == (datetime.utcnow() - timedelta(days=1)).strftime("%Y/%m/%d"):
         _log.info('Sleeping for quiet period')
-        time.sleep(wait_time)
+        time.sleep(wait_time * 2)
 
 
 def _stage_files(**kwargs):
