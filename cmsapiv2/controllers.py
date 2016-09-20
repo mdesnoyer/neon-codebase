@@ -3843,44 +3843,61 @@ class SocialImageHandler(ShareableContentHandler):
             account_id, external_video_id)
         tag_id = args.get('tag_id')
         
+
         # See if we can get the asset id from the payload
-        if self.share_payload is not None:
-            if self.share_payload['content_type'] != 'VideoMetadata':
+        payload = self.share_payload
+        if payload:
+            _type = payload['content_type']
+            _id = payload['content_id']
+
+            if _type not in ['Tag', 'VideoMetadata']:
                 statemon.state.increment('social_image_invalid_request')
-                raise ForbiddenError('Content token is not for videos')
+                raise ForbiddenError('Content token is not for valid type')
+            
+            # If an id is in the arguments, then match it against the payload.
             if external_video_id is not None:
-                if self.share_payload['content_id'] != internal_video_id:
+                # Strictly match on type and id.
+                if _type != 'VideoMetadata' or _id != internal_video_id:
                     statemon.state.increment('social_image_invalid_request')
                     raise ForbiddenError('Content token is not for this video')
+            elif tag_id is not None:
+                if _type != 'Tag' or _id != tag_id:
+                    statemon.state.increment('social_image_invalid_request')
+                    raise ForbiddenError('Content token is not for this tag')
+
+            # Else, we have no id, so find it in the payload.
             else:
-                # Grab the video id from the payload
-                internal_video_id = self.share_payload['content_id']
-                external_video_id = neondata.InternalVideoID.to_external(
-                    internal_video_id)
+                if _type == 'VideoMetadata':
+                    internal_video_id = _id
+                    external_video_id = neondata.InternalVideoID.to_external(
+                        internal_video_id)
+                elif _type == 'Tag':
+                    tag_id = _id
                 
         if (external_video_id is None) == (tag_id is None):
             statemon.state.increment('social_image_invalid_request')
             raise Invalid('Exactly one of video_id or tag_id is required')
-        if tag_id is not None:
-            # TODO(nate, mdesnoyer): wire this up for image
-            # collections when we are ready for it.
-            statemon.state.increment('social_image_invalid_request')
-            raise Invalid('tag_id is not implemented yet')
 
         # Get the size needs based on the platform
         width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
             platform]
             
+        if external_video_id is not None:
+            # We are building the composite for a video
+            video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
+            if video is None:
+                statemon.state.increment('social_image_invalid_request')
+                raise Invalid('Invalid video id')
 
-        # We are building the composite for a video
-        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
-        if video is None:
-            statemon.state.increment('social_image_invalid_request')
-            raise Invalid('Invalid video id')
+            best_thumb = yield self._get_best_thumb_of_video(video)
+        else:
+            tag = yield neondata.Tag.get(tag_id, async=True)
+            if tag is None:
+                statemon.state.increment('social_image_invalid_request')
+                raise Invalid('Invalid tag id')
+            best_thumb = yield self._get_best_thumb_of_tag(tag)
 
-        best_thumb = yield self._get_best_thumb(video)
-
-        # Now, we build the image. Hooray
+        # Now, we build the image.
         image = yield self._build_image(best_thumb, width, height, box_height,
                                         font_size)
         buf = StringIO()
@@ -3962,7 +3979,7 @@ class SocialImageHandler(ShareableContentHandler):
             raise Invalid(msg)
 
     @tornado.gen.coroutine
-    def _get_best_thumb(self, video):
+    def _get_best_thumb_of_video(self, video):
         '''Returns the (base, best) ThumbnailMetadata objects.'''
 
         # Get the job thumbnails
@@ -3987,6 +4004,21 @@ class SocialImageHandler(ShareableContentHandler):
 
         best_thumb = job_thumbs[-1]
 
+        raise tornado.gen.Return(best_thumb)
+
+    @tornado.gen.coroutine
+    def _get_best_thumb_of_tag(self, tag):
+        thumb_ids = yield neondata.TagThumbnail.get(tag_id=tag.get_id(), async=True)
+        thumbnails = yield neondata.ThumbnailMetadata.get_many(
+            thumb_ids,
+            async=True)
+
+        # Sort the job thumbs ascending by model score
+        thumbnails = sorted(thumbnails, key=lambda x: x.get_score())
+
+        if len(thumbnails) == 0:
+            raise Invalid('Tag does not have any associated thumbnail')
+        best_thumb = thumbnails[-1]
         raise tornado.gen.Return(best_thumb)
 
     @classmethod

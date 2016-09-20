@@ -8905,9 +8905,13 @@ class TestSocialImageGeneration(TestControllersBase):
         self.verify_account_mock.return_value = True
 
         # Setup a video with a couple of thumbnails in it
-        self.vid_id = neondata.InternalVideoID.generate(self.account_id,
-                                                        'vid1')
+        self.vid_id = neondata.InternalVideoID.generate(self.account_id, 'vid1')
+        self.video_tag = neondata.Tag(None, account_id=self.account_id,
+                                      video_id=self.vid_id,
+                                      tag_type=neondata.TagType.VIDEO)
+        self.video_tag.save()
         self.video = video = neondata.VideoMetadata(self.vid_id, 
+                                       tag_id=self.video_tag.get_id(),
                                        non_job_thumb_ids=[
                                            '%s_def' % self.vid_id],
                                        job_results = [
@@ -8915,21 +8919,48 @@ class TestSocialImageGeneration(TestControllersBase):
                                                thumbnail_ids=[
                                                    '%s_n1' % self.vid_id])])
         video.save()
-        neondata.ThumbnailMetadata('%s_def' % self.vid_id,
+        t0 = neondata.ThumbnailMetadata('%s_def' % self.vid_id,
                                    ttype='default',
                                    rank=0,
                                    model_version='20160713-test',
                                    model_score=0.2,
-                                   urls=['640x480']).save()
-        neondata.ThumbnailMetadata('%s_n1' % self.vid_id,
+                                   urls=['640x480'])
+        t0.save()
+        t1 = neondata.ThumbnailMetadata('%s_n1' % self.vid_id,
                                    ttype='neon',
                                    rank=1,
                                    model_version='20160713-test',
-                                   model_score=0.4).save()
+                                   model_score=0.4)
+        t1.save()
+        neondata.TagThumbnail.save_many(
+            tag_id=self.video_tag.get_id(),
+            thumbnail_id=[t0.get_id(), t1.get_id()])
+
         urls = neondata.ThumbnailServingURLs('%s_n1' % self.vid_id)
         urls.add_serving_url('800x800', 800, 800)
         urls.add_serving_url('875x500', 875, 500)
         urls.save()
+
+        self.col_tag = neondata.Tag(None, account_id=self.account_id,
+                           tag_type=neondata.TagType.COLLECTION)
+        self.col_tag.save()
+        t2 = neondata.ThumbnailMetadata('%s_nvd_t2' % self.account_id,
+                                   ttype='neon',
+                                   rank=0,
+                                   model_version='20160713-test',
+                                   model_score=0.2,
+                                   urls=['640x480'])
+        t2.save()
+        t3 = neondata.ThumbnailMetadata('%s_nvd_t3' % self.account_id,
+                                   ttype='neon',
+                                   rank=0,
+                                   model_version='20160713-test',
+                                   model_score=0.8,
+                                   urls=['640x480'])
+        t3.save()
+        neondata.TagThumbnail.save_many(
+            tag_id=self.col_tag.get_id(),
+            thumbnail_id=[t2.get_id(), t3.get_id()])
 
         # Mock out the image download
         self.im_download_mocker = patch(
@@ -9014,7 +9045,7 @@ class TestSocialImageGeneration(TestControllersBase):
         self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test
-    def test_good_payload(self):
+    def test_good_video_payload(self):
         self.verify_account_mock.side_effect = [NotAuthorizedError(
             'Invalid token')]
         self.video.share_token = ShareJWTHelper.encode({
@@ -9030,7 +9061,7 @@ class TestSocialImageGeneration(TestControllersBase):
         self.assertEquals(response.code, 200)
 
     @tornado.testing.gen_test
-    def test_bad_payload(self):
+    def test_bad_video_payload(self):
         self.verify_account_mock.side_effect = [
             NotAuthorizedError('Invalid token'),
             NotAuthorizedError('Invalid token')]
@@ -9040,8 +9071,8 @@ class TestSocialImageGeneration(TestControllersBase):
                              'share_token={}'.format(
                                  self.account_id, 'vid1',
                                  ShareJWTHelper.encode({
-                                     'content_type': 'TagMetadata',
-                                     'content_id': '%s_vid1' % self.account_id
+                                     'content_type': 'VideoMetadata',
+                                     'content_id': 'notexist_123'
                                      }))))
 
         self.assertEquals(e.exception.code, 401)
@@ -9077,6 +9108,43 @@ class TestSocialImageGeneration(TestControllersBase):
                              token)))
 
         self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_tag_from_url(self):
+        url = self.get_url('/api/v2/{}/social/image?tag_id={}'.format(
+                self.account_id,
+                self.col_tag.get_id()))
+        response = yield self.http_client.fetch(url)
+        self.assertEqual(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_tag_from_payload(self):
+        self.verify_account_mock.side_effect = [NotAuthorizedError(
+            'Invalid token')]
+        token = ShareJWTHelper.encode({
+            'content_type': 'Tag',
+            'content_id': self.col_tag.get_id()})
+        self.col_tag.share_token = token
+        self.col_tag.save()
+        response = yield self.http_client.fetch(
+            self.get_url('/api/v2/{}/social/image?'
+                'share_token={}'.format(self.account_id, token)))
+        self.assertEqual(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_tag_mismatch_payload(self):
+        self.verify_account_mock.side_effect = [NotAuthorizedError(
+            'Invalid token')]
+        token = ShareJWTHelper.encode({
+            'content_type': 'Tag',
+            'content_id': 'bad_id'})
+        self.col_tag.share_token = token
+        self.col_tag.save()
+        url = self.get_url('/api/v2/{}/social/image?'
+            'share_token={}'.format(self.account_id, token))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(e.exception.code, 401)
 
     @tornado.testing.gen_test
     def test_old_video_format(self):
