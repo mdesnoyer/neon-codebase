@@ -445,8 +445,14 @@ def _quiet_period(**kwargs):
     wait_time = kwargs['quiet_period']
     execution_date = kwargs['execution_date']
 
-    # Do not wait when doing backfill
+    # Wait only if this is current run
     if execution_date.strftime("%Y/%m/%d") == datetime.utcnow().strftime("%Y/%m/%d"):
+        _log.info('Sleeping for quiet period')
+        time.sleep(wait_time)
+
+    # Also wait if this is the last run of previous day (21:00) which happens at (00:00) of current day
+    if execution_date.strftime("%H") == '21' and \
+       execution_date.strftime("%Y/%m/%d") == (datetime.utcnow() - timedelta(days=1)).strftime("%Y/%m/%d"):
         _log.info('Sleeping for quiet period')
         time.sleep(wait_time)
 
