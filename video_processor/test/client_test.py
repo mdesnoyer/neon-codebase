@@ -2228,11 +2228,11 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             cdn_mock.side_effect = wait
 
             @tornado.gen.coroutine
-            def then_change_job_state():
+            def then_change_job_state(new_state):
                 # Wait for the test worker to check the request.
                 yield event_worker_checked_job.wait()
                 def _change_job_state(request):
-                    request.state = neondata.RequestState.FINISHED
+                    request.state = new_state
                 neondata.NeonApiRequest.modify('job1', self.api_key, _change_job_state)
                 # Wake the worker in the middle of finalizing the job.
                 event_job_marked_finished.set()
@@ -2246,11 +2246,18 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             self.vprocessor.process_video = MagicMock()
             self._future_wrap_mock(self.vprocessor.process_video)
 
-            yield [self.vprocessor.start(), then_change_job_state()]
+            yield [self.vprocessor.start(), then_change_job_state(neondata.RequestState.FINISHED)]
 
             req = neondata.NeonApiRequest.get('job1', self.api_key)
             self.assertEqual(req.state, neondata.RequestState.FINISHED)
             self.assertEqual(req.fail_count, 0)
+
+            # Reset and try with the other finished state: serving.
+            event_job_marked_finished.clear()
+            event_worker_checked_job.clear()
+
+            #yield [self.vprocessor.start(), then_change_job_state()]
+
 
 
 class TestFinalizeClipResponse(TestFinalizeResponse):
