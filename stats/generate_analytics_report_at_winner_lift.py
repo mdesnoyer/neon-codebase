@@ -445,7 +445,7 @@ def main():
     _log.info('Getting metadata about the thumbnails.')
     thumbnail_info = neondata.ThumbnailMetadata.get_many(
         reduce(lambda x, y: x | y,
-               [set(x.thumbnail_ids) for x in video_info.itervalues()]))
+               [set(x.thumbnail_ids) for x in video_info.itervalues()], []))
 
     thumbnail_info = statutils.get_thumb_metadata(video_info.values())
     thumbnail_info = thumbnail_info.set_index(['integration_id', 'video_id',
