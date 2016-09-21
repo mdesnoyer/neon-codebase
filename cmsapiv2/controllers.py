@@ -4037,8 +4037,7 @@ class ClipHandler(APIV2Handler):
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field, age=None, gender=None):
         if field == 'video_id':
-            retval = neondata.InternalVideoID.to_external(
-                neondata.InternalVideoID.from_thumbnail_id(obj.key))
+            retval = neondata.InternalVideoID.to_external(obj.video_id)
         elif field == 'clip_id':
             retval = obj.key
         elif field == 'url':
