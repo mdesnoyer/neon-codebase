@@ -4024,13 +4024,14 @@ class ClipHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'clip_id', 'rank', 'start_frame',
                 'enabled', 'url', 'end_frame', 'type',
-                'created', 'updated', 'neon_score', 'duration']
+                'created', 'updated', 'neon_score', 'duration',
+                'thumbnail_id']
 
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'start_frame', 'type', 'duration',
                 'enabled', 'end_frame',
-                'created', 'updated']
+                'created', 'updated', 'thumbnail_id']
 
     @classmethod
     @tornado.gen.coroutine
@@ -4043,13 +4044,11 @@ class ClipHandler(APIV2Handler):
         elif field == 'url':
             retval = obj.urls[0] if obj.urls else None
         elif field == 'renditions':
-            # TODO(handle renditions like other endpoints)
             renditions = yield neondata.VideoRendition.search_for_objects(
                 clip_id=obj.get_id(), async=True)
             retval = [x.__dict__ for x in renditions]
         elif field == 'neon_score':
-            # Do the raw score for now
-            retval = obj.score
+            retval = obj.get_neon_score()
         else:
             raise BadRequestError('invalid field %s' % field)
 

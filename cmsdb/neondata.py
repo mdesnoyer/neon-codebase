@@ -5930,6 +5930,16 @@ class Clip(StoredObject):
 
         yield Clip.delete(key, async=True)
 
+    def get_neon_score(self):
+        """Get a value in [1..99] that the Neon score maps to.
+
+        Uses a mapping dictionary according to the name of the
+        scoring model.
+        """ 
+        if self.score is not None and float(self.score):
+            return model.scores.lookup(self.model_version, self.score, None, None)
+        return None
+
 
 class VideoRendition(StoredObject, Searchable):
     '''
