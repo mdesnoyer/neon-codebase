@@ -181,7 +181,7 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
 
     ranks = set(all_data['rank'])
     total_neon_winners = dict([(('total_neon_winners', i), count_unique_index(
-        nwins[nwins['rank'] <= i])) for i ranks])
+        nwins[nwins['rank'] <= i])) for i in ranks])
 
     meta_analysis = dict([('random_effects_%i' % i, calc_meta_analysis_from_dataframe(
         all_data[all_data['rank'] == i])) for i in ranks])
