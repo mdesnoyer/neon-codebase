@@ -9767,15 +9767,16 @@ class TestClipHandler(TestVerifiedControllersBase):
         rv_clip = rj['clips'][0] 
 
         self.assertDictContainsSubset({
-            'video_id' : 'vid1',
-            'rank' : 2,
-            'start_frame' : 47,
-            'end_frame' : 89,
+            'video_id': 'vid1',
+            'rank': 2,
+            'start_frame': 47,
+            'end_frame': 89,
             'enabled': True,
             'url': 'myclip.mp4',
             'type': 'neon',
-            'neon_score': 0.45,
-            'duration' : 1.4},
+            'neon_score': 15,  # 0.45 is mapped to this neon score
+            'duration': 1.4,
+            'thumbnail_id': 'tid1'},
             rv_clip)
 
         self.assertNotIn('renditions', rv_clip)
