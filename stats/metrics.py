@@ -178,15 +178,16 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
 
     nwins = sig_data[(sig_data['extra_conversions'] > 0) & 
                      (sig_data['p_value'] > 0.95)].set_index(index_names)
-    
+
+    ranks = set(all_data['rank'])
     total_neon_winners = dict([(('total_neon_winners', i), count_unique_index(
-        nwins[nwins['rank'] <= i])) for i in range(5)])
+        nwins[nwins['rank'] <= i])) for i ranks])
 
     meta_analysis = dict([('random_effects_%i' % i, calc_meta_analysis_from_dataframe(
-        all_data[all_data['rank'] == i])) for i in range(5)])
+        all_data[all_data['rank'] == i])) for i in ranks])
     meta_analysis = pandas.concat([calc_meta_analysis_from_dataframe(
-        all_data[all_data['rank'] == i]) for i in range(5)],
-        keys=['random_effects_%i' % i for i in range(5)], axis=1)
+        all_data[all_data['rank'] == i]) for i in ranks],
+        keys=['random_effects_%i' % i for i in ranks], axis=1)
 
     lots_of_clicks = all_data.reset_index().groupby(
         all_data.index.names).filter(
