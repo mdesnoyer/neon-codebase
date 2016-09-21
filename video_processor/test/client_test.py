@@ -2374,8 +2374,9 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(tag.video_id, self.video_id)
         self.assertEquals(tag.account_id, self.api_key)
         tag_thumb_ids = neondata.TagThumbnail.get(tag_id=tag.get_id())
-        # The clip thumbnails are not tagged to the video
-        self.assertItemsEqual(tag_thumb_ids, [])
+
+        # The clip thumbnails are also tagged to the video
+        self.assertItemsEqual(tag_thumb_ids, [c.thumbnail_id for c in clips])
         tag_clip_ids = neondata.TagClip.get(tag_id=tag.get_id())
         self.assertItemsEqual(tag_clip_ids,
                               [x.get_id() for x in clips+[default_clip]])

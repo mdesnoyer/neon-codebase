@@ -1374,6 +1374,12 @@ class ClipProcessor(VideoProcessor):
 
         yield self._tag_video(api_request)
 
+        # Associate all the clip thumbnails to the video.
+        yield neondata.TagThumbnail.save_many(
+            tag_id=self.video_metadata.tag_id,
+            thumbnail_id=[t.get_id() for t in self.clip_thumbs],
+            async=True)
+
         # Finally tag all the clips to the video
         try:
             ct = yield neondata.TagClip.save_many(
