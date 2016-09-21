@@ -506,6 +506,8 @@ class VideoProcessor(object):
             log_missing=False, 
             async=True)
 
+        print('02')
+
         if account_limits: 
             max_duration = account_limits.max_video_size
             if duration > max_duration: 

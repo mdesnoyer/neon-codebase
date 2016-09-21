@@ -2206,58 +2206,85 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         with self.assertRaises(Exception): 
             tas = yield self.vprocessor._get_email_params(video_data)
 
+    @patch('cmsdb.neondata.CDNHostingMetadataList.get')
     @tornado.testing.gen_test
-    def test_error_in_finalize_but_someone_else_finished_it(self):
+    def test_error_in_finalize_but_someone_else_finished_it(self, cdn_mocker):
 
-        _target = 'cmsdb.neondata.CDNHostingMetadataList.get'
-        with patch(_target) as cdn_mocker:
-            cdn_mock = self._future_wrap_mock(cdn_mocker)
+        cdn_mock = self._future_wrap_mock(cdn_mocker)
 
-            # Let's block on an inner yield, update the state of the
-            # request like another worker finishing, then raise
-            # an exception in the original finalize call.
-            event_worker_checked_job = tornado.locks.Event()
-            event_job_marked_finished = tornado.locks.Event()
+        # Let's block on an inner yield, update the state of the
+        # request like another worker finishing, then raise
+        # an exception in the original finalize call.
+        event_worker_checked_job = tornado.locks.Event()
+        event_job_marked_finished = tornado.locks.Event()
 
-            @tornado.gen.coroutine
-            def wait(*args, **kwargs):
-                # Wake the change job function.
-                event_worker_checked_job.set()
-                # Wait for the test to mark the job finished.
-                yield event_job_marked_finished.wait()
-            cdn_mock.side_effect = wait
+        @tornado.gen.coroutine
+        def wait(*args, **kwargs):
+            # Wake the change job function.
+            event_worker_checked_job.set()
+            # Wait for the test to mark the job finished.
+            yield event_job_marked_finished.wait()
+        cdn_mock.side_effect = wait
 
-            @tornado.gen.coroutine
-            def then_change_job_state(new_state):
-                # Wait for the test worker to check the request.
-                yield event_worker_checked_job.wait()
-                def _change_job_state(request):
-                    request.state = new_state
-                neondata.NeonApiRequest.modify('job1', self.api_key, _change_job_state)
-                # Wake the worker in the middle of finalizing the job.
-                event_job_marked_finished.set()
+        @tornado.gen.coroutine
+        def then_change_job_state(new_state):
+            # Wait for the test worker to check the request.
+            yield event_worker_checked_job.wait()
+            def _change_job_state(request):
+                request.state = new_state
+            neondata.NeonApiRequest.modify('job1', self.api_key, _change_job_state)
+            # Wake the worker in the middle of finalizing the job.
+            event_job_marked_finished.set()
 
-            self.vprocessor._finalize_response_impl = MagicMock()
-            finalize_impl_mock = self._future_wrap_mock(self.vprocessor._finalize_response_impl)
-            finalize_impl_mock.side_effect = Exception()
-            self.vprocessor.download_video_file = MagicMock()
-            self._future_wrap_mock(self.vprocessor.download_video_file)
-            self.vprocessor.video_downloader = MagicMock()
-            self.vprocessor.process_video = MagicMock()
-            self._future_wrap_mock(self.vprocessor.process_video)
+        # Since the except block is in vprocessor's start,
+        # mock the calls it makes before finalizing.
+        self.vprocessor._finalize_response_impl = MagicMock()
+        self.vprocessor.download_video_file = MagicMock()
+        self._future_wrap_mock(self.vprocessor.download_video_file)
+        self.vprocessor.video_downloader = MagicMock()
+        self.vprocessor.process_video = MagicMock()
+        self._future_wrap_mock(self.vprocessor.process_video)
 
-            yield [self.vprocessor.start(), then_change_job_state(neondata.RequestState.FINISHED)]
+        # Use this mock to test the bevhaior of an exception
+        # after the job has been finished.
+        finalize_impl_mock = self._future_wrap_mock(self.vprocessor._finalize_response_impl)
+        finalize_impl_mock.side_effect = Exception()
 
-            req = neondata.NeonApiRequest.get('job1', self.api_key)
-            self.assertEqual(req.state, neondata.RequestState.FINISHED)
-            self.assertEqual(req.fail_count, 0)
+        yield [self.vprocessor.start(), then_change_job_state(
+            neondata.RequestState.FINISHED)]
 
-            # Reset and try with the other finished state: serving.
-            event_job_marked_finished.clear()
-            event_worker_checked_job.clear()
+        req = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEqual(neondata.RequestState.FINISHED, req.state)
+        self.assertEqual(0, req.fail_count)
 
-            #yield [self.vprocessor.start(), then_change_job_state()]
+        # Reset and try with the other finished state: serving.
+        event_job_marked_finished.clear()
+        event_worker_checked_job.clear()
+        req.state = neondata.RequestState.PROCESSING
+        req.save()
+        self.vprocessor.video_downloader = MagicMock()
 
+        yield [self.vprocessor.start(), then_change_job_state(
+            neondata.RequestState.SERVING)]
+        req = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEqual(neondata.RequestState.SERVING, req.state)
+        self.assertEqual(0, req.fail_count)
+
+        # Validate a non-finished state raising an error in finalize
+        # still writes an error to request.
+        event_job_marked_finished.clear()
+        event_worker_checked_job.clear()
+        req.state = neondata.RequestState.PROCESSING
+        req.save()
+        self.vprocessor.video_downloader = MagicMock()
+        self.vprocessor.job_queue.hide_message = MagicMock()
+        self._future_wrap_mock(self.vprocessor.job_queue.hide_message)
+        yield [self.vprocessor.start(), then_change_job_state(
+            neondata.RequestState.SUBMIT)]
+
+        req = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEqual(1, req.fail_count)
+        self.assertEqual(neondata.RequestState.REQUEUED, req.state)
 
 
 class TestFinalizeClipResponse(TestFinalizeResponse):
