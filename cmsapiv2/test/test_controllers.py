@@ -8981,7 +8981,7 @@ class TestSocialImageGeneration(TestControllersBase):
         super(TestSocialImageGeneration, self).tearDown()
 
     @tornado.gen.coroutine
-    def get_response_image(self, video_id, share_token, platform=''):
+    def get_response_image(self, share_token, platform=''):
         url = self.get_url('/api/v2/{}/social/image/{}?share_token={}'.format(
             self.account_id,
             platform,
@@ -8991,17 +8991,20 @@ class TestSocialImageGeneration(TestControllersBase):
 
     @tornado.gen.coroutine
     def _get_share_token(resource, and_save=True):
-
+        if resource.share_token:
+            return resource.share_token
+        resource.share_token = ShareJWTHelper.encode({
+            'content_type': resource.__name__,
+            'content_id': resource.get_id()
+        })
+        if and_save:
+            resource.save()
+        return resource.share_token
 
     @tornado.testing.gen_test
     def test_basic(self):
-        self.video.share_token = ShareJWTHelper.encode({
-            'content_type': neondata.VideoMetadata.__name__,
-            'content_id': self.video.get_id()
-        })
-        self.video.save()
-
-        im, response = yield self.get_response_image()
+        share_token = yield self._get_share_token(self.video)
+        im, response = yield self.get_response_image(share_token)
         self.assertEquals(response.code, 200)
         self.assertEquals(response.headers['Content-Type'], 'image/jpg')
         self.assertEquals(im.size, (800,800))
@@ -9010,7 +9013,7 @@ class TestSocialImageGeneration(TestControllersBase):
         #im.show()
 
         # Check the different platforms that should have the same result
-        im, response = yield self.get_response_image('vid1', 'facebook')
+        im, response = yield self.get_response_image(share_token, 'facebook')
 
         self.assertEquals(response.code, 200)
         self.assertEquals(response.headers['Content-Type'], 'image/jpg')
@@ -9018,7 +9021,8 @@ class TestSocialImageGeneration(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_basic_twitter(self):
-        im, response = yield self.get_response_image('vid1', 'twitter')
+        share_token = yield self._get_share_token(self.video)
+        im, response = yield self.get_response_image(share_token, 'twitter')
 
         self.assertEquals(response.code, 200)
         self.assertEquals(response.headers['Content-Type'], 'image/jpg')
@@ -9029,8 +9033,12 @@ class TestSocialImageGeneration(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_unknown_video_id(self):
+        share_token = ShareJWTHelper.encode({
+            'content_type': VideoMetadata.__name__,
+            'content_id': 'unknown_id'
+        })
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.get_response_image('unknownvid')
+            yield self.get_response_image(share_token)
 
         self.assertEquals(e.exception.code, 400)
         self.assertRegexpMatches(
@@ -9038,68 +9046,26 @@ class TestSocialImageGeneration(TestControllersBase):
             'Invalid video id')
 
     @tornado.testing.gen_test
-    def test_badparams(self):
+    def test_bad_params(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(
                 self.get_url('/api/v2/{}/social/image'.format(
                     self.account_id)))
-
-        self.assertEquals(e.exception.code, 400)
-
-        with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(
-                self.get_url(
-                    '/api/v2/{}/social/image'.format(
-                        self.account_id)))
-
         self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test
-    def test_good_video_payload(self):
-        self.verify_account_mock.side_effect = [NotAuthorizedError(
-            'Invalid token')]
-        self.video.share_token = ShareJWTHelper.encode({
-             'content_type': 'VideoMetadata',
-             'content_id': self.video.get_id()})
-        self.video.save()
-        response = yield self.http_client.fetch(
-            self.get_url('/api/v2/{}/social/image'
-                         'share_token={}'.format(
-                             self.account_id,
-                             'vid1',
-                             self.video.share_token)))
-        self.assertEquals(response.code, 200)
-
-    @tornado.testing.gen_test
-    def test_bad_video_payload(self):
-        self.verify_account_mock.side_effect = [
-            NotAuthorizedError('Invalid token'),
-            NotAuthorizedError('Invalid token')]
-        with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(
-                self.get_url('/api/v2/{}/social/image?video_id={}&'
-                             'share_token={}'.format(
-                                 self.account_id, 'vid1',
-                                 ShareJWTHelper.encode({
-                                     'content_type': 'VideoMetadata',
-                                     'content_id': 'notexist_123'
-                                     }))))
-
-        self.assertEquals(e.exception.code, 401)
-
-        neondata.VideoMetadata('%s_vid2' % self.account_id).save()
+    def test_video_not_shared(self):
+        self.verify_account_mock.side_effect = NotAuthorizedError('Invalid token')
+        share_token = self._get_share_token(self.video, False)
+        url = self.get_url('/api/v2/{}/social/image?share_token={}'.format(
+            self.account_id,
+            share_token)
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(
-                self.get_url('/api/v2/{}/social/image?video_id={}&'
-                             'share_token={}'.format(
-                                 self.account_id, 'vid1',
-                                 ShareJWTHelper.encode({
-                                     'content_type': 'VideoMetadata',
-                                     'content_id': '%s_vid2' % self.account_id
-                                     }))))
 
         self.assertEquals(e.exception.code, 403)
+        neondata.VideoMetadata('%s_vid2' % self.account_id).save()
 
     @tornado.testing.gen_test
     def test_video_id_from_payload(self):
