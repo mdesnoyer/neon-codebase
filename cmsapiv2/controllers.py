@@ -3829,80 +3829,53 @@ class SocialImageHandler(ShareableContentHandler):
         '''On 200, returns a JPG image for sharing on social that is 
         composed of the baseline thumb and our best thumb.
         '''
-        schema = Schema({
+        Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            'platform': In(['twitter', '', None, 'facebook'])})
-        args = schema(self.args)
+            'platform': In(['twitter', '', None, 'facebook'])})(self.args)
 
         try:
+            # See if we can get the asset id from the payload
+            payload = self.share_payload
+            if not payload:
+                raise BadRequestError('This endpoint requires a share token', ResponseCode.HTTP_BAD_REQUEST)
 
-        # See if we can get the asset id from the payload
-        payload = self.share_payload
-        if not payload:
-            raise BadRequestError('This endpoint requires a share token', ResponseCode.HTTP_BAD_REQUEST)
+            pl_id = payload['content_id']
 
-        pl_type = payload['content_type']
-        pl_id = payload['content_id']
-
-        # Tag is primary type. VideoMetadata is here for backwards compat.
-        if _type not in ['Tag', 'VideoMetadata']:
-            statemon.state.increment('social_image_invalid_request')
-            raise ForbiddenError('Content token is not for valid type')
-            
-            # If an id is in the arguments, then match it against the payload.
-            if external_video_id is not None:
-                # Strictly match on type and id.
-                if _type != 'VideoMetadata' or _id != internal_video_id:
-                    statemon.state.increment('social_image_invalid_request')
-                    raise ForbiddenError('Content token is not for this video')
-            elif tag_id is not None:
-                if _type != 'Tag' or _id != tag_id:
-                    statemon.state.increment('social_image_invalid_request')
-                    raise ForbiddenError('Content token is not for this tag')
-
-            # Else, we have no id, so find it in the payload.
+            # Find a thumb to display.
+            # The is_authorized check validates these exist and match
+            # their share token with the share token.
+            if pl_type == neondata.VideoMetadata.__name__:
+                video = yield neondata.VideoMetadata.get(pl_id, async=True)
+                best_thumb = yield self._get_best_thumb_of_video(video)
+            elif pl_type == neondata.Tag.__name__:
+                tag = yield neondata.Tag.get(pl_id, async=True)
+                best_thumb = yield self._get_best_thumb_of_tag(tag)
+            elif pl_type == neondata.Clip.__name__:
+                clip = yield neondata.Clip.get(pl_id, async=True)
+                best_thumb = yield neondata.ThumbnailMetadata.get(clip.thumbnail_id)
             else:
-                if _type == 'VideoMetadata':
-                    internal_video_id = _id
-                    external_video_id = neondata.InternalVideoID.to_external(
-                        internal_video_id)
-                elif _type == 'Tag':
-                    tag_id = _id
+                raise ForbiddenError('Invalid token')
+
+            # Get the size needs based on the platform
+            width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
+                platform]
                 
-        if (external_video_id is None) == (tag_id is None):
-            statemon.state.increment('social_image_invalid_request')
-            raise Invalid('Exactly one of video_id or tag_id is required')
+            # Now, we build the image.
+            image = yield self._build_image(
+                best_thumb,
+                width,
+                height,
+                box_height,
+                font_size)
 
-        # Get the size needs based on the platform
-        width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
-            platform]
-            
-        if external_video_id is not None:
-            # We are building the composite for a video
-            video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
-            if video is None:
-                statemon.state.increment('social_image_invalid_request')
-                raise Invalid('Invalid video id')
+            buf = StringIO()
+            image.save(buf, 'jpeg', quality=90)
 
-            best_thumb = yield self._get_best_thumb_of_video(video)
-        else:
-            tag = yield neondata.Tag.get(tag_id, async=True)
-            if tag is None:
-                statemon.state.increment('social_image_invalid_request')
-                raise Invalid('Invalid tag id')
-            best_thumb = yield self._get_best_thumb_of_tag(tag)
-
-        # Now, we build the image.
-        image = yield self._build_image(best_thumb, width, height, box_height,
-                                        font_size)
-        buf = StringIO()
-        image.save(buf, 'jpeg', quality=90)
-
-        # Finally, write the image data to JPEG in the output
-        self.set_header('Content-Type', 'image/jpg')
-        self.set_status(200)
-        self.write(buf.getvalue())
-        self.finish()
+            # Finally, write the image data to JPEG in the output
+            self.set_header('Content-Type', 'image/jpg')
+            self.set_status(200)
+            self.write(buf.getvalue())
+            self.finish()
 
         except Exception as e:
             statemon.state.increment('social_image_invalid_request')

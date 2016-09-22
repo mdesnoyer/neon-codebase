@@ -8981,17 +8981,27 @@ class TestSocialImageGeneration(TestControllersBase):
         super(TestSocialImageGeneration, self).tearDown()
 
     @tornado.gen.coroutine
-    def get_response_image(self, video_id, platform=''):
-        url = self.get_url('/api/v2/{}/social/image/{}?video_id={}'.format(
-            self.account_id, platform, video_id))
-        response = yield self.http_client.fetch(url, method='GET')
-
+    def get_response_image(self, video_id, share_token, platform=''):
+        url = self.get_url('/api/v2/{}/social/image/{}?share_token={}'.format(
+            self.account_id,
+            platform,
+            share_token))
+        response = yield self.http_client.fetch(url)
         raise tornado.gen.Return((PIL.Image.open(response.buffer), response))
+
+    @tornado.gen.coroutine
+    def _get_share_token(resource, and_save=True):
+
 
     @tornado.testing.gen_test
     def test_basic(self):
-        im, response = yield self.get_response_image('vid1')
+        self.video.share_token = ShareJWTHelper.encode({
+            'content_type': neondata.VideoMetadata.__name__,
+            'content_id': self.video.get_id()
+        })
+        self.video.save()
 
+        im, response = yield self.get_response_image()
         self.assertEquals(response.code, 200)
         self.assertEquals(response.headers['Content-Type'], 'image/jpg')
         self.assertEquals(im.size, (800,800))
@@ -8999,7 +9009,7 @@ class TestSocialImageGeneration(TestControllersBase):
         # Uncomment this to see the image for manual inspection purposes
         #im.show()
 
-        # Check the different platforms that should ahve the same result
+        # Check the different platforms that should have the same result
         im, response = yield self.get_response_image('vid1', 'facebook')
 
         self.assertEquals(response.code, 200)
@@ -9031,16 +9041,16 @@ class TestSocialImageGeneration(TestControllersBase):
     def test_badparams(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(
-                self.get_url('/api/v2/{}/social/image?tag_id={}'.format(
-                    self.account_id, 'tag')))
+                self.get_url('/api/v2/{}/social/image'.format(
+                    self.account_id)))
 
         self.assertEquals(e.exception.code, 400)
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(
                 self.get_url(
-                    '/api/v2/{}/social/image?tag_id={}&video_id={}'.format(
-                        self.account_id, 'tag', 'vid1')))
+                    '/api/v2/{}/social/image'.format(
+                        self.account_id)))
 
         self.assertEquals(e.exception.code, 400)
 
@@ -9053,7 +9063,7 @@ class TestSocialImageGeneration(TestControllersBase):
              'content_id': self.video.get_id()})
         self.video.save()
         response = yield self.http_client.fetch(
-            self.get_url('/api/v2/{}/social/image?video_id={}&'
+            self.get_url('/api/v2/{}/social/image'
                          'share_token={}'.format(
                              self.account_id,
                              'vid1',
