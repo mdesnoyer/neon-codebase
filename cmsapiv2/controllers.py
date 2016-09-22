@@ -3831,28 +3831,23 @@ class SocialImageHandler(ShareableContentHandler):
         '''
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            'platform': In(['twitter', '', None, 'facebook']),
-            'video_id': All(Coerce(str), Length(min=1, max=256)),
-            'tag_id': All(Coerce(str), Length(min=1, max=256))})
-        args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
+            'platform': In(['twitter', '', None, 'facebook'])})
+        args = schema(self.args)
 
-        external_video_id = args.get('video_id')
-        internal_video_id = neondata.InternalVideoID.generate(
-            account_id, external_video_id)
-        tag_id = args.get('tag_id')
-        
+        try:
 
         # See if we can get the asset id from the payload
         payload = self.share_payload
-        if payload:
-            _type = payload['content_type']
-            _id = payload['content_id']
+        if not payload:
+            raise BadRequestError('This endpoint requires a share token', ResponseCode.HTTP_BAD_REQUEST)
 
-            if _type not in ['Tag', 'VideoMetadata']:
-                statemon.state.increment('social_image_invalid_request')
-                raise ForbiddenError('Content token is not for valid type')
+        pl_type = payload['content_type']
+        pl_id = payload['content_id']
+
+        # Tag is primary type. VideoMetadata is here for backwards compat.
+        if _type not in ['Tag', 'VideoMetadata']:
+            statemon.state.increment('social_image_invalid_request')
+            raise ForbiddenError('Content token is not for valid type')
             
             # If an id is in the arguments, then match it against the payload.
             if external_video_id is not None:
@@ -3908,6 +3903,11 @@ class SocialImageHandler(ShareableContentHandler):
         self.set_status(200)
         self.write(buf.getvalue())
         self.finish()
+
+        except Exception as e:
+            statemon.state.increment('social_image_invalid_request')
+            raise e
+
         statemon.state.increment('social_image_generated')
 
     @tornado.gen.coroutine
