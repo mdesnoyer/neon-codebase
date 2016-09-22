@@ -187,6 +187,11 @@ def _convert_to_gray(image):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return image
 
+def _convert_to_color(image):
+    if len(image.shape) == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    return image
+
 class ImagePrep(object):
     '''
     Exports a class that preprocesses images in a varity of configurable ways.
@@ -198,13 +203,15 @@ class ImagePrep(object):
                  scale_width=None, image_size=None,
                  crop_image_size=None, image_area=None,
                  crop_frac=None, convert_to_gray=False,
-                 return_same=False, return_pil=False):
+                 return_same=False, return_pil=False,
+                 convert_to_color=False):
         '''
         If any of the inputs are None or False, then that input does not
         trigger any preprocessing.
 
         Inputs are defined by the actions they trigger. In order of
         application:
+            - convert image to color (BGR)
             - convert image to grayscale.
             - resize such that height is not more than max_height
             - resize such that width is not more than max_width
@@ -294,6 +301,7 @@ class ImagePrep(object):
         self.image_area = image_area
         self.crop_frac = crop_frac
         self.convert_to_gray = convert_to_gray
+        self.convert_to_color = convert_to_color
         self.return_pil = return_pil
         self.return_same = return_same
 
@@ -302,6 +310,8 @@ class ImagePrep(object):
             return [self(x) for x in image]
         not_cv = _not_CV(image)
         image = _ensure_CV(image)
+        if self.convert_to_color:
+            image = _convert_to_color(image)
         if self.convert_to_gray:
             image = _convert_to_gray(image)
         if self.max_height is not None:

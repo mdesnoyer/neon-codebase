@@ -1395,6 +1395,7 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
     def initialize(self):
         super(ThumbnailHandler, self).initialize()
         self.predictor = None
+        self.imagePrep = utils.pycvutils.ImagePrep(convert_to_color=True)
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1571,9 +1572,9 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
     @tornado.gen.coroutine
     def _score_images(self):
         self._initialize_predictor()
-        # Convert from PIL ImageFile to cv2 for predict.
+        # Convert from PIL ImageFile to well-formatted cv2 for predict.
         for (_, i), t in (zip(self.images, self.thumbs)):
-            cv_image = PILImageUtils.to_cv(i)
+            cv_image = self.imagePrep(i)
             yield t.score_image(self.predictor, cv_image, True)
 
     @tornado.gen.coroutine

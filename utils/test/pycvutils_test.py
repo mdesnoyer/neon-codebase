@@ -19,6 +19,7 @@ areatol = .01    # area:             tolerance = areatol * max(area1, area2)
 asptol = .01     # aspect ratio:     tolerance = asptol * max(asp1, asp2)
 
 TEST_IMAGE = os.path.join(os.path.dirname(__file__), 'im480x360.jpg')
+TEST_GRAY_IMAGE = os.path.join(os.path.dirname(__file__), 'grayscale.jpg')
 
 def _is_CV(image):
     return type(image).__module__ == np.__name__
@@ -425,6 +426,19 @@ class TestImagePrep(unittest.TestCase):
             imageSeq = run_imageprep_seq(self.image_cv, config)
             imageEns = ip(self.image_cv)
             self.assertTrue(np.array_equiv(imageSeq, imageEns))
+
+    def test_gray_to_bgr(self):
+        image_pil = Image.open(TEST_GRAY_IMAGE)
+        ip = ImagePrep(convert_to_color=True)
+        image_cv = ip(image_pil)
+        self.assertEqual(520, len(image_cv))
+        self.assertEqual(400, len(image_cv[0]))
+        self.assertEqual(3, len(image_cv[0][0]))
+        ip = ImagePrep()
+        image_cv = ip(image_pil)
+        self.assertEqual(520, len(image_cv))
+        self.assertEqual(400, len(image_cv[0]))
+        self.assertEqual(33, image_cv[0][0])
 
 class TestResizeAndCrop(unittest.TestCase):
     '''
