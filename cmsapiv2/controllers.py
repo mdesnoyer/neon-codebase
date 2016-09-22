@@ -1976,7 +1976,7 @@ class VideoHelper(object):
                         x.n_clips = int(x.n_clips)
                     x.clip_length = args.get('clip_length', x.clip_length)
                     if x.clip_length is not None:
-                        x.clip_length = float(request.clip_length)
+                        x.clip_length = float(x.clip_length)
                     x.api_param = args.get('n_thumbs', x.api_param)
                     if x.api_param is not None:
                         x.api_param = int(x.api_param)
