@@ -28,7 +28,6 @@ import cv2
 import dateutil.parser
 import ffvideo
 import hashlib
-import imageio
 import integrations
 import json
 import model
