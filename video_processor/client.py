@@ -63,8 +63,7 @@ import logging
 _log = logging.getLogger(__name__)
 
 # Hide warnings from image process.
-logging.getLogger('sklearn').setLevel(logging.ERROR)
-logging.getLogger('scipy').setLevel(logging.ERROR)
+logging.getLogger('model.filters').setLevel(logging.ERROR)
 
 #Monitoring
 statemon.define('processed_video', int)
