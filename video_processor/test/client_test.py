@@ -889,14 +889,19 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_dequeue_job_with_failed_attempts(self):
-
+        cb = neondata.VideoCallbackResponse(
+           'job1',
+           self.api_key, 
+           err='failed because of cows moooooo') 
         def _change_job_state(request):
             request.fail_count = 4
+            request.response = cb.to_dict() 
             request.state = neondata.RequestState.PROCESSING
                       
         req = neondata.NeonApiRequest.modify('job1', self.api_key, 
                                              _change_job_state)
-        with self.assertLogExists(logging.ERROR, 'has failed too many times'):
+        m = 'too many times. Last Failure Message: failed because of cows mooo'
+        with self.assertLogExists(logging.ERROR, m):  
             yield self.video_client.do_work(async=True)
 
         # Make sure the job was deleted
