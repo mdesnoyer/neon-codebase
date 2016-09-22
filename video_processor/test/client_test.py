@@ -2208,9 +2208,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
 
     @patch('cmsdb.neondata.CDNHostingMetadataList.get')
     @tornado.testing.gen_test
-    def test_error_in_finalize_but_someone_else_finished_it(self, cdn_mocker):
-
-        cdn_mock = self._future_wrap_mock(cdn_mocker)
+    def test_error_in_finalize_but_someone_else_finished_it(self, cdn_mock):
 
         # Let's block on an inner yield, update the state of the
         # request like another worker finishing, then raise
