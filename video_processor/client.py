@@ -556,6 +556,12 @@ class VideoProcessor(object):
             raise DBError("Could not fetch processing strategy")
         self.model.update_processing_strategy(processing_strategy)
 
+        # we have an updated duration at this point lets hide 
+        # this job for this duration
+        yield self._set_job_timeout(
+            self.video_metadata.duration, 
+            time_factor=processing_strategy.processing_time_ratio)
+
         try:
             yield self._process_video_impl(self.mov)
         except model.errors.VideoReadError:

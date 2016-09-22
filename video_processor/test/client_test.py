@@ -673,6 +673,16 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor.m_thumbs = 6
         yield vprocessor.process_video(self.test_video_file)
 
+        # ensure the job timeout was set correctly 
+        processing_strategy = yield neondata.ProcessingStrategy.get(
+            self.api_key, async=True)
+        job_time = int(
+            processing_strategy.processing_time_ratio * 
+            vprocessor.video_metadata.duration)
+        self.job_hide_mock.assert_called_with(
+            self.job_message,
+            job_time)
+
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
         cargs, kwargs = self.model.choose_thumbnails.call_args
