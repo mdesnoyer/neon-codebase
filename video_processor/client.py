@@ -1503,7 +1503,12 @@ class VideoClient(multiprocessing.Process):
                 if (api_request.fail_count >= options.max_fail_count or 
                     api_request.try_count >= options.max_attempt_count):
                     msg = ('Job %s for account %s has failed too many '
-                           'times' % (job_id, api_key))
+                           'times. Last Failure Message: %s' % (
+                               job_id, 
+                               api_key, 
+                               api_request.response.get(
+                                 'error', 
+                                 'Could not find last error message.')))
                     _log.error(msg)
                     statemon.state.increment('too_many_failures')
                     
