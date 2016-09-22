@@ -3840,6 +3840,7 @@ class SocialImageHandler(ShareableContentHandler):
                 raise BadRequestError('This endpoint requires a share token', ResponseCode.HTTP_BAD_REQUEST)
 
             pl_id = payload['content_id']
+            pl_type = payload['content_type']
 
             # Find a thumb to display.
             # The is_authorized check validates these exist and match
