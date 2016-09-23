@@ -99,7 +99,7 @@ class ScoreEyes(object):
         for img in imgs:
             X.append(self._get_x_vec(img))
         X = np.array(X)
-        with warnings.catch_warnings(sklearn.exceptions.DataConversionWarning):
+        with warnings.catch_warnings(sklearn.utils.validation.DataConversionWarning):
               X = self.scaler.transform(X)
         scores = self.clf.decision_function(X)
         classif = [x > 0 for x in scores]
