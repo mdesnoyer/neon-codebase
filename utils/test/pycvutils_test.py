@@ -19,6 +19,7 @@ areatol = .01    # area:             tolerance = areatol * max(area1, area2)
 asptol = .01     # aspect ratio:     tolerance = asptol * max(asp1, asp2)
 
 TEST_IMAGE = os.path.join(os.path.dirname(__file__), 'im480x360.jpg')
+TEST_GRAY_IMAGE = os.path.join(os.path.dirname(__file__), 'grayscale.jpg')
 
 def _is_CV(image):
     return type(image).__module__ == np.__name__
@@ -108,17 +109,25 @@ def produce_rand_config(image, base_prob=0.5):
         pd['convert_to_gray'] = True
     else:
         pd['convert_to_gray'] = False
+    if base_prob < np.random.rand():
+        pd['convert_to_color'] = True
+    else:
+        pd['convert_to_color'] = False
     return pd
 
 def run_imageprep_seq(image, config):
     '''
     Runs ImagePrep sequentially by evaluating the arguments in-order
     '''
-    op_order = ['convert_to_gray', 'max_height', 'max_width',
+    op_order = ['convert_to_color', 'convert_to_gray', 'max_height', 'max_width',
                 'max_side', 'scale_height', 'scale_width', 'image_size',
                 'image_area', 'crop_frac']
     for i in op_order:
-        ip = ImagePrep(**{i:config.get(i, None)})
+        # convert_to_color, if defaulted, will break this test
+        # if convert_to_gray is also true (i.e., it will run last 
+        # and override convert to gray).
+        args = {'convert_to_color': False, i:config.get(i, None)}
+        ip = ImagePrep(**args)
         image = ip(image)
 
     return image
@@ -425,6 +434,19 @@ class TestImagePrep(unittest.TestCase):
             imageSeq = run_imageprep_seq(self.image_cv, config)
             imageEns = ip(self.image_cv)
             self.assertTrue(np.array_equiv(imageSeq, imageEns))
+
+    def test_gray_to_bgr(self):
+        image_pil = Image.open(TEST_GRAY_IMAGE)
+        ip = ImagePrep()
+        image_cv = ip(image_pil)
+        self.assertEqual(520, len(image_cv))
+        self.assertEqual(400, len(image_cv[0]))
+        self.assertEqual(3, len(image_cv[0][0]))
+        ip = ImagePrep(convert_to_color=False)
+        image_cv = ip(image_pil)
+        self.assertEqual(520, len(image_cv))
+        self.assertEqual(400, len(image_cv[0]))
+        self.assertEqual(33, image_cv[0][0])
 
 class TestResizeAndCrop(unittest.TestCase):
     '''
