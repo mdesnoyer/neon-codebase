@@ -62,9 +62,6 @@ from video_processor import video_processing_queue
 import logging
 _log = logging.getLogger(__name__)
 
-# Hide warnings from image process.
-logging.getLogger('model.filters').setLevel(logging.ERROR)
-
 #Monitoring
 statemon.define('processed_video', int)
 statemon.define('processing_error', int)
