@@ -72,8 +72,9 @@ class MovieMultipleFeatureGenerator(object):
                           end of the movie not to sample
         '''
         self.feature_generators = feature_generators
-        self.frame_step=1
-        self.startend_buffer=startend_buffer
+        self.frame_step = 1
+        self.max_height = max_height
+        self.startend_buffer = startend_buffer
 
     def __str__(self):
         return utils.obj.full_object_str(self)
