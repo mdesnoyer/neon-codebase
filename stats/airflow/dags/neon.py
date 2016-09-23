@@ -27,11 +27,6 @@ When airflow start date == execution date (Day 1, HOUR OO): Beginning of time
     a task to copy/checkpoint the data from HDFS to S3. This is going to be a big run hence the task
     instances will be spun up and later brought down once run is complete.
 
-When airflow start date != execution date (Any day, HOUR 00):
-    For the first run of each day, the input data will still be pulled off the previous day's 
-    S3 bucket for processing. Reason being, the previous day's last run will be at 21:00 so we
-    dont want to miss processing the data between 21:00 to 23:59 of previous day.
-
 When airflow start date != execution date (Any day, HOUR XX):
     Incremental processing
 
@@ -263,13 +258,16 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
     for tai in _get_s3_tais(input_path):
         tai_prefix = os.path.join(prefix, tai, processing_date, '')
 
-        #check if the prefix exists
+        # Check if the prefix exists and get the keys only if it does
         prefix_exists = check_for_prefix(tai_prefix, bucket_name)
 
-        # Get the S3 keys only if prefix exists
+        # Get only the full keys of avro files from a prefix. 
+        # Ignore the prefix itself that is returned by the list
         if prefix_exists:
-            for key in get_keys(tai_prefix, bucket_name):
-                input_files.append(key.name)
+            for key in bucket.list(prefix=tai_prefix):
+                match = re.search(".*avro", key.name)
+                if match:
+                    input_files.append(match.group(0))
         else:
             _log.info(("tai {tai} does not have any objects in S3 prefix "
                           "{prefix}").format(tai=tai, prefix=tai_prefix))
@@ -400,18 +398,6 @@ def check_for_prefix(tai_prefix, bucket_name):
     prefix_exists = any([prefixes.name for prefixes in list_prefix if prefixes.name])
 
     return True if prefix_exists else False
-
-
-def get_keys(tai_prefix, bucket_name):
-    """
-    Get the s3 keys to be copied
-    """
-    s3 = S3Connection()
-
-    bucket = s3.get_bucket(bucket_name)
-    list_keys = list(bucket.list(prefix=tai_prefix, delimiter='/'))
-
-    return list_keys
 
 
 def check_first_run(execution_date):
