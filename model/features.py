@@ -127,7 +127,8 @@ class MovieMultipleFeatureGenerator(object):
                     break
                 frameno = cur_frame
 
-                prepped_image = self._get_prep(image)
+                prep = self._get_prep()
+                prepped_image = prep(image)
                 for gen in self.feature_generators:
                     feats = gen.generate(prepped_image)
                     rval[gen.__class__][int(frameno)] = feats
