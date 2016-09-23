@@ -58,6 +58,14 @@ class PILImageUtils(object):
             np.uint8))
 
     @classmethod
+    def create_random_gray_image(cls, h, w):
+        ''' Return a random grayscale image '''
+        ''' return a random image '''
+        return Image.fromarray(np.array(
+            np.random.random_integers(0, 255, (h, w)),
+            np.uint8))
+
+    @classmethod
     def to_cv(cls, im):
         '''Convert a PIL image to an OpenCV one in BGR format.'''
 

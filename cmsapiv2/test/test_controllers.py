@@ -4223,8 +4223,6 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(clip_lists['F']['age'], '20-29')
         self.assertItemsEqual(clip_lists['F']['clip_ids'], ['clip1', 'clip3'])
         
-
-
 class TestThumbnailHandler(TestControllersBase):
     def setUp(self):
 
@@ -4267,6 +4265,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.random_image = PILImageUtils.create_random_image(480, 640)
         self.random_image2 = PILImageUtils.create_random_image(480, 640)
         self.random_image3 = PILImageUtils.create_random_image(480, 640)
+        self.random_gray_image = PILImageUtils.create_random_gray_image(480, 640)
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
         self.im_download_mock.side_effect = [
@@ -4397,34 +4396,42 @@ class TestThumbnailHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body(self):
 
-        start_thumb_ct = len(self.video.thumbnail_ids)
+        expect_thumb_ct = len(self.video.thumbnail_ids)
+        expect_rank = 1
 
         thumbnail_ref = 'kevin'
         url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
             self.account_id_api_key, thumbnail_ref))
-        buf = StringIO()
-        self.random_image.save(buf, 'JPEG')
-        body = MultipartEncoder({
-            'video_id': self.video_id,
-            'upload': ('image1.jpg', buf.getvalue())})
-        headers = {'Content-Type': body.content_type}
+        for image in [self.random_image, self.random_gray_image]:
+            buf = StringIO()
+            image.save(buf, 'JPEG')
+            body = MultipartEncoder({
+                'video_id': self.video_id,
+                'upload': ('image1.jpg', buf.getvalue())})
+            headers = {'Content-Type': body.content_type}
 
-        self.im_download_mock.side_effect = Exception('No download allowed')
-        response = yield self.http_client.fetch(
-            url,
-            headers=headers,
-            body=body.to_string(),
-            method='POST')
-        self.assertEqual(response.code, 202)
+            self.im_download_mock.side_effect = Exception('No download allowed')
+            response = yield self.http_client.fetch(
+                url,
+                headers=headers,
+                body=body.to_string(),
+                method='POST')
+            self.assertEqual(response.code, 202)
 
-        video = neondata.VideoMetadata.get(self.video.get_id())
-        self.assertEqual(start_thumb_ct + 1, len(video.thumbnail_ids))
+            video = neondata.VideoMetadata.get(self.video.get_id())
+            expect_thumb_ct += 1
+            self.assertEqual(expect_thumb_ct, len(video.thumbnail_ids))
 
-        thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[-1])
-        self.assertEqual(thumbnail.external_id, 'kevin')
-        self.assertEqual(thumbnail.video_id, video.get_id())
-        self.assertEqual(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
-        self.assertEqual(thumbnail.rank, 0)
+            thumbnail = neondata.ThumbnailMetadata.get(video.thumbnail_ids[-1])
+            self.assertEqual(thumbnail.external_id, 'kevin')
+            self.assertEqual(thumbnail.video_id, video.get_id())
+            self.assertEqual(thumbnail.type, neondata.ThumbnailType.CUSTOMUPLOAD)
+            expect_rank -= 1
+            self.assertEqual(thumbnail.rank, expect_rank)
+            # Expected shape is 480, 640, 3
+            self.assertEqual(480, len(self.model_predict_mock.call_args[0][0]))
+            self.assertEqual(640, len(self.model_predict_mock.call_args[0][0][0]))
+            self.assertEqual(3, len(self.model_predict_mock.call_args[0][0][0][0]))
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body_no_video(self):
@@ -4609,6 +4616,18 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(splits[0], '20160713-test')
         self.assertGreaterEqual(int(splits[1]), 0)
         self.assertLess(int(splits[1]), 1024)
+
+    @tornado.testing.gen_test
+    def test_feature_values(self):
+        thumbnail_id = '%s_vid0_testingtid' % self.account_id_api_key
+        url = '/api/v2/%s/thumbnails?thumbnail_id=%s&fields=%s' % (
+            self.account_id_api_key, thumbnail_id, 'thumbnail_id,features')
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)['thumbnails'][0]
+
+        feature_vals = rjson['features']
+        self.assertEqual(len(feature_vals), 1024)
+        self.assertEquals(feature_vals, list(self.thumb.features))
 
     @tornado.testing.gen_test
     def test_share_token_allows_get(self):
@@ -9755,15 +9774,16 @@ class TestClipHandler(TestVerifiedControllersBase):
         rv_clip = rj['clips'][0] 
 
         self.assertDictContainsSubset({
-            'video_id' : 'vid1',
-            'rank' : 2,
-            'start_frame' : 47,
-            'end_frame' : 89,
+            'video_id': 'vid1',
+            'rank': 2,
+            'start_frame': 47,
+            'end_frame': 89,
             'enabled': True,
             'url': 'myclip.mp4',
             'type': 'neon',
-            'neon_score': 0.45,
-            'duration' : 1.4},
+            'neon_score': 15,  # 0.45 is mapped to this neon score
+            'duration': 1.4,
+            'thumbnail_id': 'tid1'},
             rv_clip)
 
         self.assertNotIn('renditions', rv_clip)

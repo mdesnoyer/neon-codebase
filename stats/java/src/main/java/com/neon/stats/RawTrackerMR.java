@@ -104,7 +104,11 @@ public class RawTrackerMR extends Configured implements Tool {
             TrackerEvent newEvent = key.datum();
             newEvent.setEventData(newEventData);
             newEvent.setEventType(EventType.IMAGE_VISIBLE);
-            context.write(new Text(mapKey + ExtractVideoId(editThumbId)),
+            videoId = ExtractVideoId(editThumbId);
+            if (videoId == ""){
+            	context.getCounter("EventStats", "InvalidVideoId").increment(1);
+            }
+            context.write(new Text(mapKey + videoId),
                 new AvroValue<TrackerEvent>(newEvent));
           }
           break;
@@ -121,7 +125,11 @@ public class RawTrackerMR extends Configured implements Tool {
             TrackerEvent newEvent = key.datum();
             newEvent.setEventData(imageLoad);
             newEvent.setEventType(EventType.IMAGE_LOAD);
-            context.write(new Text(mapKey + ExtractVideoId(editThumbId)),
+            videoId = ExtractVideoId(editThumbId);
+            if (videoId == ""){
+              context.getCounter("EventStats", "InvalidVideoId").increment(1);
+            }
+            context.write(new Text(mapKey + videoId),
                 new AvroValue<TrackerEvent>(newEvent));
           }
           break;
@@ -130,7 +138,11 @@ public class RawTrackerMR extends Configured implements Tool {
           ImageClick imageClickData = (ImageClick) key.datum().getEventData();
           editThumbId = NormalizeThumbnailId(imageClickData.getThumbnailId());
           imageClickData.setThumbnailId(editThumbId);
-          context.write(new Text(mapKey + ExtractVideoId(editThumbId)),
+          videoId = ExtractVideoId(editThumbId);
+          if (videoId == ""){
+            context.getCounter("EventStats", "InvalidVideoId").increment(1);
+          }
+          context.write(new Text(mapKey + videoId),
               new AvroValue<TrackerEvent>(key.datum()));
           break;
 
@@ -1210,12 +1222,18 @@ public class RawTrackerMR extends Configured implements Tool {
     if (thumbnailId == null) {
       return "";
     }
-    String[] split = thumbnailId.split("[_\\-]");
-    if (split.length != 3) {
-      // Invalid video id
-      return "";
+    // Split based on underscore and underscore/hyphen
+    String[] split_uc = thumbnailId.split("[_]");
+    String[] split_uc_hyphen = thumbnailId.split("[_\\-]");
+    
+    if (split_uc.length == 3){
+    	return split_uc[1];
+    } else if (split_uc_hyphen.length == 3) {
+    	return split_uc_hyphen[1];
+    } else {
+    	// Invalid video id
+    	return "";
     }
-    return split[1];
   }
 
   /**

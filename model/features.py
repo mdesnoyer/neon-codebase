@@ -23,7 +23,7 @@ import utils.obj
 from utils import pycvutils
 import model.errors
 from model.colorname import ColorName
-from model.parse_faces import DetectFaces, FindAndParseFaces
+from model.parse_faces import FindAndParseFaces
 from model.score_eyes import ScoreEyes
 from scipy.stats import entropy
 
@@ -72,11 +72,10 @@ class MovieMultipleFeatureGenerator(object):
                           end of the movie not to sample
         '''
         self.feature_generators = feature_generators
-        self.frame_step=1
-        self.startend_buffer=startend_buffer
-        self.prep = utils.pycvutils.ImagePrep(
-            max_height=max_height,
-            crop_frac=crop_frac)
+        self.frame_step = 1
+        self.max_height = max_height
+        self.crop_frac = crop_frac
+        self.startend_buffer = startend_buffer
 
     def __str__(self):
         return utils.obj.full_object_str(self)
@@ -130,7 +129,8 @@ class MovieMultipleFeatureGenerator(object):
                     break
                 frameno = cur_frame
 
-                prepped_image = self.prep(image)
+                prep = self._get_prep()
+                prepped_image = prep(image)
                 for gen in self.feature_generators:
                     feats = gen.generate(prepped_image)
                     rval[gen.__class__][int(frameno)] = feats
@@ -149,6 +149,11 @@ class MovieMultipleFeatureGenerator(object):
                 break
 
         return rval
+
+    def _get_prep(self):
+        return pycvutils.ImagePrep(
+            max_height=self.max_height,
+            crop_frac=self.crop_frac)
         
 
 class RegionFeatureGenerator(FeatureGenerator):
@@ -163,7 +168,6 @@ class RegionFeatureGenerator(FeatureGenerator):
         self.max_height = max_height
         self.crop_frac = crop_frac
         self.thresh = thresh
-        self._get_prep()
 
     def _process_images(self, images, fonly):
         '''
@@ -175,13 +179,14 @@ class RegionFeatureGenerator(FeatureGenerator):
         images = list(images)
         if fonly:
             images = images[:1]
-        images = [self.prep(x) for x in images]
+        prep = self._get_prep()
+        images = [prep(x) for x in images]
         return images
 
     def _get_prep(self):
-        self.prep = utils.pycvutils.ImagePrep(
-                            max_height=self.max_height,
-                            crop_frac=self.crop_frac)
+        return pycvutils.ImagePrep(
+            max_height=self.max_height,
+            crop_frac=self.crop_frac)
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -361,7 +366,8 @@ class SADGenerator(RegionFeatureGenerator):
             return np.array([np.inf])
         if fonly:
             images = images[:2]
-        images = [self.prep(x) for x in images]
+        prep = self._get_prep()
+        images = [prep(x) for x in images]
         SAD_vals = self._compute_SAD(images)
         feat_vec = [float(SAD_vals[0])]
         for i in range(0, len(SAD_vals)-1):
@@ -439,8 +445,10 @@ class FaceGenerator(RegionFeatureGenerator):
         '''
         super(FaceGenerator, self).__init__()
         self.MSFP = MSFP
-        self.prep = MSFP.prep
         self.max_height = MSFP.max_height
+
+    def _get_prep(self):
+        return pycvutils.ImagePrep(max_height=self.max_height)
 
     def _feat_calc(self, image):
         return self.MSFP.get_faces(image)
@@ -460,10 +468,8 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         '''
         super(ClosedEyeGenerator, self).__init__()
         self.MSFP = MSFP
-        self.prep = MSFP.prep
         self.max_height = MSFP.max_height
         self.scoreEyes = ScoreEyes(classifier)
-        self._get_prep()
 
     def _feat_calc(self, image):
         eyes = self.MSFP.get_eyes(image)
@@ -488,9 +494,11 @@ class FacialBlurGenerator(RegionFeatureGenerator):
         '''
         super(FacialBlurGenerator, self).__init__()
         self.MSFP = MSFP
-        self.prep = MSFP.prep
         self.thresh = thresh
         self.max_height = MSFP.max_height
+
+    def _get_prep(self):
+        return pycvutils.ImagePrep(max_height=self.max_height)
 
     def _feat_calc(self, image):
         faces = self.MSFP.get_face_subimages(image)
@@ -626,34 +634,6 @@ class EntropyGenerator(RegionFeatureGenerator):
 
     def get_feat_name(self):
         return 'entropy'
-
-# class TextGeneratorSlow(RegionFeatureGenerator):
-#     '''
-#     Returns the quantity of text per frame given a sequence
-#     of frames.
-
-#     Unlike the normal text filter, this does not chop off the
-#     bottom quadrant (at least, not be default)
-#     '''
-#     def __init__(self, max_height=480, crop_frac=None):
-#         super(TextGeneratorSlow, self).__init__(max_height=max_height,
-#                                                 crop_frac=crop_frac)
-
-#     def generate_many(self, images, fonly=False):
-#         images = list(images)
-#         if fonly:
-#             images = images[:1]
-#         feat_vec = []
-#         for img in images:
-#             img = self.prep(img)
-#             text_image = TextDetectionPy.TextDetection(img)
-#             score = (float(np.count_nonzero(text_image)) /
-#                 (text_image.shape[0] * text_image.shape[1]))
-#             feat_vec.append(score)
-#         return np.array(feat_vec)
-
-#     def get_feat_name(self):
-#         return 'text'
 
 class PixelVarGenerator(RegionFeatureGenerator):
     '''

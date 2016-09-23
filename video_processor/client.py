@@ -28,7 +28,6 @@ import cv2
 import dateutil.parser
 import ffvideo
 import hashlib
-import imageio
 import integrations
 import json
 import model
@@ -247,96 +246,110 @@ class VideoProcessor(object):
         '''
         Actual work done here
         '''
-        try:
-            statemon.state.increment('workers_downloading')
+        try: 
             try:
-                yield self.download_video_file()
-            finally:
-                statemon.state.decrement('workers_downloading')
-
-            #Process the video
-            with self.cv_semaphore:
-                statemon.state.increment('workers_cv_processing')
+                statemon.state.increment('workers_downloading')
                 try:
-                    yield self.process_video(
-                        self.video_downloader.get_local_filename()) 
+                    yield self.download_video_file()
                 finally:
-                    statemon.state.decrement('workers_cv_processing')
+                    statemon.state.decrement('workers_downloading')
 
-            #finalize response, if success send client and notification
-            #response
-            yield self.finalize_response()
+                #Process the video
+                with self.cv_semaphore:
+                    statemon.state.increment('workers_cv_processing')
+                    try:
+                        yield self.process_video(
+                            self.video_downloader.get_local_filename()) 
+                    finally:
+                        statemon.state.decrement('workers_cv_processing')
 
-            # Delete the job from the queue
-            _log.info('Deleting on %s' % self.job_queue)
-            yield self.job_queue.delete_message(self.job_message)
+                #finalize response, if success send client and notification
+                #response
+                yield self.finalize_response()
 
-        except OtherWorkerCompleted as e:
+                # Delete the job from the queue
+                _log.info('Deleting on %s' % self.job_queue)
+                yield self.job_queue.delete_message(self.job_message)
+
+            except OtherWorkerCompleted as e:
+                # This is expected. Skip the general exception handling.
+                # Let the except block one layer up handle this.
+                raise e
+
+            except Exception as e:
+                new_state = neondata.RequestState.CUSTOMER_ERROR
+                if not isinstance(e, VideoError):
+                    new_state = neondata.RequestState.INT_ERROR
+                    statemon.state.increment('unknown_exception')
+                    _log.exception("Unexpected error [%s]: %s" % (os.getpid(), e))
+
+                cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
+                                                    self.job_params['video_id'],
+                                                    err=e.message)
+                
+                def _write_failure(request):
+
+                    # Check if job has successfully finished by another worker.
+                    if request.state in [neondata.RequestState.FINISHED,
+                                         neondata.RequestState.SERVING]:
+                        # Since job is good, this error can be ignored.
+                        raise OtherWorkerCompleted();
+
+                    request.fail_count += 1
+                    request.response = cb.to_dict()
+                    if request.fail_count < options.max_fail_count:
+                        # This job is going to be requeued
+                        request.state = neondata.RequestState.REQUEUED
+                    else:
+                        request.state = new_state
+
+                api_request = yield neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'],
+                    self.job_params['api_key'],
+                    _write_failure,
+                    async=True)
+
+                if api_request is None:
+                    _log.warn('Job %s for account %s was deleted, so ignore' %
+                              (self.job_params['job_id'],
+                               self.job_params['api_key']))
+                    yield self.job_queue.delete_message(self.job_message)
+
+                elif api_request.state == neondata.RequestState.REQUEUED:
+                    # Let another node pick up the job to try again
+                    try:
+                        yield self.job_queue.hide_message(self.job_message, 
+                                                          options.dequeue_period
+                                                          / 2.0)
+                    except boto.exception.SQSError as e:
+                        _log.warn('Error hiding message: %s' % e)
+                
+                else:
+                    # It's the final error
+                    statemon.state.increment('processing_error')
+                
+                    # Send the callback to let the client know there was an
+                    # error that they might be able to fix
+                    if isinstance(e, VideoError):
+                        yield api_request.send_callback(async=True)
+
+                    # Delete the job
+                    _log.warn('Job %s for account %s has failed' %
+                              (api_request.job_id, api_request.api_key))
+                    yield self.job_queue.delete_message(self.job_message)
+                     
+                    # modify accountlimits to have one less video post
+                    def _modify_limits(al): 
+                        al.video_posts -= 1 
+                    yield neondata.AccountLimits.modify( 
+                        api_request.api_key, 
+                        _modify_limits, 
+                        async=True) 
+
+        except OtherWorkerCompleted:
             statemon.state.increment('other_worker_completed')
             _log.info('Job %s for account %s was already completed' %
                       (self.job_params['job_id'], self.job_params['api_key']))
-            return
-
-        except Exception as e:
-            new_state = neondata.RequestState.CUSTOMER_ERROR
-            if not isinstance(e, VideoError):
-                new_state = neondata.RequestState.INT_ERROR
-                _log.exception("Unexpected error [%s]: %s" % (os.getpid(), e))
-
-            cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
-                                                self.job_params['video_id'],
-                                                err=e.message)
-            
-            def _write_failure(request):
-                request.fail_count += 1
-                request.response = cb.to_dict()
-                if request.fail_count < options.max_fail_count:
-                    # This job is going to be requeued
-                    request.state = neondata.RequestState.REQUEUED
-                else:
-                    request.state = new_state
-            api_request = yield neondata.NeonApiRequest.modify(
-                self.job_params['job_id'],
-                self.job_params['api_key'],
-                _write_failure,
-                async=True)
-
-            if api_request is None:
-                _log.warn('Job %s for account %s was deleted, so ignore' %
-                          (self.job_params['job_id'],
-                           self.job_params['api_key']))
-                yield self.job_queue.delete_message(self.job_message)
-
-            elif api_request.state == neondata.RequestState.REQUEUED:
-                # Let another node pick up the job to try again
-                try:
-                    yield self.job_queue.hide_message(self.job_message, 
-                                                      options.dequeue_period
-                                                      / 2.0)
-                except boto.exception.SQSError as e:
-                    _log.warn('Error hiding message: %s' % e)
-            
-            else:
-                # It's the final error
-                statemon.state.increment('processing_error')
-            
-                # Send the callback to let the client know there was an
-                # error that they might be able to fix
-                if isinstance(e, VideoError):
-                    yield api_request.send_callback(async=True)
-
-                # Delete the job
-                _log.warn('Job %s for account %s has failed' %
-                          (api_request.job_id, api_request.api_key))
-                yield self.job_queue.delete_message(self.job_message)
-                 
-                # modify accountlimits to have one less video post
-                def _modify_limits(al): 
-                    al.video_posts -= 1 
-                yield neondata.AccountLimits.modify( 
-                    api_request.api_key, 
-                    _modify_limits, 
-                    async=True) 
        
         finally:
             # Close the video downloader
@@ -542,6 +555,12 @@ class VideoProcessor(object):
                         "%s: %s")%(str(account_id), e))
             raise DBError("Could not fetch processing strategy")
         self.model.update_processing_strategy(processing_strategy)
+
+        # we have an updated duration at this point lets hide 
+        # this job for this duration
+        yield self._set_job_timeout(
+            self.video_metadata.duration, 
+            time_factor=processing_strategy.processing_time_ratio)
 
         try:
             yield self._process_video_impl(self.mov)
@@ -1382,6 +1401,12 @@ class ClipProcessor(VideoProcessor):
 
         yield self._tag_video(api_request)
 
+        # Associate all the clip thumbnails to the video.
+        yield neondata.TagThumbnail.save_many(
+            tag_id=self.video_metadata.tag_id,
+            thumbnail_id=[t.get_id() for t in self.clip_thumbs],
+            async=True)
+
         # Finally tag all the clips to the video
         try:
             ct = yield neondata.TagClip.save_many(
@@ -1492,7 +1517,12 @@ class VideoClient(multiprocessing.Process):
                 if (api_request.fail_count >= options.max_fail_count or 
                     api_request.try_count >= options.max_attempt_count):
                     msg = ('Job %s for account %s has failed too many '
-                           'times' % (job_id, api_key))
+                           'times. Last Failure Message: %s' % (
+                               job_id, 
+                               api_key, 
+                               api_request.response.get(
+                                 'error', 
+                                 'Could not find last error message.')))
                     _log.error(msg)
                     statemon.state.increment('too_many_failures')
                     
