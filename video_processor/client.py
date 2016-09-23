@@ -280,6 +280,7 @@ class VideoProcessor(object):
                 new_state = neondata.RequestState.CUSTOMER_ERROR
                 if not isinstance(e, VideoError):
                     new_state = neondata.RequestState.INT_ERROR
+                    statemon.state.increment('unknown_exception')
                     _log.exception("Unexpected error [%s]: %s" % (os.getpid(), e))
 
                 cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
