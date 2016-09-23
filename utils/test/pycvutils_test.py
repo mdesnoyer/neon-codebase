@@ -109,17 +109,25 @@ def produce_rand_config(image, base_prob=0.5):
         pd['convert_to_gray'] = True
     else:
         pd['convert_to_gray'] = False
+    if base_prob < np.random.rand():
+        pd['convert_to_color'] = True
+    else:
+        pd['convert_to_color'] = False
     return pd
 
 def run_imageprep_seq(image, config):
     '''
     Runs ImagePrep sequentially by evaluating the arguments in-order
     '''
-    op_order = ['convert_to_gray', 'max_height', 'max_width',
+    op_order = ['convert_to_color', 'convert_to_gray', 'max_height', 'max_width',
                 'max_side', 'scale_height', 'scale_width', 'image_size',
                 'image_area', 'crop_frac']
     for i in op_order:
-        ip = ImagePrep(**{i:config.get(i, None)})
+        # convert_to_color, if defaulted, will break this test
+        # if convert_to_gray is also true (i.e., it will run last 
+        # and override convert to gray).
+        args = {'convert_to_color': False, i:config.get(i, None)}
+        ip = ImagePrep(**args)
         image = ip(image)
 
     return image
@@ -429,12 +437,12 @@ class TestImagePrep(unittest.TestCase):
 
     def test_gray_to_bgr(self):
         image_pil = Image.open(TEST_GRAY_IMAGE)
-        ip = ImagePrep(convert_to_color=True)
+        ip = ImagePrep()
         image_cv = ip(image_pil)
         self.assertEqual(520, len(image_cv))
         self.assertEqual(400, len(image_cv[0]))
         self.assertEqual(3, len(image_cv[0][0]))
-        ip = ImagePrep()
+        ip = ImagePrep(convert_to_color=False)
         image_cv = ip(image_pil)
         self.assertEqual(520, len(image_cv))
         self.assertEqual(400, len(image_cv[0]))

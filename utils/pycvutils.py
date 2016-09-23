@@ -204,7 +204,7 @@ class ImagePrep(object):
                  crop_image_size=None, image_area=None,
                  crop_frac=None, convert_to_gray=False,
                  return_same=False, return_pil=False,
-                 convert_to_color=False):
+                 convert_to_color=True):
         '''
         If any of the inputs are None or False, then that input does not
         trigger any preprocessing.
