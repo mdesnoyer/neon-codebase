@@ -74,6 +74,7 @@ class MovieMultipleFeatureGenerator(object):
         self.feature_generators = feature_generators
         self.frame_step = 1
         self.max_height = max_height
+        self.crop_frac = crop_frac
         self.startend_buffer = startend_buffer
 
     def __str__(self):
