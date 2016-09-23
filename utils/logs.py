@@ -24,6 +24,7 @@ if sys.path[0] != __base_path__:
 
 import atexit
 import copy
+from cloghandler import ConcurrentRotatingFileHandler
 import datetime
 import json
 import logging
@@ -175,7 +176,7 @@ def CreateLogger(name=None,
     # For a file output
     if logfile is not None:
         # Rotating file handler
-        handler = logging.handlers.RotatingFileHandler(
+        handler = ConcurrentRotatingFileHandler(
             logfile,
             maxBytes=options.max_log_file_size,
             backupCount=3)

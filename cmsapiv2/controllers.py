@@ -1395,6 +1395,7 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
     def initialize(self):
         super(ThumbnailHandler, self).initialize()
         self.predictor = None
+        self.imagePrep = utils.pycvutils.ImagePrep(convert_to_color=True)
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1571,9 +1572,9 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
     @tornado.gen.coroutine
     def _score_images(self):
         self._initialize_predictor()
-        # Convert from PIL ImageFile to cv2 for predict.
+        # Convert from PIL ImageFile to well-formatted cv2 for predict.
         for (_, i), t in (zip(self.images, self.thumbs)):
-            cv_image = PILImageUtils.to_cv(i)
+            cv_image = self.imagePrep(i)
             yield t.score_image(self.predictor, cv_image, True)
 
     @tornado.gen.coroutine
@@ -1976,7 +1977,7 @@ class VideoHelper(object):
                         x.n_clips = int(x.n_clips)
                     x.clip_length = args.get('clip_length', x.clip_length)
                     if x.clip_length is not None:
-                        x.clip_length = float(request.clip_length)
+                        x.clip_length = float(x.clip_length)
                     x.api_param = args.get('n_thumbs', x.api_param)
                     if x.api_param is not None:
                         x.api_param = int(x.api_param)
@@ -4030,32 +4031,30 @@ class ClipHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'clip_id', 'rank', 'start_frame',
                 'enabled', 'url', 'end_frame', 'type',
-                'created', 'updated', 'neon_score', 'duration']
+                'created', 'updated', 'neon_score', 'duration',
+                'thumbnail_id']
 
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'start_frame', 'type', 'duration',
                 'enabled', 'end_frame',
-                'created', 'updated']
+                'created', 'updated', 'thumbnail_id']
 
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field, age=None, gender=None):
         if field == 'video_id':
-            retval = neondata.InternalVideoID.to_external(
-                neondata.InternalVideoID.from_thumbnail_id(obj.key))
+            retval = neondata.InternalVideoID.to_external(obj.video_id)
         elif field == 'clip_id':
             retval = obj.key
         elif field == 'url':
             retval = obj.urls[0] if obj.urls else None
         elif field == 'renditions':
-            # TODO(handle renditions like other endpoints)
             renditions = yield neondata.VideoRendition.search_for_objects(
                 clip_id=obj.get_id(), async=True)
             retval = [x.__dict__ for x in renditions]
         elif field == 'neon_score':
-            # Do the raw score for now
-            retval = obj.score
+            retval = obj.get_neon_score()
         else:
             raise BadRequestError('invalid field %s' % field)
 
