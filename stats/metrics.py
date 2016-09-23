@@ -179,7 +179,7 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     nwins = sig_data[(sig_data['extra_conversions'] > 0) & 
                      (sig_data['p_value'] > 0.95)].set_index(index_names)
 
-    ranks = set(all_data['rank'])
+    ranks = set(all_data.ix[all_data['type'] == 'neon']['rank'])
     total_neon_winners = dict([(('total_neon_winners', i), count_unique_index(
         nwins[nwins['rank'] <= i])) for i in ranks])
 
