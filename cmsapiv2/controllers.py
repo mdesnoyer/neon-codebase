@@ -4000,7 +4000,7 @@ class SocialImageHandler(ShareableContentHandler):
     def get_access_levels(cls):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
-class ClipHandler(APIV2Handler):
+class ClipHandler(ShareableContentHandler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
