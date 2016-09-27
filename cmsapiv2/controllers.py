@@ -3830,68 +3830,59 @@ class SocialImageHandler(ShareableContentHandler):
         '''On 200, returns a JPG image for sharing on social that is 
         composed of the baseline thumb and our best thumb.
         '''
-        schema = Schema({
+        Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            'platform': In(['twitter', '', None, 'facebook']),
-            'video_id': All(Coerce(str), Length(min=1, max=256)),
-            'tag_id': All(Coerce(str), Length(min=1, max=256))})
-        args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
+            'platform': In(['twitter', '', None, 'facebook'])})(self.args)
 
-        external_video_id = args.get('video_id')
-        internal_video_id = neondata.InternalVideoID.generate(
-            account_id, external_video_id)
-        tag_id = args.get('tag_id')
-        
-        # See if we can get the asset id from the payload
-        if self.share_payload is not None:
-            if self.share_payload['content_type'] != 'VideoMetadata':
-                statemon.state.increment('social_image_invalid_request')
-                raise ForbiddenError('Content token is not for videos')
-            if external_video_id is not None:
-                if self.share_payload['content_id'] != internal_video_id:
-                    statemon.state.increment('social_image_invalid_request')
-                    raise ForbiddenError('Content token is not for this video')
+        try:
+            # See if we can get the asset id from the payload
+            payload = self.share_payload
+            if not payload:
+                raise BadRequestError('This endpoint requires a share token', ResponseCode.HTTP_BAD_REQUEST)
+
+            pl_id = payload['content_id']
+            pl_type = payload['content_type']
+
+            # Find a thumb to display.
+            # The is_authorized check validates these exist and match
+            # their share token with the share token.
+            if pl_type == neondata.VideoMetadata.__name__:
+                video = yield neondata.VideoMetadata.get(pl_id, async=True)
+                best_thumb = yield self._get_best_thumb_of_video(video)
+            elif pl_type == neondata.Tag.__name__:
+                tag = yield neondata.Tag.get(pl_id, async=True)
+                best_thumb = yield self._get_best_thumb_of_tag(tag)
+            elif pl_type == neondata.Clip.__name__:
+                clip = yield neondata.Clip.get(pl_id, async=True)
+                best_thumb = yield neondata.ThumbnailMetadata.get(clip.thumbnail_id)
             else:
-                # Grab the video id from the payload
-                internal_video_id = self.share_payload['content_id']
-                external_video_id = neondata.InternalVideoID.to_external(
-                    internal_video_id)
+                raise ForbiddenError('Invalid token')
+
+            # Get the size needs based on the platform
+            width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
+                platform]
                 
-        if (external_video_id is None) == (tag_id is None):
+            # Now, we build the image.
+            image = yield self._build_image(
+                best_thumb,
+                width,
+                height,
+                box_height,
+                font_size)
+
+            buf = StringIO()
+            image.save(buf, 'jpeg', quality=90)
+
+            # Finally, write the image data to JPEG in the output
+            self.set_header('Content-Type', 'image/jpg')
+            self.set_status(200)
+            self.write(buf.getvalue())
+            self.finish()
+
+        except Exception as e:
             statemon.state.increment('social_image_invalid_request')
-            raise Invalid('Exactly one of video_id or tag_id is required')
-        if tag_id is not None:
-            # TODO(nate, mdesnoyer): wire this up for image
-            # collections when we are ready for it.
-            statemon.state.increment('social_image_invalid_request')
-            raise Invalid('tag_id is not implemented yet')
+            raise e
 
-        # Get the size needs based on the platform
-        width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
-            platform]
-            
-
-        # We are building the composite for a video
-        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
-        if video is None:
-            statemon.state.increment('social_image_invalid_request')
-            raise Invalid('Invalid video id')
-
-        best_thumb = yield self._get_best_thumb(video)
-
-        # Now, we build the image. Hooray
-        image = yield self._build_image(best_thumb, width, height, box_height,
-                                        font_size)
-        buf = StringIO()
-        image.save(buf, 'jpeg', quality=90)
-
-        # Finally, write the image data to JPEG in the output
-        self.set_header('Content-Type', 'image/jpg')
-        self.set_status(200)
-        self.write(buf.getvalue())
-        self.finish()
         statemon.state.increment('social_image_generated')
 
     @tornado.gen.coroutine
@@ -3963,7 +3954,7 @@ class SocialImageHandler(ShareableContentHandler):
             raise Invalid(msg)
 
     @tornado.gen.coroutine
-    def _get_best_thumb(self, video):
+    def _get_best_thumb_of_video(self, video):
         '''Returns the (base, best) ThumbnailMetadata objects.'''
 
         # Get the job thumbnails
@@ -3990,11 +3981,26 @@ class SocialImageHandler(ShareableContentHandler):
 
         raise tornado.gen.Return(best_thumb)
 
+    @tornado.gen.coroutine
+    def _get_best_thumb_of_tag(self, tag):
+        thumb_ids = yield neondata.TagThumbnail.get(tag_id=tag.get_id(), async=True)
+        thumbnails = yield neondata.ThumbnailMetadata.get_many(
+            thumb_ids,
+            async=True)
+
+        # Sort the job thumbs ascending by model score
+        thumbnails = sorted(thumbnails, key=lambda x: x.get_score())
+
+        if len(thumbnails) == 0:
+            raise Invalid('Tag does not have any associated thumbnail')
+        best_thumb = thumbnails[-1]
+        raise tornado.gen.Return(best_thumb)
+
     @classmethod
     def get_access_levels(cls):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
-class ClipHandler(APIV2Handler):
+class ClipHandler(ShareableContentHandler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
