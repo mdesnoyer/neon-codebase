@@ -906,7 +906,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         # Return a hosting created from the merged metadata.
         return cmsdb.cdnhosting.CDNHosting.create(metadata)
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=20.0)
     def test_upload_mp4(self):
 
         hoster = self._get_mp4_hoster()
@@ -936,7 +936,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
             re = 'http://cdn[1-2].cdn.com/%s' % self.key_name_format % (w, h)
             self.assertRegexpMatches(url, re)
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=20.0)
     def test_mp4_key_with_make_tid_folders(self):
 
         hoster = self._get_mp4_hoster(make_tid_folders=True)
@@ -961,7 +961,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
             re = 'http://cdn[1-2].cdn.com/' + key_name
             self.assertRegexpMatches(url, re)
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=20.0)
     def test_mp4_width_or_height_is_none(self):
 
         hoster = self._get_mp4_hoster(
