@@ -246,10 +246,10 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
     :param input_path: the base path S3 URL for input files to the DAG
     :return:
     """
-
-    bucket_name, prefix = _get_s3_tuple(input_path)
-
     s3 = S3Connection()
+    
+    bucket_name, prefix = _get_s3_tuple(input_path)
+    bucket = s3.get_bucket(bucket_name)
 
     processing_date = execution_date.strftime('%Y/%m/%d')
     _log.info('processing date is %s' % processing_date)
