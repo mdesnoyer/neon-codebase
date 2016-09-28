@@ -5736,7 +5736,7 @@ class Clip(StoredObject):
     def __init__(self, clip_id=None, video_id=None, thumbnail_id=None, 
                  urls=None, ttype=None, rank=0, model_version=None, 
                  enabled=True, score=None, start_frame=None, end_frame=None,
-                 duration=None):
+                 duration=None, share_token=None):
         clip_id = clip_id or uuid.uuid4().hex
         super(Clip,self).__init__(clip_id)
 
@@ -5765,6 +5765,10 @@ class Clip(StoredObject):
         # will be a score combined of a raw valence score plus some
         # other stuff (like motion analysis)
         self.score = score
+
+        # Share token permits viewing by non-owner. It must
+        # be set to be used.
+        self.share_token = share_token
 
     @property
     def account_id(self):
