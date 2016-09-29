@@ -3738,7 +3738,9 @@ class FeatureHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList(
+                at_least_x=1, 
+                min_length_for_elements=1)), 
             'model_name' : All(Coerce(str), Length(min=1, max=512)), 
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
