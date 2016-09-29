@@ -1932,7 +1932,9 @@ class VideoHelper(object):
                     async=True)
                 # bypassing save_objects to avoid the extra video save
                 # that comes later
-                yield tornado.gen.Task(thumb.save)
+                success = yield thumb.save(async=True) 
+                if not success: 
+                    raise IOError('unable to save default thumbnail')
 
             # create the api_request
             api_request = yield VideoHelper.create_api_request(

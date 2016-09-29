@@ -2788,6 +2788,32 @@ class TestVideoHandler(TestControllersBase):
         self.assertNotEquals(rjson['job_id'],'')
         self.assertNotEquals(rjson['video']['video_id'], '1234.ascs')
 
+    @patch('cmsdb.neondata.ThumbnailMetadata.save')
+    @patch('cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
+    @tornado.testing.gen_test
+    def test_post_video_thumb_save_fails(self, di_mocker, mocker):
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234a.s.cs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&url=some_url' % (self.account_id_api_key,
+                  self.test_i_id)
+
+        wrapped_mocker = self._future_wrap_mock(mocker)
+        wrapped_di_mocker = self._future_wrap_mock(di_mocker)  
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            wrapped_di_mocker.side_effect = [self.random_image]
+            wrapped_mocker.return_value = False
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertEquals(rjson['error']['message'],
+                          'unable to save default thumbnail')
+
     @tornado.testing.gen_test
     def test_post_failed_to_download_thumbnail(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
