@@ -8,11 +8,9 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 from apiv2 import *
-from collections import OrderedDict
 from cvutils.imageutils import PILImageUtils
 import dateutil.parser
 import model.predictor
-import numpy as np
 import PIL.Image
 import PIL.ImageDraw
 import PIL.ImageFont
@@ -24,7 +22,6 @@ import utils.pycvutils
 import cmsapiv2.client
 from cmsdb.neondata import TagType
 import fractions
-import itertools
 import logging
 import model
 import utils.autoscale
@@ -32,7 +29,8 @@ import video_processor.video_processing_queue
 _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
-define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
+define("cmsapiv1_port", default=8083, help="what port apiv1 is running on",
+       type=int)
 
 # For scoring non-video thumbnails.
 define('model_server_port', default=9000, type=int,
@@ -103,7 +101,8 @@ class AccountHandler(APIV2Handler):
         if fields:
             fields = set(fields.split(','))
 
-        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id)
+        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                              account_id)
 
         if not user_account:
             raise NotFoundError()
@@ -143,7 +142,7 @@ class AccountHandler(APIV2Handler):
                 acct_internal.default_thumbnail_id)
 
         yield tornado.gen.Task(neondata.NeonUserAccount.modify,
-                                        acct_internal.key, _update_account)
+                               acct_internal.key, _update_account)
         statemon.state.increment('put_account_oks')
         self.success(acct_for_return)
 
@@ -192,7 +191,7 @@ class AccountHandler(APIV2Handler):
 '''*********************************************************************
 IntegrationHelper
 *********************************************************************'''
-class IntegrationHelper():
+class IntegrationHelper(object):
     """Class responsible for helping the integration handlers."""
 
     @staticmethod
@@ -215,7 +214,8 @@ class IntegrationHelper():
             integration.account_id = acct.neon_api_key
             integration.partner_code = args['publisher_id']
             integration.api_key = args.get('api_key', integration.api_key)
-            integration.api_secret = args.get('api_secret', integration.api_secret)
+            integration.api_secret = args.get('api_secret',
+                                              integration.api_secret)
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = neondata.BrightcoveIntegration()
@@ -293,15 +293,18 @@ class IntegrationHelper():
         integration_type - the type of integration to create
         """
         if integration_type == neondata.IntegrationType.OOYALA:
-            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
-                                                 integration_id)
+            integration = yield tornado.gen.Task(
+                neondata.OoyalaIntegration.get,
+                integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
-                                                 integration_id)
+            integration = yield tornado.gen.Task(
+                neondata.BrightcoveIntegration.get,
+                integration_id)
         if integration:
             raise tornado.gen.Return(integration)
         else:
-            raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
+            raise NotFoundError('%s %s' % ('unable to find the integration '
+                                           'for id:',integration_id))
 
     @staticmethod
     @tornado.gen.coroutine
@@ -322,18 +325,18 @@ class IntegrationHelper():
         rv = {}
         rv['integrations'] = []
         for i in integrations:
-           new_obj = None
-           if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
-               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
-               new_obj['type'] = 'brightcove'
-           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
-               new_obj = yield OoyalaIntegrationHandler.db2api(i)
-               new_obj['type'] = 'ooyala'
-           else:
-               continue
+            new_obj = None
+            if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
+                new_obj = yield BrightcoveIntegrationHandler.db2api(i)
+                new_obj['type'] = 'brightcove'
+            elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
+                new_obj = yield OoyalaIntegrationHandler.db2api(i)
+                new_obj['type'] = 'ooyala'
+            else:
+                continue
 
-           if new_obj:
-               rv['integrations'].append(new_obj)
+            if new_obj:
+                rv['integrations'].append(new_obj)
 
         raise tornado.gen.Return(rv)
 

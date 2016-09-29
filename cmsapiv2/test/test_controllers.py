@@ -9,14 +9,11 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
-from boto.sqs.message import Message
-import boto.exception
 from cmsapiv2.apiv2 import *
 from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
-import model
 import logging
 import numpy as np
 import random
@@ -26,25 +23,20 @@ import tornado.gen
 import tornado.testing
 import tornado.httpclient
 import test_utils.postgresql
-import time
 import unittest
 import utils.neon
 import utils.http
 import urllib
 import urlparse
 import test_utils.neontest
-from test_utils import sqsmock
 import uuid
 import jwt
-from mock import patch, DEFAULT, MagicMock
+from mock import patch, MagicMock
 from cmsdb import neondata
 from passlib.hash import sha256_crypt
 import PIL.Image
 from StringIO import StringIO
 from cvutils.imageutils import PILImageUtils
-from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
-from tornado.httputil import HTTPServerRequest
-import video_processor.video_processing_queue
 from utils.options import options
 from utils import statemon
 
