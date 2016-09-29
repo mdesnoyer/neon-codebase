@@ -881,7 +881,7 @@ class StatsDBWatcher(threading.Thread):
                 # Now, find out when the last event we knew about was
                 curtime = datetime.datetime.utcnow()
                 cursor.execute(
-                    ('SELECT max(serverTime) FROM videoplays WHERE '
+                    ('SELECT max(serverTime) FROM eventsequences WHERE '
                      'yr >= {yr:d} or (yr = {yr:d} and mnth >= {mnth:d})'
                      ).format(
                          mnth=curtime.month, yr=curtime.year))
