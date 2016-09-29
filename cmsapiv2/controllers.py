@@ -2196,15 +2196,8 @@ class VideoHelper(object):
                 # are handled in that section.
                 pass
             elif field == 'demographic_clip_ids':
-                new_video['demographic_clip_ids'] = []
-                for video_result in video.job_results: 
-                    cur_entry = { 
-                        'gender': video_result.gender, 
-                        'age': video_result.age, 
-                        'clip_ids': (video_result.clip_ids + 
-                                     video.non_job_clip_ids)
-                    }
-                    new_video['demographic_clip_ids'].append(cur_entry)  
+                new_video['demographic_clip_ids'] = \
+                    VideoHelper.get_demographic_clip_ids(video)
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -2251,6 +2244,22 @@ class VideoHelper(object):
                     new_video['error'] = err
 
         raise tornado.gen.Return(new_video)
+
+    @staticmethod
+    def get_demographic_clip_ids(video):
+        '''Given a VideoMetadata, get the demographic_clip_ids'''
+
+        result = []
+        for video_result in video.job_results: 
+            cur_entry = { 
+                'gender': video_result.gender, 
+                'age': video_result.age, 
+                'clip_ids': (video_result.clip_ids + 
+                             video.non_job_clip_ids)
+            }
+            result.append(cur_entry)  
+        return result
+
 
 '''*********************************************************************
 VideoHandler
@@ -3859,11 +3868,46 @@ class SocialImageHandler(ShareableContentHandler):
             elif pl_type == neondata.Tag.__name__:
                 tag = yield neondata.Tag.get(pl_id, async=True)
                 best_thumb = yield self._get_best_thumb_of_tag(tag)
+
+                # If the tag is of video and the video has a clip,
+                # use the best clip's score in place of the thumbnail's.
+                try:
+                    if tag.tag_type == neondata.TagType.VIDEO:
+                        video = yield neondata.VideoMetadata.get(
+                            tag.video_id,
+                            async=True)
+                        dems = VideoHelper.get_demographic_clip_ids(video)
+
+                        if dems:
+                            # Get the best clip of the null gender and age group.
+                            clips = (d for d in dems
+                                     if d['age'] is None and
+                                        d['gender'] is None).next()
+                            best_clip_id = clips['clip_ids'][0]
+
+                            clip = yield neondata.Clip.get(
+                                best_clip_id,
+                                async=True)
+                            clip_thumb = yield neondata.ThumbnailMetadata.get(
+                                clip.thumbnail_id,
+                                async=True)
+                            # Override the best thumb with this one, and the
+                            # clip's score.
+                            if clip_thumb:
+                                best_thumb = clip_thumb
+                                best_thumb.model_version = None
+                                best_thumb.model_score = clip.score
+                except Exception as e:
+                    _log.warn('Problem using clip thumb %s', e)
+                    # Fail back to using the best thumbnail.
+                    
+
             elif pl_type == neondata.Clip.__name__:
                 clip = yield neondata.Clip.get(pl_id, async=True)
                 best_thumb = yield neondata.ThumbnailMetadata.get(clip.thumbnail_id)
             else:
                 raise ForbiddenError('Invalid token')
+
 
             # Get the size needs based on the platform
             width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[

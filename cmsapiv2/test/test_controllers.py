@@ -8962,13 +8962,13 @@ class TestSocialImageGeneration(TestControllersBase):
                                                thumbnail_ids=[
                                                    '%s_n1' % self.vid_id])])
         video.save()
-        t0 = neondata.ThumbnailMetadata('%s_def' % self.vid_id,
+        self.t0 = neondata.ThumbnailMetadata('%s_def' % self.vid_id,
                                    ttype='default',
                                    rank=0,
                                    model_version='20160713-test',
                                    model_score=0.2,
                                    urls=['640x480'])
-        t0.save()
+        self.t0.save()
         t1 = neondata.ThumbnailMetadata('%s_n1' % self.vid_id,
                                    ttype='neon',
                                    rank=1,
@@ -8977,7 +8977,7 @@ class TestSocialImageGeneration(TestControllersBase):
         t1.save()
         neondata.TagThumbnail.save_many(
             tag_id=self.video_tag.get_id(),
-            thumbnail_id=[t0.get_id(), t1.get_id()])
+            thumbnail_id=[self.t0.get_id(), t1.get_id()])
 
         urls = neondata.ThumbnailServingURLs('%s_n1' % self.vid_id)
         urls.add_serving_url('800x800', 800, 800)
@@ -9102,6 +9102,36 @@ class TestSocialImageGeneration(TestControllersBase):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEquals(e.exception.code, 403)
+
+    @patch('PIL.ImageDraw.Draw')
+    @tornado.testing.gen_test
+    def test_use_clip_score(self, draw):
+        vjtl = neondata.VideoJobThumbnailList(clip_ids=['clip0'])
+        self.video.job_results = [vjtl]
+        self.video.save()
+
+        clip_id = 'clip0'
+        clip = neondata.Clip(
+            clip_id,
+            video_id=self.vid_id,
+            thumbnail_id=self.t0.get_id(),
+            score=0.34)
+        clip.save();
+        tag = neondata.Tag(
+            tag_type=neondata.TagType.VIDEO,
+            account_id=self.account_id,
+            video_id=self.vid_id)
+        share_token = yield self._get_share_token(tag)
+
+        neondata.TagThumbnail.save(
+            tag_id=tag.get_id(),
+            thumbnail_id=self.t0.get_id())
+        _, response = yield self.get_response_image(share_token)
+        self.assertEqual(response.code, 200)
+
+        # Validate that draw got the clip's score.
+        expect_score = clip.get_neon_score()
+        self.assertEqual(expect_score, int(draw.mock_calls[1][1][1]))
 
     @tornado.testing.gen_test
     def test_tag_from_payload(self):
