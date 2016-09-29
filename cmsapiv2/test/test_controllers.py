@@ -8776,6 +8776,24 @@ class TestFeatureHandler(TestControllersBase):
         self.assertEquals(f2['name'], None) 
         self.assertEquals(f2['variance_explained'], 0.0) 
         self.assertEquals(f2['model_name'], 'kfmodel')
+
+    @tornado.testing.gen_test
+    def test_get_by_key_no_keys(self):
+        key = neondata.Feature.create_key('kfmodel', 1)
+        yield neondata.Feature(key).save(async=True)
+        key = neondata.Feature.create_key('kfmodel', 2)
+        yield neondata.Feature(key).save(async=True)
+        url = '/api/v2/feature?key='
+         
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(
+                self.get_url(url))
+
+        self.assertEquals(e.exception.code, 400)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'all elements must be of length \(1\)')
  
 class TestEmailSupportHandler(TestControllersBase):
 
