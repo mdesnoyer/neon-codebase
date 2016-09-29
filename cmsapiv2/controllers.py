@@ -2194,7 +2194,8 @@ class VideoHelper(object):
                 # are handled in that section.
                 pass
             elif field == 'demographic_clip_ids':
-                new_video['demographic_clip_ids'] = self.get_demographic_clip_ids()
+                new_video['demographic_clip_ids'] = \
+                    VideoHelper.get_demographic_clip_ids(video)
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
