@@ -263,7 +263,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 item = {}
                 item['pool'] = None 
                 self.io_loop_dict[io_loop_id] = item 
-                _ = _get_momoko_db()
+                db = _get_momoko_db()
                 conn = yield self._get_momoko_connection(db) 
             else:
                 # we have seen this ioloop before, it has a pool use it
