@@ -6197,7 +6197,7 @@ class ThumbnailMetadata(StoredObject):
         Inputs:
             file: file handle or bufferio
         Outbut:
-            color: 3-tuple (R,G,B)'''
+            color: list [R,G,B]'''
 
         color_thief = ColorThief(file)
         return list(color_thief.get_color())
