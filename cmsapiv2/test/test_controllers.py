@@ -4503,8 +4503,6 @@ class TestThumbnailHandler(TestControllersBase):
         buf2 = StringIO()
         self.random_image2.save(buf2, 'JPEG')
 
-        #body = MultipartEncoder({
-        #    'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
         # Try two.
         body = MultipartEncoder([
             ('upload', ('image1.jpg', buf.getvalue(), 'multipart/form-data')),
@@ -5002,20 +5000,133 @@ class TestThumbnailHandler(TestControllersBase):
 
     def test_get_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.get')
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.get_exceptions(url, exception_mocker)
 
     def test_put_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.put')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.put_exceptions(url, params, exception_mocker)
 
     def test_post_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.post_exceptions(url, params, exception_mocker)
+
+    @tornado.testing.gen_test
+    def test_post_thumbnail_limit_counter_increments(self):
+
+        # Sanity check.
+        neondata.AccountLimits(
+            self.account_id_api_key,
+            refresh_time_image_posts=datetime(2050,1,1)).save()
+        limit = neondata.AccountLimits.get(self.account_id_api_key)
+        self.assertEqual(0, limit.image_posts)
+
+        # Post one.
+        image_filename = 'green.jpg'
+        _url = '/api/v2/{}/thumbnails?url={}&tag_id={}'
+        url = self.get_url(_url.format(
+            self.account_id_api_key,
+            image_filename,
+            'tag_0'))
+        response = yield self.http_client.fetch(url, body='', method='POST')
+        self.assertEqual(response.code, 202)
+
+        # Since this happens in on_finish wait for the change at the db.
+        get_posts = lambda: neondata.AccountLimits.get(
+            self.account_id_api_key).image_posts
+        yield self.assertWaitForEquals(get_posts, 1, async=True)
+
+        # Post two.
+        image_filenames = 'red.jpg,blue.jpg'
+        _url = '/api/v2/{}/thumbnails?url={}&tag_id={}'
+        url = self.get_url(_url.format(
+            self.account_id_api_key,
+            image_filenames,
+            'tag_0'))
+        response = yield self.http_client.fetch(url, body='', method='POST')
+        self.assertEqual(response.code, 202)
+
+        yield self.assertWaitForEquals(get_posts, 3, async=True)
+
+        # Try two more but by body.
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
+        buf2 = StringIO()
+        self.random_image2.save(buf2, 'JPEG')
+
+        # Try two.
+        body = MultipartEncoder([
+            ('upload', ('image1.jpg', buf.getvalue(), 'multipart/form-data')),
+            ('upload', ('image2.jpg', buf2.getvalue(), 'multipart/form-data'))])
+
+        headers = {'Content-Type': body.content_type}
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key,
+            'Cool'))
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='POST')
+        self.assertEqual(response.code, 202)
+
+        yield self.assertWaitForEquals(get_posts, 5, async=True)
+
+    @tornado.testing.gen_test
+    def test_post_thumbnail_limit_reached(self):
+
+        neondata.AccountLimits(
+            self.account_id_api_key, 
+            image_posts=1000,
+            max_image_posts=1000, 
+            refresh_time_image_posts=datetime(2050,1,1)).save()
+
+        url = self.get_url('/api/v2/{}/thumbnails?url={}'.format(
+            self.account_id_api_key,
+            'image.jpg'))
+
+        headers = {'Content-Type': 'application/json'}
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                headers=headers,
+                body='',
+                method='POST')
+        self.assertEqual(402, e.exception.code)
+
+
+    @tornado.testing.gen_test
+    def test_post_thumbnail_limit_resets(self):
+
+        neondata.AccountLimits(
+            self.account_id_api_key, 
+            image_posts=1000,
+            max_image_posts=1000, 
+            refresh_time_image_posts=datetime(2000,1,1)).save()
+
+        url = self.get_url('/api/v2/{}/thumbnails?url={}'.format(
+            self.account_id_api_key,
+            'image.jpg'))
+
+        headers = {'Content-Type': 'application/json'}
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body='',
+            method='POST')
+        self.assertEqual(202, response.code)
+
+        limit = neondata.AccountLimits.get(self.account_id_api_key)
+        self.assertEqual(0, limit.image_posts)
+ 
+        get_limit = lambda: neondata.AccountLimits.get(
+            self.account_id_api_key).image_posts
+
+        yield self.assertWaitForEquals(get_limit, 1, async=True)
 
 
 class TestHealthCheckHandler(TestControllersBase):

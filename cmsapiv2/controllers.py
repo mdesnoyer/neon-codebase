@@ -1723,6 +1723,28 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
 
         raise tornado.gen.Return(retval)
 
+    def get_limits(self):
+        '''Limit the post of images'''
+
+        try:
+            increment = len(self.images)
+        except AttributeError:
+            increment = 1
+        post_list = [{ 'left_arg': 'image_posts',
+                       'right_arg': 'max_image_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_image_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_image_posts',
+                           'timer_resets': [ ('image_posts', 0) ]
+                       },
+                       'values_to_increase': [ ('image_posts', increment) ],
+                       'values_to_decrease': []
+        }]
+        return {
+                   HTTPVerbs.POST: post_list
+               }
+
     @classmethod
     def get_access_levels(self):
         return {
