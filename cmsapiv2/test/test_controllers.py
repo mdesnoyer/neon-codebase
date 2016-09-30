@@ -4360,6 +4360,8 @@ class TestThumbnailHandler(TestControllersBase):
         valid_tag_ids = {'tag_0', 'tag_2'}
         thumb1 = rjson['thumbnails'][0]
         self.assertEqual(set(thumb1['tag_ids']), valid_tag_ids)
+        self.assertIsNotNone(thumb1['dominant_color'])
+        self.assertEqual(thumb1['dominant_color'], thumbnail.dominant_color)
 
         # Try two.
         _url = '/api/v2/{}/thumbnails?thumbnail_ref={}&url={}&tag_id={}'
@@ -4607,11 +4609,12 @@ class TestThumbnailHandler(TestControllersBase):
         url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s&fields=%s' % (
             self.account_id_api_key,
             self.thumb.get_id(),
-            'thumbnail_id,width'))
+            'thumbnail_id,width,dominant_color'))
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)['thumbnails'][0]
         self.assertEqual(rjson['width'], 500)
         self.assertEqual(rjson['thumbnail_id'], self.thumb.get_id())
+        self.assertEqual(None, rjson['dominant_color'])
 
     @tornado.testing.gen_test
     def test_feature_ids(self):

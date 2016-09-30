@@ -19,6 +19,7 @@ import momoko
 import multiprocessing
 from mock import patch, MagicMock, ANY
 import os
+import PIL.Image
 import psycopg2
 import re
 import random
@@ -1387,6 +1388,12 @@ class TestAddingImageData(NeonDbTestCase):
         self.cdn_check_patcher.stop()
         super(TestAddingImageData, self).tearDown()
 
+    def test_dominant_color(self):
+        color = (255, 0, 0)
+        image = PIL.Image.new('RGB', (100, 100), color)
+        dominant = neondata.ThumbnailMetadata.generate_dominant_color(image)
+        self.assertEqual(color, dominant)
+
     @tornado.testing.gen_test
     def test_lookup_cdn_info(self):
 
@@ -1709,6 +1716,14 @@ class TestAddingImageData(NeonDbTestCase):
         self.assertEquals(tmeta2.width, 640)
         self.assertEquals(tmeta2.height, 540)
         self.assertIsNotNone(tmeta2.phash)
+
+    @patch('cmsdb.neondata.ThumbnailMetadata.generate_dominant_color')
+    @tornado.testing.gen_test
+    def test_dominant_color_raise_caught(self, mock_generate):
+        mock_generate.side_effect = Exception('Failure')
+        thumb = neondata.ThumbnailMetadata('key')
+        with self.assertRaises(Exception):
+            yield thumb.add_image_data(self.image)
 
 
 class TestPostgresDBConnections(NeonDbTestCase):
@@ -2417,6 +2432,7 @@ class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
             self.assertEquals(x.features[3], 4.0) 
         so1 = yield ThumbnailMetadata.get(so1.key, async=True)
         self.assertEquals(so1.features[0], 1.0) 
+
 
 class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
 

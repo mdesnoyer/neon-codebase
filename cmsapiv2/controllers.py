@@ -1681,12 +1681,13 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno', 'tag_ids',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions']
+                'type', 'external_ref', 'created', 'updated', 'renditions',
+                'dominant_color']
 
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
-                'created', 'updated']
+                'created', 'updated', 'dominant_color']
 
     @classmethod
     @tornado.gen.coroutine

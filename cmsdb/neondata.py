@@ -3859,12 +3859,14 @@ class CDNHostingMetadata(UnsaveableStoredObject):
     @staticmethod
     @tornado.gen.coroutine
     def get_by_video(video):
-        cdn_key = CDNHostingMetadataList.create_key(
-            video.get_account_id(),
-            video.integration_id)
-        cdn_metadata = yield CDNHostingMetadataList.get(cdn_key, async=True)
+        cdn_metadata = [NeonCDNHostingMetadata()]
+        if video:
+            cdn_key = CDNHostingMetadataList.create_key(
+                video.get_account_id(),
+                video.integration_id)
+            cdn_metadata = yield CDNHostingMetadataList.get(cdn_key, async=True)
         # Default to hosting on the Neon CDN if we don't know about it
-        raise tornado.gen.Return(cdn_metadata or [NeonCDNHostingMetadata()])
+        raise tornado.gen.Return(cdn_metadata)
 
 
 class S3CDNHostingMetadata(CDNHostingMetadata):
@@ -6011,7 +6013,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None, features=None):
+                 external_id=None, features=None, dominant_color=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -6050,6 +6052,9 @@ class ThumbnailMetadata(StoredObject):
          
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
+
+        # Dominant color of the image
+        self.dominant_color = dominant_color
 
     @classmethod
     def _baseclass_name(cls):
@@ -6143,7 +6148,6 @@ class ThumbnailMetadata(StoredObject):
         self.width = image.size[0]
         self.height = image.size[1]
         self.update_phash(image)
-
         # Save the image as jpeg, then generate the key from its hash.
         fmt = 'jpeg'
         filestream = StringIO()
@@ -6151,6 +6155,11 @@ class ThumbnailMetadata(StoredObject):
         filestream.seek(0)
         imgdata = filestream.read()
         self.key = ThumbnailID.generate(imgdata, self.video_id)
+
+        try:
+            self.dominant_color = self.generate_dominant_color(image)
+        except Exception as e:
+            _log.warn('Error generating dominant color key:%s %s', self.key, e)
 
         # Host the primary copy of the image
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
@@ -6178,6 +6187,22 @@ class ThumbnailMetadata(StoredObject):
         yield [x.upload(image, self.key, s3_url, async=True,
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
+
+    @staticmethod
+    def generate_dominant_color(image):
+        '''Extract a dominant color of the image
+
+        Inputs:
+            image: pil image
+        Outbut:
+            color: 3-tuple (R,G,B)'''
+        w, h = image.size
+        pixels = image.getcolors(w * h)
+        most_frequent_pixel = pixels[0]
+        for count, colour in pixels:
+            if count > most_frequent_pixel[0]:
+                most_frequent_pixel = (count, colour)
+        return most_frequent_pixel[1]
 
     @tornado.gen.coroutine
     def score_image(self, predictor, image=None, save_object=False):
