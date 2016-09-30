@@ -832,7 +832,6 @@ class VideoProcessor(object):
                 old_thumb.filtered = new_thumb.filtered
                 old_thumb.features = new_thumb.features
                 old_thumb.dominant_color = new_thumb.dominant_color
-                
         try:
             new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
                 [x.key for x in new_thumbs],
