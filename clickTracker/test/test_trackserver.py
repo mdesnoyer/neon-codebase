@@ -342,7 +342,7 @@ class TestFullServer(test_utils.neontest.AsyncHTTPTestCase):
             msgbuf = StringIO(binary_body)
             body = self.avro_reader.read(avro.io.BinaryDecoder(msgbuf))
         
-            self.assertEqual(headers['track_vers'], '2.2')
+            self.assertEqual(headers['track_vers'], '2.3')
             self.assertEqual(headers['event'], ebody['eventType'])
             self.assertEqual(headers['timestamp'],
                          str(body['serverTime']))
