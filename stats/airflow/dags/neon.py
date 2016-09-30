@@ -91,7 +91,7 @@ options.define('quiet_period', default=45, type=int,
 options.define('mr_jar', default='neon-stats-1.0-job.jar', type=str,
                help=('Jar for the map reduce cleaning job to run relative to '
                      'stats/java/target/'))
-options.define('input_path', default='s3://neon-tracker-logs-v2/v2.2',
+options.define('input_path', default='s3://neon-tracker-logs-v2/v2.3',
                type=str,
                help='S3 URI base path to source files for staging.')
 options.define('staging_path', default='s3://neon-tracker-logs-test-hadoop/',
@@ -119,7 +119,7 @@ options.define('clicklog_period', default=3, type=int,
 options.define('max_task_instances', default=30, type=int,
                help='Maximum number of task instances to request')
 options.define('full_run_input_path', 
-               default='/*/*/*/*', type=str, 
+               default='/*/*/*/*/*', type=str, 
                help='input path for first run')
 options.define('airflow_rebase_date', default='2016-08-19', type=str,
                help=('The date when airflow metadata is getting '
