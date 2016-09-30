@@ -3860,15 +3860,12 @@ class CDNHostingMetadata(UnsaveableStoredObject):
     @staticmethod
     @tornado.gen.coroutine
     def get_by_video(video):
-        cdn_metadata = [NeonCDNHostingMetadata()]
-        if video:
-            cdn_key = CDNHostingMetadataList.create_key(
-                video.get_account_id(),
-                video.integration_id)
-            cdn_metadata = yield CDNHostingMetadataList.get(cdn_key, async=True)
+        cdn_key = CDNHostingMetadataList.create_key(
+            video.get_account_id(),
+            video.integration_id)
+        cdn_metadata = yield CDNHostingMetadataList.get(cdn_key, async=True)
         # Default to hosting on the Neon CDN if we don't know about it
-        raise tornado.gen.Return(cdn_metadata)
-
+        raise tornado.gen.Return(cdn_metadata or [NeonCDNHostingMetadata()])
 
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
