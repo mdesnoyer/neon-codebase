@@ -9936,8 +9936,98 @@ class TestClipHandler(TestVerifiedControllersBase):
         self.assertEquals(rv_clip_two['video_id'], 'vid1')  
         self.assertEquals(rv_clip_two['clip_id'], 'testa_vid1_2')  
         self.assertEquals(rv_clip_three, {})  
-        self.assertEquals(rj['count'], 3) 
+        self.assertEquals(rj['count'], 3)
+
+class TestBatchHandler(TestVerifiedControllersBase):
+    def setUp(self):
+        super(TestBatchHandler, self).setUp()
+        acct = neondata.NeonUserAccount('testa', name='me')
+        acct.save()
+        self.url = self.get_url(
+            '/api/v2/batch')
+
+    @patch('cmsapiv2.client.Client.send_request')
+    @tornado.testing.gen_test
+    def test_batch_with_two_good_requests(self, http_mocker):
+        hmock_wrap = self._future_wrap_mock(http_mocker)
+        hmock_wrap.side_effect = lambda x: tornado.httpclient.HTTPResponse(
+            x,
+            200,
+            buffer=StringIO('{"cows": "moo", "pigs": "oink"}'))
+        call_info = {} 
+        call_info['call_info'] = {}  
+        requests = [] 
+        requests.append({'relative_url': 'test.com', 'method':'GET' })
+        requests.append({'relative_url': 'test.com', 'method':'POST' })
+        requests.append({'relative_url': 'test.com', 'method':'PUT' })
+        call_info['call_info']['requests'] = requests 
+        res = yield self.http_client.fetch(
+            self.url, 
+            headers=self.headers,
+            body=json.dumps(call_info),
+            method='POST')
+        rjson = json.loads(res.body) 
+        self.assertEquals(3, len((rjson['results'])))
+        res1 = rjson['results'][0]
+        res2 = rjson['results'][1]
+        res3 = rjson['results'][2]
+        self.assertEquals(res1['response']['cows'], 'moo') 
+        self.assertEquals(res1['response_code'], 200) 
+        self.assertEquals(res1['method'], 'GET') 
+        self.assertEquals(res2['response']['pigs'], 'oink') 
+        self.assertEquals(res2['method'], 'POST')
+        self.assertEquals(res3['method'], 'PUT')
  
+    @patch('cmsapiv2.client.Client.send_request')
+    @tornado.testing.gen_test
+    def test_batch_with_exceptions(self, http_mocker):
+        hmock_wrap = self._future_wrap_mock(http_mocker)
+        hmock_wrap.side_effect = [ AttributeError, Exception ]
+        call_info = {} 
+        call_info['call_info'] = {}  
+        requests = [] 
+        requests.append({'relative_url': 'test.com', 'method':'GET' })
+        requests.append({'relative_url': 'test.com', 'method':'POST' })
+        call_info['call_info']['requests'] = requests 
+        res = yield self.http_client.fetch(
+            self.url, 
+            headers=self.headers,
+            body=json.dumps(call_info),
+            method='POST')
+        rjson = json.loads(res.body)
+        res1 = rjson['results'][0]
+        res2 = rjson['results'][1]
+        self.assertEquals(res1['response'], 'Malformed Request') 
+        self.assertEquals(res2['response'], 'Unknown Error Occurred') 
+        self.assertEquals(res1['response_code'], 400) 
+        self.assertEquals(res2['response_code'], 500)
+ 
+    @patch('cmsapiv2.client.Client.send_request')
+    @tornado.testing.gen_test
+    def test_batch_with_response_error(self, http_mocker):
+        hmock_wrap = self._future_wrap_mock(http_mocker)
+        hmock_wrap.side_effect = lambda x: tornado.httpclient.HTTPResponse(
+            x,
+            403,
+            buffer=StringIO('{"error" : "pigs do not moo cows do"}'))
+
+        call_info = {} 
+        call_info['call_info'] = {}  
+        requests = [] 
+        requests.append({'relative_url': 'test.com', 'method':'GET' })
+        call_info['call_info']['requests'] = requests 
+        res = yield self.http_client.fetch(
+            self.url, 
+            headers=self.headers,
+            body=json.dumps(call_info),
+            method='POST')
+        rjson = json.loads(res.body)
+        res1 = rjson['results'][0]
+        self.assertEquals(res1['response_code'], 403) 
+        self.assertEquals(
+            res1['response']['error']['message'], 
+            'Forbidden') 
+            
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
     unittest.main(argv=(['%prog']+args))

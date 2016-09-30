@@ -3633,7 +3633,7 @@ class BatchHandler(APIV2Handler):
             skip_auth=True)
 
         requests = call_info.get('requests', None)
-        output = { 'results' : [] } 
+        output = { 'results' : [] }
         for req in requests: 
             # request will be information about 
             # the call we want to make 
@@ -3659,7 +3659,8 @@ class BatchHandler(APIV2Handler):
                             'code' : response.code 
                         } 
                     }
-                    result['response'] = error 
+                    result['response'] = error
+                    result['response_code'] = response.code 
                 else:  
                     result['relative_url'] = req['relative_url'] 
                     result['method'] = req['method'] 
@@ -3667,8 +3668,10 @@ class BatchHandler(APIV2Handler):
                     result['response_code'] = response.code
             except AttributeError:
                 result['response'] = 'Malformed Request'
+                result['response_code'] = ResponseCode.HTTP_BAD_REQUEST 
             except Exception as e: 
                 result['response'] = 'Unknown Error Occurred' 
+                result['response_code'] = ResponseCode.HTTP_INTERNAL_SERVER_ERROR
             finally: 
                 output['results'].append(result)
                  
