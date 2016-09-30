@@ -6156,9 +6156,10 @@ class ThumbnailMetadata(StoredObject):
         filestream.seek(0)
         imgdata = filestream.read()
         self.key = ThumbnailID.generate(imgdata, self.video_id)
+        filestream.seek(0)
 
         try:
-            self.dominant_color = self.generate_dominant_color(image)
+            self.dominant_color = self.generate_dominant_color(filestream)
         except Exception as e:
             _log.warn('Error generating dominant color key:%s %s', self.key, e)
 
@@ -6190,15 +6191,15 @@ class ThumbnailMetadata(StoredObject):
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
     @staticmethod
-    def generate_dominant_color(image):
+    def generate_dominant_color(file):
         '''Extract a dominant color of the image
 
         Inputs:
-            image: pil image
+            file: file handle or bufferio
         Outbut:
             color: 3-tuple (R,G,B)'''
 
-        color_thief = ColorThief(image)
+        color_thief = ColorThief(file)
         return color_thief.get_color()
 
 
