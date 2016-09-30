@@ -27,6 +27,7 @@ import binascii
 import cmsdb.cdnhosting
 import code
 from collections import OrderedDict, defaultdict
+from colorthief import ColorThief
 import concurrent.futures
 import copy
 import cv2
@@ -6196,13 +6197,10 @@ class ThumbnailMetadata(StoredObject):
             image: pil image
         Outbut:
             color: 3-tuple (R,G,B)'''
-        w, h = image.size
-        pixels = image.getcolors(w * h)
-        most_frequent_pixel = pixels[0]
-        for count, colour in pixels:
-            if count > most_frequent_pixel[0]:
-                most_frequent_pixel = (count, colour)
-        return most_frequent_pixel[1]
+
+        color_thief = ColorThief(image)
+        return color_thief.get_color()
+
 
     @tornado.gen.coroutine
     def score_image(self, predictor, image=None, save_object=False):
