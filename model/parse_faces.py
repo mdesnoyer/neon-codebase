@@ -32,21 +32,6 @@ class ParseStateError(Exception):
         if self.value == 2:
             return "Invalid component requested"
 
-class DetectFaces(object):
-    '''
-    Detects faces.
-    '''
-    def __init__(self):
-        self.detector = dlib.get_frontal_face_detector()
-        self.prep = pycvutils.ImagePrep(convert_to_gray=True)
-
-    def get_N_faces(self, image):
-        '''
-        Returns the number of faces an image contains.
-        '''
-        image = self.prep(image)
-        return len(self.detector(image))
-
 class MultiStageFaceParser(object):
     '''
     Wraps FindAndParseFaces, but allows three-stage evaluation.
@@ -72,8 +57,6 @@ class MultiStageFaceParser(object):
         self.fParse = FindAndParseFaces(predictor, self.detector)
         self.image_data = {}
         self.max_height = max_height
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height)
 
     def reset(self):
         self.image_data = {}
@@ -135,6 +118,9 @@ class MultiStageFaceParser(object):
         self.fParse.reset()
         return self.__dict__.copy()
 
+    def _get_prep(self):
+        return pycvutils.ImagePrep(max_height=self.max_height)
+
 class FindAndParseFaces(object):
     '''
     Detects faces, and segments them.
@@ -146,7 +132,9 @@ class FindAndParseFaces(object):
             self.detector = detector
         self.predictor = predictor
         self.reset()
-        self.prep = pycvutils.ImagePrep(convert_to_gray=True)
+
+    def _get_prep(self):
+        return pycvutils.ImagePrep(convert_to_gray=True)
 
     def reset(self):
         self._faceDets = []
@@ -216,7 +204,8 @@ class FindAndParseFaces(object):
         return self._image[left:left+width, top:top+height]
 
     def ingest(self, image):
-        image = self.prep(image)
+        prep = self._get_prep()
+        image = prep(image)
         self._image = image
         self._faceDets = self.detector(image)
         self._facePoints = []
@@ -228,7 +217,8 @@ class FindAndParseFaces(object):
         Detects faces, returns detections to be used by
         MultiStageFaceParser.
         '''
-        self._image = self.prep(image)
+        prep = self._get_prep()
+        self._image = prep(image)
         return self.detector(image)
 
     def _SEQsegFaces(self, image, dets):
@@ -237,7 +227,8 @@ class FindAndParseFaces(object):
         the detections, to be used by MultiStageFaceParser
         '''
         self._faceDets = dets
-        self._image = self.prep(image)
+        prep = self._get_prep()
+        self._image = prep(image)
         self._facePoints = []
         for f in self._faceDets:
             self._facePoints.append(self.predictor(image, f))
@@ -250,7 +241,8 @@ class FindAndParseFaces(object):
         allowing us to proceed with the eye scoring.
         '''
         self._faceDets = dets
-        self._image = self.prep(image)
+        prep = self._get_prep()
+        self._image = prep(image)
         self._facePoints = facePoints
 
     def get_comp(self, face, comp):

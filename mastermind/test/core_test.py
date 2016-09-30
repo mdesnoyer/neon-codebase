@@ -12,24 +12,21 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 import mastermind.core
-from mastermind.core import Mastermind, ThumbnailInfo, VideoInfo, ModelMapper, ScoreType
+from mastermind.core import (Mastermind, ThumbnailInfo, VideoInfo, 
+                             ModelMapper, ScoreType)
 
 from cmsdb import neondata
 from cmsdb.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
 import decimal
-import fake_filesystem
-import fake_tempfile
 import json
 import logging
 from mock import patch, MagicMock
-import multiprocessing.pool
 import numpy.random
 import numpy as np
 import pandas
 import test_utils.neontest
 import test_utils.postgresql
 import tornado.httpclient
-import unittest
 import utils.neon
 from utils.options import options
 
@@ -38,6 +35,7 @@ _log = logging.getLogger(__name__)
 def build_thumb(metadata=neondata.ThumbnailMetadata(None, None),
                 base_impressions=0, incremental_impressions=0,
                 base_conversions=0, incremental_conversions=0, phash=None):
+    '''Helper function to build a thumbnail object.'''
     if phash is None:
         metadata.phash = numpy.random.randint(1<<30)
     else:
@@ -169,13 +167,13 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def test_model_mapping(self):
         # tests that the mapping from models --> score type is 
         # correct for known models. 
-        modelsToTest = ['20130924_textdiff',
-        '20130924_crossfade','p_20150722_withCEC_w20',
-        '20130924_crossfade_withalg','p_20150722_withCEC_w40',
-        '20150206_flickr_slow_memcache','20130924',
-        'p_20150722_withCEC_w10','p_20150722_withCEC_wA',
-        'p_20150722_withCEC_wNone']
-        for model in modelsToTest:
+        models = ['20130924_textdiff',
+                  '20130924_crossfade', 'p_20150722_withCEC_w20',
+                  '20130924_crossfade_withalg', 'p_20150722_withCEC_w40',
+                  '20150206_flickr_slow_memcache', '20130924',
+                  'p_20150722_withCEC_w10', 'p_20150722_withCEC_wA',
+                  'p_20150722_withCEC_wNone']
+        for model in models:
             self.assertEqual(ScoreType.CLASSICAL, 
                 ModelMapper.get_model_type(model))
 
@@ -230,9 +228,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # in order to test the priors, we have to label the thumbnails
         # with their respective models. This occurs when we call 
         # update_video_info, which isn't heretofor invoked. 
-        modelsTested = [['20130924_crossfade', ScoreType.CLASSICAL], 
-                        [None, ScoreType.UNKNOWN],
-                        ['asdf', ScoreType.RANK_CENTRALITY]]
+        models_tested = [['20130924_crossfade', ScoreType.CLASSICAL], 
+                         [None, ScoreType.UNKNOWN],
+                         ['asdf', ScoreType.RANK_CENTRALITY]]
         thumbnails = [ThumbnailMetadata('n1', 'vid1', rank=0,
                                         ttype='neon', model_score=5.8),
                       ThumbnailMetadata('n2', 'vid1', rank=1,
@@ -249,23 +247,23 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                            [1.0, 1.0, 1.0, 1.0],
                            [2.44, 1.75, 1.0, 1.0]]
 
-        for n, (model_version, model_type_num) in enumerate(
-                                                  modelsTested):
+        for i, (model_version, model_type_num) in enumerate(
+                                                  models_tested):
             self.mastermind.update_video_info(
                 VideoMetadata('acct1_vid1', 
                               model_version=model_version),
                               thumbnails)
             # ensure that the model type, obtained by name, 
             # is correct. 
-            modelType_byname = ModelMapper.get_model_type(model_version)
-            self.assertTrue(modelType_byname == model_type_num)
+            modeltype_byname = ModelMapper.get_model_type(model_version)
+            self.assertTrue(modeltype_byname == model_type_num)
             # acquire the video_info
             m_vid_info = self.mastermind.video_info['acct1_vid1']
             # iterate over each thumbnail, ensuring that it is 
             # correct
-            for m,t in enumerate(m_vid_info.thumbnails):
-                gpc = self.mastermind._get_prior_conversions(t, m_vid_info)
-                self.assertAlmostEqual(gpc, expected_scores[n][m])
+            for j, thumb in enumerate(m_vid_info.thumbnails):
+                gpc = self.mastermind._get_prior_conversions(thumb, m_vid_info)
+                self.assertAlmostEqual(gpc, expected_scores[i][j])
 
     def test_more_conversions_than_impressions(self):
         self.mastermind.update_experiment_strategy(
@@ -313,9 +311,12 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_ign_breaker_three(self):
         self.mastermind.update_experiment_strategy(
-            'testacct123', ExperimentStrategy('gvs3vytvg20ozp78rolqmdfa', exp_frac=1.2, baseline_type='brightcove'))
+            'testacct123', ExperimentStrategy('gvs3vytvg20ozp78rolqmdfa',
+                                              exp_frac=1.2,
+                                              baseline_type='brightcove'))
         self.mastermind.serving_directive = {
-            'testacct123_4324552316001': (('gvs3vytvg20ozp78rolqmdfa', '4324552316001'),
+            'testacct123_4324552316001': (('gvs3vytvg20ozp78rolqmdfa', 
+                                           '4324552316001'),
                            [
                             ('tid1', 0),
                             ('tid2', 0),
@@ -329,7 +330,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 'testacct123', True,
                 [build_thumb(ThumbnailMetadata(
                     'd6dfa36d8431e795b573263bed0a71e8', '4324552316001', 
-                    ctr=None,rank=1,height=720,width=1280,
+                    ctr=None, rank=1, height=720, width=1280,
                     model_version='20130924_crossfade_withalg',
                     phash=4437922592898527388,
                     ttype='neon', model_score=5.654004413457463),
@@ -470,13 +471,14 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  score_type=ScoreType.CLASSICAL)
 
         self.mastermind._calculate_new_serving_directive('acct1_vid1')
-        self.assertEquals(len(self.mastermind.serving_directive['acct1_vid1'][1]), 9)
+        self.assertEquals(
+            len(self.mastermind.serving_directive['acct1_vid1'][1]), 9)
 
     def test_ign_breaker_two(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=0.2,
                                         baseline_type='brightcove'))
-        self.serving_directive = {
+        self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'vid1'),
                            [
                             ('tid11', ''),
@@ -625,7 +627,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(directive, {'n1': 0.0, 'n2':0.01, 'ctr':0.99 })
 
     def test_finding_baseline_thumb(self):
-        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
+        video_info = VideoInfo('acct1', True, [],
+                               score_type=ScoreType.CLASSICAL)
 
         # When there is just a Neon thumb, we should show the Neon one
         video_info.thumbnails.append(
@@ -657,7 +660,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', baseline_type='centerframe'))
 
         # The random frame is not shown if it's not the baseline type
-        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
+        video_info = VideoInfo('acct1', True, [],
+                               score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         with self.assertLogExists(logging.ERROR,
@@ -679,7 +683,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             exp_frac=0.01, holdback_frac=0.01, 
             baseline_type='brightcove'))
 
-        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
+        video_info = VideoInfo('acct1', True, [],
+                               score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         video_info.thumbnails.append(
@@ -703,7 +708,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', baseline_type='neon',
                                         exp_frac=0.01, holdback_frac=0.02))
 
-        video_info = VideoInfo('acct1', True, [],score_type=ScoreType.CLASSICAL)
+        video_info = VideoInfo('acct1', True, [],
+                               score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         video_info.thumbnails.append(
@@ -767,7 +773,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertGreater(directive['n2'], 0.0)
 
     def test_multiple_chosen_thumbs(self):
-        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
+        video_info = VideoInfo('acct1', True, [],
+                               score_type=ScoreType.CLASSICAL)
 
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('n1', 'vid1', ttype='neon',
@@ -935,7 +942,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', exp_frac=0.01,
             holdback_frac=0.01, only_exp_if_chosen=True))
 
-        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
+        video_info = VideoInfo('acct1', True, [],
+                               score_type=ScoreType.CLASSICAL)
         self.assertIsNone(
             self.mastermind._calculate_current_serving_directive(
                 video_info))

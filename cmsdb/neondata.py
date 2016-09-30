@@ -125,10 +125,10 @@ statemon.define('postgres_successful_pubsub_callbacks', int)
 statemon.define('postgres_pools', int) 
 statemon.define('postgres_pool_full', int)
 
-class ThumbDownloadError(IOError):pass
-class VideoDownloadError(IOError):pass
-class DBStateError(ValueError):pass
-class DBConnectionError(IOError):pass
+class ThumbDownloadError(IOError): pass
+class VideoDownloadError(IOError): pass
+class DBStateError(ValueError): pass
+class DBConnectionError(IOError): pass
 
 def _get_db_information(): 
     '''Function that returns the address to the database for an object.
@@ -193,18 +193,15 @@ class PostgresDB(tornado.web.RequestHandler):
                 psycopg2.BINARY.values, 
                 'np_array_type', 
                 typecast_numpy_array)
-            psycopg2.extensions.register_type(np_array_type) 
-        
-        def _set_current_host(self): 
-            self.old_host = self.host 
-            self.host = options.db_address
+            psycopg2.extensions.register_type(np_array_type)
  
         def _build_dsn(self): 
-            return 'dbname=%s user=%s host=%s port=%s password=%s' % (self.db_info['dbname'], 
-                        self.db_info['user'], 
-                        self.db_info['host'], 
-                        self.db_info['port'], 
-                        self.db_info['password'])
+            return 'dbname=%s user=%s host=%s port=%s password=%s' % (
+                self.db_info['dbname'], 
+                self.db_info['user'], 
+                self.db_info['host'], 
+                self.db_info['port'], 
+                self.db_info['password'])
 
         def _clean_up_io_dict(self):
             '''since we allow optional_sync on many of these calls 
@@ -229,9 +226,10 @@ class PostgresDB(tornado.web.RequestHandler):
 
         def _get_momoko_db(self): 
             current_io_loop = tornado.ioloop.IOLoop.current()
-            conn = momoko.Connection(dsn=self._build_dsn(),
-                                     ioloop=current_io_loop,
-                                     cursor_factory=psycopg2.extras.RealDictCursor)
+            conn = momoko.Connection(
+                dsn=self._build_dsn(),
+                ioloop=current_io_loop,
+                cursor_factory=psycopg2.extras.RealDictCursor)
             return conn
                         
         @tornado.gen.coroutine
@@ -257,9 +255,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 return conn
 
             if self.db_info is None: 
-                self.db_info = current_db_info = _get_db_information()
-            else:
-                current_db_info = _get_db_information()
+                self.db_info = _get_db_information()
   
             if dict_item is None: 
                 # this is the first time we've seen this io_loop just 
@@ -279,7 +275,7 @@ class PostgresDB(tornado.web.RequestHandler):
                                pool, 
                                True, 
                                dict_item)
-                except Exception as e: 
+                except Exception: 
                     pool.close() 
                     dict_item['pool'] = None 
                     raise
@@ -474,7 +470,8 @@ class PostgresDB(tornado.web.RequestHandler):
 class PostgresPubSub(object):
     class _PostgresPubSub: 
         def __init__(self): 
-            self.channels = {} 
+            self.channels = {}
+            self.db = None 
         
         @tornado.gen.coroutine    
         def _connect(self):
@@ -506,7 +503,7 @@ class PostgresPubSub(object):
                 connection = channel['connection'].connection 
                 connection.poll()
                 _log.info_n('Notifying listeners of db changes - %s' % 
-                    (connection.notifies),25)
+                    (connection.notifies), 25)
                 while connection.notifies:
                     notification = connection.notifies.pop() 
                     payload = notification.payload
@@ -520,7 +517,8 @@ class PostgresPubSub(object):
                     tornado.ioloop.IOLoop.current().add_future(future, func) 
             except Exception as e: 
                 statemon.state.increment('postgres_unknown_errors')
-                _log.exception('Error in pubsub trying to get notifications %s. ' % e) 
+                _log.exception('Error in pubsub trying to get notifications '
+                               '%s. ' % e) 
                 self._reconnect(channel_name) 
         
         def _reconnect(self, channel_name):
@@ -547,11 +545,13 @@ class PostgresPubSub(object):
         def listen(self, channel_name, func):
             '''publicly accessible function that starts listening on a channel 
                
-               handles the postgres connection as well, no need to connect before 
-               calling me 
+               handles the postgres connection as well, no need to
+               connect before calling me
   
-               channel - baseclassname of the object, will call PG LISTEN on this 
-               func - the function to callback to if we receive notifications 
+               channel - baseclassname of the object, will call PG
+               LISTEN on this 
+               func - the function to callback to if we
+               receive notifications
  
                simply is added to the io_loop via add_handler 
             ''' 
@@ -563,21 +563,25 @@ class PostgresPubSub(object):
                     yield momoko_conn.execute('LISTEN %s' % channel_name)
                     io_loop = tornado.ioloop.IOLoop.current()
                     self.channels[channel_name] = { 
-                                                    'connection' : momoko_conn, 
-                                                    'callback_functions' : [func] 
+                        'connection' : momoko_conn, 
+                        'callback_functions' : [func] 
                                                   }
-                    io_loop.add_handler(momoko_conn.connection.fileno(), 
-                                        lambda fd, events: self._receive_notification(fd, events, channel_name), 
+                    io_loop.add_handler(
+                        momoko_conn.connection.fileno(), 
+                        lambda fd, events: self._receive_notification(
+                            fd, events, channel_name), 
                                         io_loop.READ) 
                     _log.info(
-                        'Opening a new listener on postgres at %s for channel %s' %
+                        'Opening a new listener on postgres at %s for '
+                        'channel %s' %
                         (self.db.db_info['host'], channel_name))
                     statemon.state.increment('postgres_listeners')
                 except psycopg2.Error as e: 
-                    _log.exception('a psycopg error occurred when listening to %s on postgres %s' \
-                                   % (channel_name, e)) 
+                    _log.exception('a psycopg error occurred when listening '
+                                   'to %s on postgres %s' % (channel_name, e)) 
                 except Exception as e: 
-                    _log.exception('an unknown error occurred when listening to %s on postgres %s' \
+                    _log.exception('an unknown error occurred when listening '
+                                   'to %s on postgres %s' 
                                    % (channel_name, e)) 
                     statemon.state.increment('postgres_unknown_errors')
                     
@@ -601,11 +605,11 @@ class PostgresPubSub(object):
                     yield connection.execute('UNLISTEN %s' % channel_name)
                     connection.close()
                 except psycopg2.InterfaceError as e:
-                    # this means we already lost connection, and can not close a 
-                    # closed connection  
-                    _log.exception('psycopg error when unlistening to %s on postgres %s' \
+                    # this means we already lost connection, and can
+                    # not close a closed connection
+                    _log.exception('psycopg error when unlistening to %s on '
+                                   'postgres %s' 
                                    % (channel, e))
-                    pass  
                 self.channels.pop(channel_name, None)
                 statemon.state.decrement('postgres_listeners')
             except psycopg2.Error as e: 
@@ -5731,7 +5735,7 @@ class Clip(StoredObject):
     def __init__(self, clip_id=None, video_id=None, thumbnail_id=None, 
                  urls=None, ttype=None, rank=0, model_version=None, 
                  enabled=True, score=None, start_frame=None, end_frame=None,
-                 duration=None):
+                 duration=None, share_token=None):
         clip_id = clip_id or uuid.uuid4().hex
         super(Clip,self).__init__(clip_id)
 
@@ -5760,6 +5764,10 @@ class Clip(StoredObject):
         # will be a score combined of a raw valence score plus some
         # other stuff (like motion analysis)
         self.score = score
+
+        # Share token permits viewing by non-owner. It must
+        # be set to be used.
+        self.share_token = share_token
 
     @property
     def account_id(self):

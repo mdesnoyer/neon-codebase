@@ -8,11 +8,9 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 from apiv2 import *
-from collections import OrderedDict
 from cvutils.imageutils import PILImageUtils
 import dateutil.parser
 import model.predictor
-import numpy as np
 import PIL.Image
 import PIL.ImageDraw
 import PIL.ImageFont
@@ -24,7 +22,6 @@ import utils.pycvutils
 import cmsapiv2.client
 from cmsdb.neondata import TagType
 import fractions
-import itertools
 import logging
 import model
 import utils.autoscale
@@ -32,7 +29,8 @@ import video_processor.video_processing_queue
 _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
-define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
+define("cmsapiv1_port", default=8083, help="what port apiv1 is running on",
+       type=int)
 
 # For scoring non-video thumbnails.
 define('model_server_port', default=9000, type=int,
@@ -103,7 +101,8 @@ class AccountHandler(APIV2Handler):
         if fields:
             fields = set(fields.split(','))
 
-        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id)
+        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                              account_id)
 
         if not user_account:
             raise NotFoundError()
@@ -143,7 +142,7 @@ class AccountHandler(APIV2Handler):
                 acct_internal.default_thumbnail_id)
 
         yield tornado.gen.Task(neondata.NeonUserAccount.modify,
-                                        acct_internal.key, _update_account)
+                               acct_internal.key, _update_account)
         statemon.state.increment('put_account_oks')
         self.success(acct_for_return)
 
@@ -192,7 +191,7 @@ class AccountHandler(APIV2Handler):
 '''*********************************************************************
 IntegrationHelper
 *********************************************************************'''
-class IntegrationHelper():
+class IntegrationHelper(object):
     """Class responsible for helping the integration handlers."""
 
     @staticmethod
@@ -215,7 +214,8 @@ class IntegrationHelper():
             integration.account_id = acct.neon_api_key
             integration.partner_code = args['publisher_id']
             integration.api_key = args.get('api_key', integration.api_key)
-            integration.api_secret = args.get('api_secret', integration.api_secret)
+            integration.api_secret = args.get('api_secret',
+                                              integration.api_secret)
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = neondata.BrightcoveIntegration()
@@ -293,15 +293,18 @@ class IntegrationHelper():
         integration_type - the type of integration to create
         """
         if integration_type == neondata.IntegrationType.OOYALA:
-            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
-                                                 integration_id)
+            integration = yield tornado.gen.Task(
+                neondata.OoyalaIntegration.get,
+                integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
-                                                 integration_id)
+            integration = yield tornado.gen.Task(
+                neondata.BrightcoveIntegration.get,
+                integration_id)
         if integration:
             raise tornado.gen.Return(integration)
         else:
-            raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
+            raise NotFoundError('%s %s' % ('unable to find the integration '
+                                           'for id:',integration_id))
 
     @staticmethod
     @tornado.gen.coroutine
@@ -322,18 +325,18 @@ class IntegrationHelper():
         rv = {}
         rv['integrations'] = []
         for i in integrations:
-           new_obj = None
-           if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
-               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
-               new_obj['type'] = 'brightcove'
-           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
-               new_obj = yield OoyalaIntegrationHandler.db2api(i)
-               new_obj['type'] = 'ooyala'
-           else:
-               continue
+            new_obj = None
+            if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
+                new_obj = yield BrightcoveIntegrationHandler.db2api(i)
+                new_obj['type'] = 'brightcove'
+            elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
+                new_obj = yield OoyalaIntegrationHandler.db2api(i)
+                new_obj['type'] = 'ooyala'
+            else:
+                continue
 
-           if new_obj:
-               rv['integrations'].append(new_obj)
+            if new_obj:
+                rv['integrations'].append(new_obj)
 
         raise tornado.gen.Return(rv)
 
@@ -1929,7 +1932,9 @@ class VideoHelper(object):
                     async=True)
                 # bypassing save_objects to avoid the extra video save
                 # that comes later
-                yield tornado.gen.Task(thumb.save)
+                success = yield thumb.save(async=True) 
+                if not success: 
+                    raise IOError('unable to save default thumbnail')
 
             # create the api_request
             api_request = yield VideoHelper.create_api_request(
@@ -2191,15 +2196,8 @@ class VideoHelper(object):
                 # are handled in that section.
                 pass
             elif field == 'demographic_clip_ids':
-                new_video['demographic_clip_ids'] = []
-                for video_result in video.job_results: 
-                    cur_entry = { 
-                        'gender': video_result.gender, 
-                        'age': video_result.age, 
-                        'clip_ids': (video_result.clip_ids + 
-                                     video.non_job_clip_ids)
-                    }
-                    new_video['demographic_clip_ids'].append(cur_entry)  
+                new_video['demographic_clip_ids'] = \
+                    VideoHelper.get_demographic_clip_ids(video)
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -2246,6 +2244,22 @@ class VideoHelper(object):
                     new_video['error'] = err
 
         raise tornado.gen.Return(new_video)
+
+    @staticmethod
+    def get_demographic_clip_ids(video):
+        '''Given a VideoMetadata, get the demographic_clip_ids'''
+
+        result = []
+        for video_result in video.job_results: 
+            cur_entry = { 
+                'gender': video_result.gender, 
+                'age': video_result.age, 
+                'clip_ids': (video_result.clip_ids + 
+                             video.non_job_clip_ids)
+            }
+            result.append(cur_entry)  
+        return result
+
 
 '''*********************************************************************
 VideoHandler
@@ -3735,7 +3749,9 @@ class FeatureHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList(
+                at_least_x=1, 
+                min_length_for_elements=1)), 
             'model_name' : All(Coerce(str), Length(min=1, max=512)), 
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
@@ -3830,68 +3846,94 @@ class SocialImageHandler(ShareableContentHandler):
         '''On 200, returns a JPG image for sharing on social that is 
         composed of the baseline thumb and our best thumb.
         '''
-        schema = Schema({
+        Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            'platform': In(['twitter', '', None, 'facebook']),
-            'video_id': All(Coerce(str), Length(min=1, max=256)),
-            'tag_id': All(Coerce(str), Length(min=1, max=256))})
-        args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
+            'platform': In(['twitter', '', None, 'facebook'])})(self.args)
 
-        external_video_id = args.get('video_id')
-        internal_video_id = neondata.InternalVideoID.generate(
-            account_id, external_video_id)
-        tag_id = args.get('tag_id')
-        
-        # See if we can get the asset id from the payload
-        if self.share_payload is not None:
-            if self.share_payload['content_type'] != 'VideoMetadata':
-                statemon.state.increment('social_image_invalid_request')
-                raise ForbiddenError('Content token is not for videos')
-            if external_video_id is not None:
-                if self.share_payload['content_id'] != internal_video_id:
-                    statemon.state.increment('social_image_invalid_request')
-                    raise ForbiddenError('Content token is not for this video')
+        try:
+            # See if we can get the asset id from the payload
+            payload = self.share_payload
+            if not payload:
+                raise BadRequestError('This endpoint requires a share token', ResponseCode.HTTP_BAD_REQUEST)
+
+            pl_id = payload['content_id']
+            pl_type = payload['content_type']
+
+            # Find a thumb to display.
+            # The is_authorized check validates these exist and match
+            # their share token with the share token.
+            if pl_type == neondata.VideoMetadata.__name__:
+                video = yield neondata.VideoMetadata.get(pl_id, async=True)
+                best_thumb = yield self._get_best_thumb_of_video(video)
+            elif pl_type == neondata.Tag.__name__:
+                tag = yield neondata.Tag.get(pl_id, async=True)
+                best_thumb = yield self._get_best_thumb_of_tag(tag)
+
+                # If the tag is of video and the video has a clip,
+                # use the best clip's score in place of the thumbnail's.
+                try:
+                    if tag.tag_type == neondata.TagType.VIDEO:
+                        video = yield neondata.VideoMetadata.get(
+                            tag.video_id,
+                            async=True)
+                        dems = VideoHelper.get_demographic_clip_ids(video)
+
+                        if dems:
+                            # Get the best clip of the null gender and age group.
+                            clips = (d for d in dems
+                                     if d['age'] is None and
+                                        d['gender'] is None).next()
+                            best_clip_id = clips['clip_ids'][0]
+
+                            clip = yield neondata.Clip.get(
+                                best_clip_id,
+                                async=True)
+                            clip_thumb = yield neondata.ThumbnailMetadata.get(
+                                clip.thumbnail_id,
+                                async=True)
+                            # Override the best thumb with this one, and the
+                            # clip's score.
+                            if clip_thumb:
+                                best_thumb = clip_thumb
+                                best_thumb.model_version = None
+                                best_thumb.model_score = clip.score
+                except Exception as e:
+                    _log.warn('Problem using clip thumb %s', e)
+                    # Fail back to using the best thumbnail.
+                    
+
+            elif pl_type == neondata.Clip.__name__:
+                clip = yield neondata.Clip.get(pl_id, async=True)
+                best_thumb = yield neondata.ThumbnailMetadata.get(clip.thumbnail_id)
             else:
-                # Grab the video id from the payload
-                internal_video_id = self.share_payload['content_id']
-                external_video_id = neondata.InternalVideoID.to_external(
-                    internal_video_id)
+                raise ForbiddenError('Invalid token')
+
+
+            # Get the size needs based on the platform
+            width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
+                platform]
                 
-        if (external_video_id is None) == (tag_id is None):
+            # Now, we build the image.
+            image = yield self._build_image(
+                best_thumb,
+                width,
+                height,
+                box_height,
+                font_size)
+
+            buf = StringIO()
+            image.save(buf, 'jpeg', quality=90)
+
+            # Finally, write the image data to JPEG in the output
+            self.set_header('Content-Type', 'image/jpg')
+            self.set_status(200)
+            self.write(buf.getvalue())
+            self.finish()
+
+        except Exception as e:
             statemon.state.increment('social_image_invalid_request')
-            raise Invalid('Exactly one of video_id or tag_id is required')
-        if tag_id is not None:
-            # TODO(nate, mdesnoyer): wire this up for image
-            # collections when we are ready for it.
-            statemon.state.increment('social_image_invalid_request')
-            raise Invalid('tag_id is not implemented yet')
+            raise e
 
-        # Get the size needs based on the platform
-        width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[
-            platform]
-            
-
-        # We are building the composite for a video
-        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
-        if video is None:
-            statemon.state.increment('social_image_invalid_request')
-            raise Invalid('Invalid video id')
-
-        best_thumb = yield self._get_best_thumb(video)
-
-        # Now, we build the image. Hooray
-        image = yield self._build_image(best_thumb, width, height, box_height,
-                                        font_size)
-        buf = StringIO()
-        image.save(buf, 'jpeg', quality=90)
-
-        # Finally, write the image data to JPEG in the output
-        self.set_header('Content-Type', 'image/jpg')
-        self.set_status(200)
-        self.write(buf.getvalue())
-        self.finish()
         statemon.state.increment('social_image_generated')
 
     @tornado.gen.coroutine
@@ -3963,7 +4005,7 @@ class SocialImageHandler(ShareableContentHandler):
             raise Invalid(msg)
 
     @tornado.gen.coroutine
-    def _get_best_thumb(self, video):
+    def _get_best_thumb_of_video(self, video):
         '''Returns the (base, best) ThumbnailMetadata objects.'''
 
         # Get the job thumbnails
@@ -3990,11 +4032,26 @@ class SocialImageHandler(ShareableContentHandler):
 
         raise tornado.gen.Return(best_thumb)
 
+    @tornado.gen.coroutine
+    def _get_best_thumb_of_tag(self, tag):
+        thumb_ids = yield neondata.TagThumbnail.get(tag_id=tag.get_id(), async=True)
+        thumbnails = yield neondata.ThumbnailMetadata.get_many(
+            thumb_ids,
+            async=True)
+
+        # Sort the job thumbs ascending by model score
+        thumbnails = sorted(thumbnails, key=lambda x: x.get_score())
+
+        if len(thumbnails) == 0:
+            raise Invalid('Tag does not have any associated thumbnail')
+        best_thumb = thumbnails[-1]
+        raise tornado.gen.Return(best_thumb)
+
     @classmethod
     def get_access_levels(cls):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
-class ClipHandler(APIV2Handler):
+class ClipHandler(ShareableContentHandler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({

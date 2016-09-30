@@ -29,3 +29,6 @@ omit =
      *gen-py*
      */flume/*
      tools/*
+     cmsdb/migrations/*
+     schema/*
+     stats/*

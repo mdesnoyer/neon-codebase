@@ -11,13 +11,13 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import __builtin__
+import cloghandler
 import copy
 from cStringIO import StringIO
 import fake_filesystem
 import json
 import logging
-from mock import patch
-from mock import MagicMock
+from mock import patch, MagicMock
 import re
 from StringIO import StringIO
 import test_utils.neontest
@@ -89,12 +89,9 @@ class TestAccessLogger(test_utils.neontest.TestCase):
     def setUp(self):
         self.access_logger = logging.getLogger('tornado.access')
         self.orig_handlers = copy.copy(self.access_logger.handlers)
-
         self.filesystem = fake_filesystem.FakeFilesystem()
-        self.fake_os = fake_filesystem.FakeOsModule(self.filesystem)
         self.fake_open = fake_filesystem.FakeFileOpen(self.filesystem)
-        logging.handlers.os = self.fake_os
-        logging.open = self.fake_open
+        cloghandler.open = self.fake_open
 
         self.logger_configured = utils.logs._added_configured_logger
         utils.logs._added_configured_logger = False
@@ -106,8 +103,8 @@ class TestAccessLogger(test_utils.neontest.TestCase):
         for handler in handlers_to_delete:
             self.access_logger.removeHandler(handler)
 
-        logging.handlers.os = os
         logging.open = __builtin__.open
+        cloghandler.open = __builtin__.open
         utils.logs._added_configured_logger = self.logger_configured
 
     def test_access_log_no_propagate(self):

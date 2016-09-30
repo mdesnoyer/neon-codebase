@@ -1090,13 +1090,21 @@ class CustomVoluptuousTypes():
         return f 
 
     @staticmethod
-    def CommaSeparatedList(limit=100):
+    def CommaSeparatedList(limit=100, at_least_x=0, min_length_for_elements=0):
         def f(v):
             csl_list = list(set(v.split(',')))
             if len(csl_list) > limit:
                 raise Invalid("list exceeds limit (%d)" % limit)
-            else:
-                return csl_list
+            elif len(csl_list) < at_least_x: 
+                raise Invalid(
+                    "list must have at least (%d) elements" % at_least_x)
+            if min_length_for_elements > 0: 
+                for i in csl_list: 
+                    if len(i) < min_length_for_elements: 
+                        raise Invalid(
+                           "all elements must be of length (%d)" % 
+                           min_length_for_elements)
+            return csl_list
         return f
 
     @staticmethod
