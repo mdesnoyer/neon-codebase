@@ -1395,7 +1395,7 @@ class TestAddingImageData(NeonDbTestCase):
         image.save(filestream, 'jpeg', quality=90)
         filestream.seek(0)
         dominant = neondata.ThumbnailMetadata.generate_dominant_color(filestream)
-        self.assertEqual(color, dominant)
+        self.assertEqual(list(color), dominant)
 
     @tornado.testing.gen_test
     def test_lookup_cdn_info(self):
