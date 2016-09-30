@@ -93,7 +93,7 @@ class AccountHandler(APIV2Handler):
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
 
-        args = {}
+        args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
 
@@ -332,8 +332,6 @@ class IntegrationHelper(object):
             elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
                 new_obj = yield OoyalaIntegrationHandler.db2api(i)
                 new_obj['type'] = 'ooyala'
-            else:
-                continue
 
             if new_obj:
                 rv['integrations'].append(new_obj)
@@ -341,7 +339,6 @@ class IntegrationHelper(object):
         raise tornado.gen.Return(rv)
 
     @staticmethod
-    @tornado.gen.coroutine
     def validate_oauth_credentials(client_id, client_secret, integration_type):
         if integration_type is neondata.IntegrationType.BRIGHTCOVE:
             if client_id and not client_secret:
@@ -493,8 +490,8 @@ class BrightcovePlayerHandler(APIV2Handler):
             async=True)
         if not integration:
             raise NotFoundError(
-                'BrighcoveIntegration does not exist for player reference:%s',
-                args['player_ref'])
+                'BrighcoveIntegration does not exist for integration_id: %s' % 
+                args['integration_id'])
 
         # Retrieve the list of players from Brightcove api
         bc = api.brightcove_api.PlayerAPI(integration)
@@ -560,7 +557,7 @@ class BrightcovePlayerHandler(APIV2Handler):
             async=True)
         if not integration:
             raise NotFoundError(
-                'BrighcoveIntegration does not exist for integration_id:%s',
+                'BrighcoveIntegration does not exist for integration_id:%s' % 
                 args['integration_id'])
         if integration.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')

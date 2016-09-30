@@ -686,6 +686,39 @@ class TestAccountHandler(TestControllersBase):
         self.assertEquals(1, rjson['serving_enabled'])
 
     @tornado.testing.gen_test
+    def test_get_acct_with_fields(self):
+        url = '/api/v2/%s/?fields=serving_enabled,integration_ids' % (
+            self.user.neon_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertFalse(rjson.has_key('account_id')) 
+        self.assertEquals(1, rjson['serving_enabled'])
+        self.assertTrue(rjson.has_key('integration_ids')) 
+
+    @tornado.testing.gen_test
+    def test_get_acct_with_fields(self):
+        url = '/api/v2/%s/?fields=serving_enabled' % (self.user.neon_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertFalse(rjson.has_key('account_id')) 
+        self.assertEquals(1, rjson['serving_enabled'])
+    
+    @tornado.testing.gen_test 
+    def test_get_acct_with_invalid_fields(self): 
+        url = '/api/v2/%s/?fields=account_id,cows' % (self.user.neon_api_key)
+ 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                method="GET")
+       
+        rjson = json.loads(e.exception.response.body)
+        self.assertEquals(e.exception.code, 400)
+        self.assertEquals(rjson['error']['message'], 'invalid field cows') 
+
+    @tornado.testing.gen_test
     def test_update_acct_base(self):
         url = '/api/v2/%s?default_height=1200&default_width=1500' % (
             self.user.neon_api_key)
@@ -1332,6 +1365,94 @@ class TestUserHandler(TestControllersBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Cannot update')
 
+
+class TestIntegrationHelper(TestControllersBase): 
+    def setUp(self): 
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        self.user.save()
+        self.account_id = self.user.neon_api_key
+        super(TestIntegrationHelper, self).setUp()
+
+    @tornado.testing.gen_test 
+    def test_create_bcove_integration(self):
+        ih = controllers.IntegrationHelper()
+        integration = yield ih.create_integration(
+            self.user, 
+            {'account_id' : self.account_id, 'publisher_id' : '1234' }, 
+            neondata.IntegrationType.BRIGHTCOVE)
+        self.assertEquals(integration.account_id, self.account_id) 
+        self.assertEquals(integration.publisher_id, '1234')
+ 
+    @tornado.testing.gen_test 
+    def test_create_ooyala_integration(self):
+        ih = controllers.IntegrationHelper()
+        integration = yield ih.create_integration(
+            self.user, 
+            {'account_id' : self.account_id, 'publisher_id' : '1234' }, 
+            neondata.IntegrationType.OOYALA)
+        self.assertEquals(integration.account_id, self.account_id) 
+        self.assertEquals(integration.partner_code, '1234')
+ 
+    @tornado.testing.gen_test 
+    def test_create_unknown_integration(self):
+        ih = controllers.IntegrationHelper()
+        with self.assertRaises(ValueError): 
+            integration = yield ih.create_integration(
+                self.user, 
+                {'account_id' : self.account_id, 'publisher_id' : '1234' }, 
+                'COWS')
+
+    @patch('cmsdb.neondata.BrightcoveIntegration.save')
+    @tornado.testing.gen_test 
+    def test_create_integration_integration_no_savey(self, int_saver):
+        wrapped_saver = self._future_wrap_mock(int_saver) 
+        wrapped_saver.return_value = False 
+        ih = controllers.IntegrationHelper()
+        with self.assertRaises(SaveError): 
+            integration = yield ih.create_integration(
+                self.user, 
+                {'account_id' : self.account_id, 'publisher_id' : '1234' }, 
+                neondata.IntegrationType.BRIGHTCOVE, 
+                cdn='meisacdn')
+
+    @patch('cmsdb.neondata.CDNHostingMetadataList.save')
+    @tornado.testing.gen_test 
+    def test_create_integration_cdn_no_savey(self, cdn_saver):
+        wrapped_saver = self._future_wrap_mock(cdn_saver) 
+        wrapped_saver.return_value = False 
+        ih = controllers.IntegrationHelper()
+        with self.assertRaises(SaveError): 
+            integration = yield ih.create_integration(
+                self.user, 
+                {'account_id' : self.account_id, 'publisher_id' : '1234' }, 
+                neondata.IntegrationType.OOYALA, 
+                cdn='meisacdn')
+
+    @tornado.testing.gen_test 
+    def test_get_integration_no_account_found(self): 
+        ih = controllers.IntegrationHelper()
+        with self.assertRaises(NotFoundError): 
+            yield ih.get_integrations('a134')
+
+    def test_validate_oauth_credentials_bad_keys(self): 
+        ih = controllers.IntegrationHelper()
+        with self.assertRaises(BadRequestError): 
+            ih.validate_oauth_credentials(
+                None, 
+                '123', 
+                neondata.IntegrationType.BRIGHTCOVE)
+        with self.assertRaises(BadRequestError): 
+            ih.validate_oauth_credentials(
+                '123', 
+                None, 
+                neondata.IntegrationType.BRIGHTCOVE)
+
+    def test_validate_oauth_credentials_ooyala_pass(self): 
+        ih = controllers.IntegrationHelper()
+        ih.validate_oauth_credentials(
+            None, 
+            '123', 
+            neondata.IntegrationType.OOYALA)
 
 class TestOoyalaIntegrationHandler(TestControllersBase):
     def setUp(self):
@@ -8189,6 +8310,51 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual('pl1', player1['player_ref'])
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
         self.assertIsNone(neondata.BrightcovePlayer.get('pl1'))
+
+    @tornado.testing.gen_test
+    def test_get_player_no_integration(self):
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, '123')
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(url),
+                headers=headers)
+        self.assertEqual(e.exception.code, 404)
+
+    @tornado.testing.gen_test
+    def test_put_player_no_integration(self):
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(
+             self.account_id)
+        bparams = {} 
+        bparams['integration_id'] = 'dne' 
+        bparams['player_ref'] = 'cows' 
+        bparams['is_tracked'] = False
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(url),
+                method='PUT', 
+                body=json.dumps(bparams),
+                headers=headers)
+        self.assertEqual(e.exception.code, 404)
+
+    @tornado.testing.gen_test
+    def test_put_player_integration_not_authorized(self):
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(
+             'baddddaccount')
+        bparams = {} 
+        bparams['integration_id'] = self.integration.integration_id 
+        bparams['player_ref'] = 'cows' 
+        bparams['is_tracked'] = False
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(url),
+                method='PUT', 
+                body=json.dumps(bparams),
+                headers=headers)
+        self.assertEqual(e.exception.code, 401)
 
     @tornado.testing.gen_test
     def test_get_no_default_player(self):
