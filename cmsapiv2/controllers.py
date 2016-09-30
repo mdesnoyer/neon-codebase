@@ -1723,6 +1723,28 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
 
         raise tornado.gen.Return(retval)
 
+    def get_limits(self):
+        '''Limit the post of images'''
+
+        try:
+            increment = len(self.images)
+        except AttributeError:
+            increment = 1
+        post_list = [{ 'left_arg': 'image_posts',
+                       'right_arg': 'max_image_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_image_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_image_posts',
+                           'timer_resets': [ ('image_posts', 0) ]
+                       },
+                       'values_to_increase': [ ('image_posts', increment) ],
+                       'values_to_decrease': []
+        }]
+        return {
+                   HTTPVerbs.POST: post_list
+               }
+
     @classmethod
     def get_access_levels(self):
         return {
@@ -3633,7 +3655,7 @@ class BatchHandler(APIV2Handler):
             skip_auth=True)
 
         requests = call_info.get('requests', None)
-        output = { 'results' : [] } 
+        output = { 'results' : [] }
         for req in requests: 
             # request will be information about 
             # the call we want to make 
@@ -3659,7 +3681,8 @@ class BatchHandler(APIV2Handler):
                             'code' : response.code 
                         } 
                     }
-                    result['response'] = error 
+                    result['response'] = error
+                    result['response_code'] = response.code 
                 else:  
                     result['relative_url'] = req['relative_url'] 
                     result['method'] = req['method'] 
@@ -3667,8 +3690,10 @@ class BatchHandler(APIV2Handler):
                     result['response_code'] = response.code
             except AttributeError:
                 result['response'] = 'Malformed Request'
+                result['response_code'] = ResponseCode.HTTP_BAD_REQUEST 
             except Exception as e: 
                 result['response'] = 'Unknown Error Occurred' 
+                result['response_code'] = ResponseCode.HTTP_INTERNAL_SERVER_ERROR
             finally: 
                 output['results'].append(result)
                  

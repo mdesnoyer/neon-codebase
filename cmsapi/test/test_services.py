@@ -109,7 +109,6 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
                 uitem = neondata.ThumbnailURLMapper(t_url, tid)
                 thumbnail_url_mapper_list.append(uitem)
         retid = neondata.ThumbnailMetadata.save_all(thumbnails)
-        returl = neondata.ThumbnailURLMapper.save_all(thumbnail_url_mapper_list)
 
         # standard mock response
         response_body = {}

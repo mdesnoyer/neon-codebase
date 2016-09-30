@@ -4503,8 +4503,6 @@ class TestThumbnailHandler(TestControllersBase):
         buf2 = StringIO()
         self.random_image2.save(buf2, 'JPEG')
 
-        #body = MultipartEncoder({
-        #    'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
         # Try two.
         body = MultipartEncoder([
             ('upload', ('image1.jpg', buf.getvalue(), 'multipart/form-data')),
@@ -5002,20 +5000,133 @@ class TestThumbnailHandler(TestControllersBase):
 
     def test_get_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.get')
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.get_exceptions(url, exception_mocker)
 
     def test_put_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.put')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.put_exceptions(url, params, exception_mocker)
 
     def test_post_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/thumbnails' % '1234234'
+        url = '/api/v2/%s/thumbnails' % '1234234'
         self.post_exceptions(url, params, exception_mocker)
+
+    @tornado.testing.gen_test
+    def test_post_thumbnail_limit_counter_increments(self):
+
+        # Sanity check.
+        neondata.AccountLimits(
+            self.account_id_api_key,
+            refresh_time_image_posts=datetime(2050,1,1)).save()
+        limit = neondata.AccountLimits.get(self.account_id_api_key)
+        self.assertEqual(0, limit.image_posts)
+
+        # Post one.
+        image_filename = 'green.jpg'
+        _url = '/api/v2/{}/thumbnails?url={}&tag_id={}'
+        url = self.get_url(_url.format(
+            self.account_id_api_key,
+            image_filename,
+            'tag_0'))
+        response = yield self.http_client.fetch(url, body='', method='POST')
+        self.assertEqual(response.code, 202)
+
+        # Since this happens in on_finish wait for the change at the db.
+        get_posts = lambda: neondata.AccountLimits.get(
+            self.account_id_api_key).image_posts
+        yield self.assertWaitForEquals(get_posts, 1, async=True)
+
+        # Post two.
+        image_filenames = 'red.jpg,blue.jpg'
+        _url = '/api/v2/{}/thumbnails?url={}&tag_id={}'
+        url = self.get_url(_url.format(
+            self.account_id_api_key,
+            image_filenames,
+            'tag_0'))
+        response = yield self.http_client.fetch(url, body='', method='POST')
+        self.assertEqual(response.code, 202)
+
+        yield self.assertWaitForEquals(get_posts, 3, async=True)
+
+        # Try two more but by body.
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
+        buf2 = StringIO()
+        self.random_image2.save(buf2, 'JPEG')
+
+        # Try two.
+        body = MultipartEncoder([
+            ('upload', ('image1.jpg', buf.getvalue(), 'multipart/form-data')),
+            ('upload', ('image2.jpg', buf2.getvalue(), 'multipart/form-data'))])
+
+        headers = {'Content-Type': body.content_type}
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key,
+            'Cool'))
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='POST')
+        self.assertEqual(response.code, 202)
+
+        yield self.assertWaitForEquals(get_posts, 5, async=True)
+
+    @tornado.testing.gen_test
+    def test_post_thumbnail_limit_reached(self):
+
+        neondata.AccountLimits(
+            self.account_id_api_key, 
+            image_posts=1000,
+            max_image_posts=1000, 
+            refresh_time_image_posts=datetime(2050,1,1)).save()
+
+        url = self.get_url('/api/v2/{}/thumbnails?url={}'.format(
+            self.account_id_api_key,
+            'image.jpg'))
+
+        headers = {'Content-Type': 'application/json'}
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                headers=headers,
+                body='',
+                method='POST')
+        self.assertEqual(402, e.exception.code)
+
+
+    @tornado.testing.gen_test
+    def test_post_thumbnail_limit_resets(self):
+
+        neondata.AccountLimits(
+            self.account_id_api_key, 
+            image_posts=1000,
+            max_image_posts=1000, 
+            refresh_time_image_posts=datetime(2000,1,1)).save()
+
+        url = self.get_url('/api/v2/{}/thumbnails?url={}'.format(
+            self.account_id_api_key,
+            'image.jpg'))
+
+        headers = {'Content-Type': 'application/json'}
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body='',
+            method='POST')
+        self.assertEqual(202, response.code)
+
+        limit = neondata.AccountLimits.get(self.account_id_api_key)
+        self.assertEqual(0, limit.image_posts)
+ 
+        get_limit = lambda: neondata.AccountLimits.get(
+            self.account_id_api_key).image_posts
+
+        yield self.assertWaitForEquals(get_limit, 1, async=True)
 
 
 class TestHealthCheckHandler(TestControllersBase):
@@ -9936,8 +10047,98 @@ class TestClipHandler(TestVerifiedControllersBase):
         self.assertEquals(rv_clip_two['video_id'], 'vid1')  
         self.assertEquals(rv_clip_two['clip_id'], 'testa_vid1_2')  
         self.assertEquals(rv_clip_three, {})  
-        self.assertEquals(rj['count'], 3) 
+        self.assertEquals(rj['count'], 3)
+
+class TestBatchHandler(TestVerifiedControllersBase):
+    def setUp(self):
+        super(TestBatchHandler, self).setUp()
+        acct = neondata.NeonUserAccount('testa', name='me')
+        acct.save()
+        self.url = self.get_url(
+            '/api/v2/batch')
+
+    @patch('cmsapiv2.client.Client.send_request')
+    @tornado.testing.gen_test
+    def test_batch_with_two_good_requests(self, http_mocker):
+        hmock_wrap = self._future_wrap_mock(http_mocker)
+        hmock_wrap.side_effect = lambda x: tornado.httpclient.HTTPResponse(
+            x,
+            200,
+            buffer=StringIO('{"cows": "moo", "pigs": "oink"}'))
+        call_info = {} 
+        call_info['call_info'] = {}  
+        requests = [] 
+        requests.append({'relative_url': 'test.com', 'method':'GET' })
+        requests.append({'relative_url': 'test.com', 'method':'POST' })
+        requests.append({'relative_url': 'test.com', 'method':'PUT' })
+        call_info['call_info']['requests'] = requests 
+        res = yield self.http_client.fetch(
+            self.url, 
+            headers=self.headers,
+            body=json.dumps(call_info),
+            method='POST')
+        rjson = json.loads(res.body) 
+        self.assertEquals(3, len((rjson['results'])))
+        res1 = rjson['results'][0]
+        res2 = rjson['results'][1]
+        res3 = rjson['results'][2]
+        self.assertEquals(res1['response']['cows'], 'moo') 
+        self.assertEquals(res1['response_code'], 200) 
+        self.assertEquals(res1['method'], 'GET') 
+        self.assertEquals(res2['response']['pigs'], 'oink') 
+        self.assertEquals(res2['method'], 'POST')
+        self.assertEquals(res3['method'], 'PUT')
  
+    @patch('cmsapiv2.client.Client.send_request')
+    @tornado.testing.gen_test
+    def test_batch_with_exceptions(self, http_mocker):
+        hmock_wrap = self._future_wrap_mock(http_mocker)
+        hmock_wrap.side_effect = [ AttributeError, Exception ]
+        call_info = {} 
+        call_info['call_info'] = {}  
+        requests = [] 
+        requests.append({'relative_url': 'test.com', 'method':'GET' })
+        requests.append({'relative_url': 'test.com', 'method':'POST' })
+        call_info['call_info']['requests'] = requests 
+        res = yield self.http_client.fetch(
+            self.url, 
+            headers=self.headers,
+            body=json.dumps(call_info),
+            method='POST')
+        rjson = json.loads(res.body)
+        res1 = rjson['results'][0]
+        res2 = rjson['results'][1]
+        self.assertEquals(res1['response'], 'Malformed Request') 
+        self.assertEquals(res2['response'], 'Unknown Error Occurred') 
+        self.assertEquals(res1['response_code'], 400) 
+        self.assertEquals(res2['response_code'], 500)
+ 
+    @patch('cmsapiv2.client.Client.send_request')
+    @tornado.testing.gen_test
+    def test_batch_with_response_error(self, http_mocker):
+        hmock_wrap = self._future_wrap_mock(http_mocker)
+        hmock_wrap.side_effect = lambda x: tornado.httpclient.HTTPResponse(
+            x,
+            403,
+            buffer=StringIO('{"error" : "pigs do not moo cows do"}'))
+
+        call_info = {} 
+        call_info['call_info'] = {}  
+        requests = [] 
+        requests.append({'relative_url': 'test.com', 'method':'GET' })
+        call_info['call_info']['requests'] = requests 
+        res = yield self.http_client.fetch(
+            self.url, 
+            headers=self.headers,
+            body=json.dumps(call_info),
+            method='POST')
+        rjson = json.loads(res.body)
+        res1 = rjson['results'][0]
+        self.assertEquals(res1['response_code'], 403) 
+        self.assertEquals(
+            res1['response']['error']['message'], 
+            'Forbidden') 
+            
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
     unittest.main(argv=(['%prog']+args))

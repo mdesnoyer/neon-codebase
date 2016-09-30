@@ -6406,30 +6406,39 @@ class AccountLimits(StoredObject):
     def __init__(self, 
                  account_id, 
                  video_posts=0, 
-                 max_video_posts=10, 
+                 max_video_posts=10,
                  refresh_time_video_posts=datetime.datetime(2050,1,1), 
                  seconds_to_refresh_video_posts=2592000.0,
                  max_video_size=900.0,
                  email_posts=0,
                  max_email_posts=60, 
                  refresh_time_email_posts=datetime.datetime(2000,1,1), 
-                 seconds_to_refresh_email_posts=3600.0):
+                 seconds_to_refresh_email_posts=3600.0,
+                 image_posts=0,
+                 max_image_posts=1000,
+                 refresh_time_image_posts=datetime.datetime(2000,1,1),
+                 seconds_to_refresh_image_posts=2592000.0):
  
         super(AccountLimits, self).__init__(account_id)
         
-        # the number of video posts this account has made in the time window 
+        # the number of video/image posts this account has made in the time window 
         self.video_posts = video_posts 
+        self.image_posts = image_posts
          
-        # the maximum amount of video posts the account is allowed in a time 
+        # the maximum amount of video/image posts allowed in a time 
         # window 
         self.max_video_posts = max_video_posts 
+        self.max_image_posts = max_image_posts 
 
-        # when the video_posts counter will be reset 
+        # when the video/image_posts counter will be reset 
         self.refresh_time_video_posts = refresh_time_video_posts.strftime(
+            "%Y-%m-%d %H:%M:%S.%f") 
+        self.refresh_time_image_posts = refresh_time_image_posts.strftime(
             "%Y-%m-%d %H:%M:%S.%f") 
 
         # amount of seconds to add to now() when resetting the timer 
         self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+        self.seconds_to_refresh_image_posts = seconds_to_refresh_image_posts
 
         # maximum video length we will process in seconds 
         self.max_video_size = max_video_size
@@ -6453,13 +6462,20 @@ class AccountLimits(StoredObject):
          
         '''
         sref = bp.seconds_to_refresh_video_posts
+        img_sref = bp.seconds_to_refresh_image_posts
 
         self.max_video_posts = bp.max_video_posts
+        self.max_image_posts = bp.max_image_posts
         self.seconds_to_refresh_video_posts = sref
+        self.seconds_to_refresh_image_posts = img_sref
         self.max_video_size = bp.max_video_size 
         self.refresh_time_video_posts = \
             (datetime.datetime.utcnow() +\
              datetime.timedelta(seconds=sref)).strftime(
+                 "%Y-%m-%d %H:%M:%S.%f")
+        self.refresh_time_image_posts = \
+            (datetime.datetime.utcnow() +\
+             datetime.timedelta(seconds=img_sref)).strftime(
                  "%Y-%m-%d %H:%M:%S.%f")
  
     @classmethod
@@ -6488,16 +6504,20 @@ class BillingPlans(StoredObject):
                  plan_type, 
                  max_video_posts=None, 
                  seconds_to_refresh_video_posts=None,
-                 max_video_size=None):
+                 max_video_size=None,
+                 max_image_posts=None,
+                 seconds_to_refresh_image_posts=None):
  
         super(BillingPlans, self).__init__(plan_type)
-        
-        # the max number of video posts that are allowed  
+
+        # the max number of video and image posts that are allowed  
         self.max_video_posts = max_video_posts
+        self.max_image_posts = max_image_posts
          
         # this will take now() and add this to it, for when the next 
         # refresh will happen
         self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+        self.seconds_to_refresh_image_posts = seconds_to_refresh_image_posts
 
         # maximum video length we will process in seconds 
         self.max_video_size = max_video_size 

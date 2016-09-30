@@ -370,7 +370,7 @@ class BaseTrackerDataV2(object):
         return ThriftFlumeEvent(headers = {
                 'timestamp' : str(self.serverTime),
                 'tai' : self.trackerAccountId,
-                'track_vers' : '2.2',
+                'track_vers' : '2.3',
                 'event' : self.eventType,
                 'flume.avro.schema.url' : schema_url
                 }, body=encoded_str.getvalue())
