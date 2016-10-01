@@ -3307,7 +3307,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # Check the thumbnail for the clip
         thumb = neondata.ThumbnailMetadata.get(clip.thumbnail_id)
         self.assertEquals(thumb.video_id, video_meta.key)
-        self.assertEqual([43, 29, 29], thumb.dominant_color)
+        self.assertEqual([9, 4, 6], thumb.dominant_color)
         
         # Validate each clip is tagged.
         tagged_clip_ids = neondata.TagClip.get(tag_id=video_meta.tag_id)
