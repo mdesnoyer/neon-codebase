@@ -1560,7 +1560,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertEqual(tag_thumb_ids, all_video_thumb_ids)
 
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=10.0)
     def test_broken_default_thumb(self):
         '''
         Test to validate the flow when default thumb is broken
@@ -1751,7 +1751,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])        
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=10.0)
     def test_processing_after_requeue(self):
         '''
         Test processing video after a failed first attempt due to either internal error or
@@ -2088,7 +2088,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertEquals(len(db_thumb.urls), 2)
 
     @patch('video_processor.client.neondata.NeonApiRequest.modify')
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=10.0)
     def test_api_request_update_fail(self, api_request_mock):
         api_request_mock = self._future_wrap_mock(api_request_mock,
                                                   require_async_kw=True)
@@ -2124,7 +2124,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             with self.assertRaises(video_processor.client.DBError):
                 yield self.vprocessor.finalize_response()
 
-    @tornado.testing.gen_test(timeout=10.0)
+    @tornado.testing.gen_test(timeout=15.0)
     def test_somebody_else_processed(self):
 
         # Try when somebody else was sucessful
@@ -3307,7 +3307,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # Check the thumbnail for the clip
         thumb = neondata.ThumbnailMetadata.get(clip.thumbnail_id)
         self.assertEquals(thumb.video_id, video_meta.key)
-        self.assertEqual([9, 4, 6], thumb.dominant_color)
+        self.assertEqual([81, 54, 52], thumb.dominant_color)
         
         # Validate each clip is tagged.
         tagged_clip_ids = neondata.TagClip.get(tag_id=video_meta.tag_id)

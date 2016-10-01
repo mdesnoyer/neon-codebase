@@ -6195,10 +6195,16 @@ class ThumbnailMetadata(StoredObject):
         Outbut:
             color: list [R,G,B]'''
 
-        w, h = image.size
-        pixels = image.getcolors(w * h)
-        pixels.sort(key=lambda p: p[0], reverse=True)
-        return list(pixels[0][1])
+        h = image.histogram()
+        r = h[0:256]
+        g = h[256:256*2]
+        b = h[256*2: 256*3]
+        return [
+            sum( i*w for i, w in enumerate(r) ) / sum(r),
+            sum( i*w for i, w in enumerate(g) ) / sum(g),
+            sum( i*w for i, w in enumerate(b) ) / sum(b)]
+                                                        
+
 
     @tornado.gen.coroutine
     def score_image(self, predictor, image=None, save_object=False):
