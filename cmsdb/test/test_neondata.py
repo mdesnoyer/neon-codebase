@@ -1390,11 +1390,8 @@ class TestAddingImageData(NeonDbTestCase):
 
     def test_dominant_color(self):
         color = (252, 4, 4)
-        image = PIL.Image.new('RGB', (100, 100), color)
-        filestream = StringIO()
-        image.save(filestream, 'jpeg', quality=90)
-        filestream.seek(0)
-        dominant = neondata.ThumbnailMetadata.generate_dominant_color(filestream)
+        image = PIL.Image.new('RGB', (1000, 1000), color)
+        dominant = neondata.ThumbnailMetadata.generate_dominant_color(image)
         self.assertEqual(list(color), dominant)
 
     @tornado.testing.gen_test

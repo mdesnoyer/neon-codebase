@@ -6153,10 +6153,9 @@ class ThumbnailMetadata(StoredObject):
         filestream.seek(0)
         imgdata = filestream.read()
         self.key = ThumbnailID.generate(imgdata, self.video_id)
-        filestream.seek(0)
 
         try:
-            self.dominant_color = self.generate_dominant_color(filestream)
+            self.dominant_color = self.generate_dominant_color(image)
         except Exception as e:
             _log.warn('Error generating dominant color key:%s %s', self.key, e)
 
@@ -6188,7 +6187,7 @@ class ThumbnailMetadata(StoredObject):
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
     @staticmethod
-    def generate_dominant_color(file):
+    def generate_dominant_color(image):
         '''Extract a dominant color of the image
 
         Inputs:
@@ -6196,9 +6195,10 @@ class ThumbnailMetadata(StoredObject):
         Outbut:
             color: list [R,G,B]'''
 
-        color_thief = ColorThief(file)
-        return list(color_thief.get_color())
-
+        w, h = image.size
+        pixels = image.getcolors(w * h)
+        pixels.sort(key=lambda p: p[0], reverse=True)
+        return list(pixels[0][1])
 
     @tornado.gen.coroutine
     def score_image(self, predictor, image=None, save_object=False):
