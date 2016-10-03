@@ -854,7 +854,7 @@ class VideoProcessor(object):
                 # Don't keep the random centerframe or neon thumbnails
                 thumbs = yield neondata.ThumbnailMetadata.get_many(
                     video_obj.thumbnail_ids, async=True)
-                keep_thumbs = [x.key for x in thumbs if x.type not in [
+                keep_thumbs = [x.key for x in thumbs if x and x.type not in [
                     neondata.ThumbnailType.NEON,
                     neondata.ThumbnailType.CENTERFRAME,
                     neondata.ThumbnailType.RANDOM]]
@@ -1110,6 +1110,7 @@ class ThumbnailProcessor(VideoProcessor):
 
             known_thumbs = yield neondata.ThumbnailMetadata.get_many(
                 known_tids, async=True)
+            known_thumbs = [ x for x in known_thumbs if x ] 
 
         # Attach the thumbnails to the video. This will upload the
         # thumbnails to the appropriate CDNs.
