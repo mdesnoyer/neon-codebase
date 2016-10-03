@@ -613,6 +613,7 @@ class BrightcovePlayerHandler(APIV2Handler):
                 bc_player_config)
             if patch:
                 try:
+                    import pdb; pdb.set_trace()
                     yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
                 except Exception as e:
                     statemon.state.increment('brightcove_publish_plugin_error')

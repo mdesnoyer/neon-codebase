@@ -8500,6 +8500,26 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             player.integration_id, self.integration.integration_id)
 
     @tornado.testing.gen_test
+    def test_put_tracked_player_exception(self):
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_player') as _pub:
+                pub = self._future_wrap_mock(_pub)
+                pub.side_effect = [Exception]
+                r = yield self.http_client.fetch(
+                    self.get_url(url),
+                    headers=header,
+                    method='PUT',
+                    body=json.dumps({
+                        'player_ref': 'pl0',
+                        'is_tracked': True,
+                        'integration_id': self.integration.integration_id
+                    }))
+                self.assertEqual(1, pub.call_count)
+
+    @tornado.testing.gen_test
     def test_put_untracked_player(self):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
