@@ -128,10 +128,10 @@ def AddConfiguredLogger():
 
     # Add a logger for tornado access logs
     if options.access_log_file is not None:
-        access_logger = CreateLogger('tornado.access',
-                                     logfile=options.access_log_file,
-                                     fmt=options.format,
-                                     level=logging.INFO)
+        CreateLogger('tornado.access',
+                     logfile=options.access_log_file,
+                     fmt=options.format,
+                     level=logging.INFO)
     logging.getLogger('tornado.access').propagate = False
 
     logging.captureWarnings(True)
@@ -370,12 +370,12 @@ class NeonLogger(logging.Logger):
             f = f.f_back
         rv = "(unknown file)", 0, "(unknown function)"
         while hasattr(f, "f_code"):
-            co = f.f_code
-            filename = os.path.normcase(co.co_filename)
+            code = f.f_code
+            filename = os.path.normcase(code.co_filename)
             if filename in [_srcfile, logging._srcfile]:
                 f = f.f_back
                 continue
-            rv = (co.co_filename, f.f_lineno, co.co_name)
+            rv = (code.co_filename, f.f_lineno, code.co_name)
             break
         return rv
 
@@ -407,8 +407,8 @@ class NeonLogger(logging.Logger):
 
     def log_n(self, level, msg, n=10, *args, **kwargs):
         '''Log every nth message.'''
-        fn, lno, func = self.findCaller()
-        key = (fn, lno)
+        filename, lno, func = self.findCaller()
+        key = (filename, lno)
         cur_val = self.sample_counters.get(key, 0)
         self.sample_counters[key] = cur_val + 1
         if cur_val % n == 0:

@@ -27,7 +27,6 @@ import binascii
 import cmsdb.cdnhosting
 import code
 from collections import OrderedDict, defaultdict
-from colorthief import ColorThief
 import concurrent.futures
 import copy
 import cv2

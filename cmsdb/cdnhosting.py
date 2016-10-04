@@ -125,7 +125,8 @@ class CDNHosting(object):
         self.resize = cdn_metadata.resize
         self.update_serving_urls = cdn_metadata.update_serving_urls
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
-        self.video_rendition_formats = cdn_metadata.video_rendition_formats or []
+        self.video_rendition_formats = (cdn_metadata.video_rendition_formats 
+                                        or [])
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
         self.source_crop = cdn_metadata.source_crop
         self.crop_with_saliency = cdn_metadata.crop_with_saliency
@@ -275,7 +276,8 @@ class CDNHosting(object):
             step = 1                
 
             # Use the specified video container type.
-            if container_type == cmsdb.neondata.VideoRenditionContainerType.MP4:
+            if (container_type == 
+                cmsdb.neondata.VideoRenditionContainerType.MP4):
                 ext = 'mp4'
                 content_type = 'video/mp4'
                 codec = codec or 'libx264'
@@ -289,7 +291,8 @@ class CDNHosting(object):
                 # TODO: Use ffmpeg for the cropping & resizing
                 #imageio_params['ffmpeg_params'].extend([
                 #    '-vf', 'scale=%s:%s' % (width, height)])
-            elif container_type == cmsdb.neondata.VideoRenditionContainerType.GIF:
+            elif (container_type == 
+                  cmsdb.neondata.VideoRenditionContainerType.GIF):
                 ext = 'gif'
                 content_type = 'image/gif'
                 codec = None
@@ -330,7 +333,8 @@ class CDNHosting(object):
                     # then open up a new reader for the file.
                     target.flush()
                     with open(target.name, 'rb') as _file:
-                        basename = cmsdb.neondata.VideoRendition.FNAME_FORMAT.format(
+                        basename = \
+                          cmsdb.neondata.VideoRendition.FNAME_FORMAT.format(
                             video_id=clip.video_id,
                             clip_id=clip.get_id(),
                             width=width,
@@ -696,10 +700,14 @@ class CloudinaryHosting(CDNHosting):
 
     def api_sign_request(self, params_to_sign, api_secret):
         '''
-        You need to sign a string with all parameters sorted by their names alphabetically.
-        Separate parameter name and value with '=' and join parameters with '&'.
+        You need to sign a string with all parameters sorted by their
+        names alphabetically.  Separate parameter name and value with
+        '=' and join parameters with '&'.  
         '''
-        to_sign = "&".join(sorted([(k+"="+(",".join(v) if isinstance(v, list) else str(v))) for k, v in params_to_sign.items() if v]))
+        
+        to_sign = "&".join(
+            sorted([(k+"="+(",".join(v) if isinstance(v, list) else str(v))) 
+                    for k, v in params_to_sign.items() if v]))
         return hashlib.sha1(str(to_sign + api_secret)).hexdigest()
 
 
@@ -724,7 +732,8 @@ class AkamaiHosting(CDNHosting):
     def _upload_impl(self, _file, basename, content_type, url=None,
             overwrite=True):
         if content_type.startswith('video'):
-            raise NotImplementedError('File stream upload to akamai not implemented')
+            raise NotImplementedError(
+                'File stream upload to akamai not implemented')
         rng = random.Random(''.join(basename.split('_')[:3]))
 
         cdn_prefix = rng.choice(self.cdn_prefixes)

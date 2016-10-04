@@ -9,7 +9,6 @@ PyYAML==3.10
 Pympler==0.3.1
 avro==1.7.6
 boto==2.32.1
-colorthief==0.2.0
 coverage==3.7
 ConcurrentLogHandler==0.9.1
 dateutils==0.6.6

@@ -37,7 +37,9 @@ from utils.http import ResponseCode, HTTPVerbs
 import utils.sync
 from utils.options import define, options
 import uuid
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean, Url, In, ALLOW_EXTRA
+from voluptuous import (Schema, Required, All, Length, Range, MultipleInvalid,
+                        Coerce, Invalid, Any, Optional, Boolean, Url, In,
+                        ALLOW_EXTRA)
 
 _log = logging.getLogger(__name__)
 
@@ -192,8 +194,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.args = args
         return self.args
 
-    def set_account_id(request):
-        parsed_url = urlparse(request.uri)
+    def set_account_id(self):
+        parsed_url = urlparse(self.uri)
         try:
             path_part = parsed_url.path.split('/')[3]
             # Ensure none of the non-account paths are picked up.
@@ -201,23 +203,23 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                                  'email', 'authenticate', 'refresh_token',
                                  'accounts', 'users', 'logout']
             if path_part not in non_account_paths:
-                request.account_id = path_part
+                self.account_id = path_part
             else:
-                request.account_id = None
+                self.account_id = None
         except IndexError:
-            request.account_id = None
+            self.account_id = None
 
     @tornado.gen.coroutine
-    def set_account(request):
-        request.set_account_id()
-        if request.account_id:
+    def set_account(self):
+        self.set_account_id()
+        if self.account_id:
             account = yield neondata.NeonUserAccount.get(
-                          request.account_id,
+                          self.account_id,
                           async=True)
-            request.account = account
+            self.account = account
 
     @tornado.gen.coroutine
-    def is_authorized(request,
+    def is_authorized(self,
                       access_level_required,
                       account_required=True,
                       internal_only=False):
@@ -236,8 +238,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if access_level_required is neondata.AccessLevels.NONE:
             raise tornado.gen.Return(True)
 
-        account = request.account
-        access_token = request.access_token
+        account = self.account
+        access_token = self.access_token
         if not access_token:
             raise NotAuthorizedError('this endpoint requires an access token')
         if account_required and not account:
@@ -250,7 +252,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             if username:
                 user = yield neondata.User.get(username, async=True)
                 if user:
-                    request.user = user
+                    self.user = user
 
                     def _check_internal_only():
                         al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
@@ -261,55 +263,60 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                             return False
                         return True
 
-                    if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
-                            neondata.AccessLevels.GLOBAL_ADMIN:
+                    if (user.access_level & 
+                        neondata.AccessLevels.GLOBAL_ADMIN is 
+                        neondata.AccessLevels.GLOBAL_ADMIN):
                         raise tornado.gen.Return(True)
 
-                    elif account_required and account and username in account.users:
+                    elif (account_required and account and 
+                          username in account.users):
                         if not _check_internal_only():
                             raise NotAuthorizedError('Internal only resource.')
-                        if user.access_level & access_level_required is \
-                                access_level_required:
+                        if (user.access_level & 
+                            access_level_required is access_level_required):
                             raise tornado.gen.Return(True)
                     else:
                         if internal_only:
                             if not _check_internal_only():
-                                raise NotAuthorizedError('Internal only resource.')
+                                raise NotAuthorizedError(
+                                    'Internal only resource.')
                         if not account_required:
-                            if user.access_level & access_level_required is \
-                                   access_level_required:
+                            if (user.access_level & access_level_required is 
+                                access_level_required):
                                 raise tornado.gen.Return(True)
 
-                    raise NotAuthorizedError('You cannot access this resource.')
+                    raise NotAuthorizedError(
+                        'You cannot access this resource.')
                 raise NotAuthorizedError('user does not exist')
             else:
                 raise jwt.InvalidTokenError
 
         except jwt.ExpiredSignatureError:
-            raise NotAuthorizedError('access token is expired, please refresh the token')
+            raise NotAuthorizedError(
+                'access token is expired, please refresh the token')
         except (jwt.DecodeError, jwt.InvalidTokenError, KeyError):
             raise NotAuthorizedError('invalid token')
 
         raise tornado.gen.Return(True)
 
     @tornado.gen.coroutine
-    def check_valid_subscription(request):
+    def check_valid_subscription(self):
         '''verifies we have a valid subscription and can make this call
 
            called in prepare, and will raise an exception if the subscription
            is not valid for this account
         '''
-        if request.account is None:
+        if self.account is None:
             raise tornado.gen.Return(True)
 
         # this account isn't billed through this integration (older account)
         # just return true
-        if request.account.billed_elsewhere:
+        if self.account.billed_elsewhere:
             raise tornado.gen.Return(True)
 
         current_subscription = None
 
-        acct = request.account
+        acct = self.account
         subscription_info = acct.subscription_information
         current_plan_type = subscription_info['plan']['id']
         acct_subscription_status = subscription_info['status']
@@ -318,12 +325,12 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if datetime.utcnow() > dateutil.parser.parse(
              acct.verify_subscription_expiry):
             try:
-                stripe_customer = yield request.executor.submit(
+                stripe_customer = yield self.executor.submit(
                     stripe.Customer.retrieve,
                     acct.billing_provider_ref)
 
                 # returns the most active subscriptions up to 10
-                cust_sub_obj = yield request.executor.submit(
+                cust_sub_obj = yield self.executor.submit(
                     stripe_customer.subscriptions.all)
                 cust_subs = cust_sub_obj['data']
 
@@ -366,7 +373,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         raise TooManyRequestsError('Your subscription is not valid')
 
     @tornado.gen.coroutine
-    def check_account_limits(request, limit_list):
+    def check_account_limits(self, limit_list):
         ''' responsible for checking account limits
 
             this is called in prepare, and that pulls this info
@@ -377,12 +384,12 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                that is necessary.
         '''
 
-        if request.account is None:
+        if self.account is None:
             raise tornado.gen.Return(True)
 
         # grab the account_limit object for the requests
         acct_limits = yield neondata.AccountLimits.get(
-                          request.account_id,
+                          self.account_id,
                           async=True,
                           log_missing=False)
 
@@ -391,7 +398,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if acct_limits is None:
             raise tornado.gen.Return(True)
 
-        request.account_limits = acct_limits
+        self.account_limits = acct_limits
         al_data_dict = acct_limits.to_dict()['_data']
         for limit in limit_list:
             try:
@@ -404,15 +411,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     return
                 else:
                     # lets check the timer if there is one
-                    timer_dict = request._get_timer_dict(limit, al_data_dict)
+                    timer_dict = self._get_timer_dict(limit, al_data_dict)
                     if timer_dict:
                         refresh_time = timer_dict['refresh_time']
                         # check to see if we should refresh
                         if dateutil.parser.parse(refresh_time) <= \
                                 datetime.utcnow():
-                            request.account_limits = yield \
-                                request._reset_rate_limit(
-                                      request.account_id,
+                            self.account_limits = yield \
+                                self._reset_rate_limit(
+                                      self.account_id,
                                       timer_dict['timer_resets'],
                                       limit['timer_info']['refresh_time'],
                                       timer_dict['add_to_refresh_time'])
@@ -561,9 +568,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         try:
             self.set_access_token_information()
-            yield self.is_authorized(access_level_dict[self.request.method],
-                                     self.request.method in account_required_list,
-                                     internal_only)
+            yield self.is_authorized(
+                access_level_dict[self.request.method],
+                self.request.method in account_required_list,
+                internal_only)
         except KeyError:
             raise NotImplementedError('access levels are not defined')
 
@@ -822,7 +830,8 @@ class ShareableContentHandler(APIV2Handler):
 
                 resource = None
                 if _type == neondata.VideoMetadata.__name__:
-                    resource = yield neondata.VideoMetadata.get(_id, async=True)
+                    resource = yield neondata.VideoMetadata.get(_id,
+                                                                async=True)
                 elif _type == neondata.Tag.__name__:
                     resource = yield neondata.Tag.get(_id, async=True)
                 elif _type == neondata.Clip.__name__:
@@ -1005,7 +1014,8 @@ class JWTHelper(object):
             raise Exception('token type not recognized')
 
         if 'exp' not in payload.keys():
-            payload['exp'] = datetime.utcnow() + timedelta(seconds=exp_time_add)
+            payload['exp'] = (datetime.utcnow() + 
+                              timedelta(seconds=exp_time_add))
         token = jwt.encode(payload,
                            options.token_secret,
                            algorithm='HS256')
@@ -1013,7 +1023,8 @@ class JWTHelper(object):
 
     @staticmethod
     def decode_token(access_token):
-        return jwt.decode(access_token, options.token_secret, algorithms=['HS256'])
+        return jwt.decode(access_token, options.token_secret,
+                          algorithms=['HS256'])
 
 '''*********************************************************************
 APIV2 Defined Exceptions
@@ -1147,7 +1158,8 @@ class CustomVoluptuousTypes():
         def f(tag_type):
             if tag_type is None:
                 return neondata.TagType.COLLECTION
-            if tag_type in [neondata.TagType.VIDEO, neondata.TagType.COLLECTION]:
+            if tag_type in [neondata.TagType.VIDEO,
+                            neondata.TagType.COLLECTION]:
                 return tag_type
             raise Invalid('Invalid TagType %s' % tag_type)
         return f
