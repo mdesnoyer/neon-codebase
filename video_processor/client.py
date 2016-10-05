@@ -1523,15 +1523,16 @@ class ClipProcessor(VideoProcessor):
         Based on an assumption of the length of time to cut a rendition.
         '''
         clip_lengths = self.clip_length or 10.0
+        n_clips = len(self.clips) or self.n_clips
         
         n_renditions = 5
         if cdn_metadata:
             n_renditions = sum([len(x.video_rendition_formats) 
                                 for x in cdn_metadata.cdns])
 
-        time_per_seconds_of_clip = 2.1
+        time_per_seconds_of_clip = 3.0
 
-        return 5.0 + (n_renditions * self.n_clips * clip_lengths * 
+        return 5.0 + (n_renditions * n_clips * clip_lengths * 
                       time_per_seconds_of_clip)
 
     def _estimate_video_processing_time(self, duration,
