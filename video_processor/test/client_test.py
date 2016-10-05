@@ -15,7 +15,7 @@ import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
 if sys.path[0] != __base_path__:
-        sys.path.insert(0, __base_path__)
+    sys.path.insert(0, __base_path__)
 
 from boto.sqs.message import Message
 import boto.exception
@@ -23,17 +23,15 @@ import cmsdb.cdnhosting
 from cmsdb import neondata
 import cv2
 from cvutils.imageutils import PILImageUtils
-import integrations
 from itertools import chain, repeat
 import json
 import logging
-from mock import MagicMock, patch, ANY
+from mock import MagicMock, patch
 import model.errors
 import model
 import multiprocessing
 import numpy as np
 import os
-import pickle
 from PIL import Image
 import psycopg2
 import Queue
@@ -43,30 +41,22 @@ import request_template
 import signal
 import socket
 from StringIO import StringIO
-import subprocess
 import time
-import tempfile
 import test_utils
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.net
 import test_utils.opencv
 import test_utils.postgresql
-from test_utils import sqsmock
 from tornado.concurrent import Future
-from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+from tornado.httpclient import HTTPResponse, HTTPError
 import tornado.ioloop
-from tornado.testing import AsyncHTTPTestCase,AsyncTestCase,AsyncHTTPClient
-from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import tornado.locks
-import urllib
-import urlparse
-import urllib2
 import unittest
 import utils
 from cvutils import imageutils
 import utils.neon
-from utils.options import define, options
+from utils.options import options
 import utils.ps
 from utils import statemon
 import utils.video_download
@@ -113,8 +103,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.model = MagicMock()
 
         #Mock Model methods,
-        self.model.choose_thumbnails.return_value = \
-          _get_good_model_return_value(), _get_good_model_return_value_low_score()
+        self.model.choose_thumbnails.return_value = (
+          _get_good_model_return_value(), 
+          _get_good_model_return_value_low_score())
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
                                 "test.mp4") 
         self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
@@ -314,7 +305,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor = self.setup_video_processor("neon",
                                                 'http://www.somefile.com/')
         yield vprocessor.download_video_file()
-        args, kwargs = self.youtube_client_mock.call_args
+        args, _ = self.youtube_client_mock.call_args
         found_params = args[0]
         self.assertTrue(found_params['restrictfilenames'])
         self.assertGreater(len(found_params['progress_hooks']), 0)
@@ -454,7 +445,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor.video_downloader.tempfile.seek(0) 
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
-        cargs, kwargs = self.job_hide_mock.call_args
+        cargs, _ = self.job_hide_mock.call_args
         self.assertGreater(cargs[1], 1800.)
         self.assertLess(cargs[1], 1950.)
 
@@ -476,7 +467,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor.video_downloader.tempfile.seek(0) 
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
-        cargs, kwargs = self.job_hide_mock.call_args
+        cargs, _ = self.job_hide_mock.call_args
         self.assertGreater(cargs[1], 1800.)
         self.assertLess(cargs[1], 1950.)
 
@@ -546,7 +537,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 15)
-        cargs, kwargs = self.job_hide_mock.call_args
+        cargs, _ = self.job_hide_mock.call_args
         self.assertGreater(cargs[1], 45.0)
         self.assertLess(cargs[1], 180.0)
 
@@ -576,7 +567,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 600.0)
 
-        cargs, kwargs = self.job_hide_mock.call_args
+        cargs, _ = self.job_hide_mock.call_args
         self.assertGreater(cargs[1], 1860.0)
         self.assertLess(cargs[1], 1950.0)
 
@@ -611,7 +602,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                     u'id': 'k8tzfpeyPzw',
                     u'view_count': 1100328,
                     u'webpage_url': u'https://www.youtube.com/watch?v=k8tzfpeyPzw'}
-            raise Error('Wrong')
+            raise Exception('Wrong')
         self.youtube_extract_info_mock.side_effect = _extracted_info
 
         vp = self.setup_video_processor('neon', url=url_with_list)
@@ -630,7 +621,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vp = self.setup_video_processor('neon', url=url)
         with self.assertRaises(video_processor.client.VideoDownloadError) as e:
             yield vp.download_video_file()
-        self.assertRegexpMatches(e.exception.message, r'(?i)Unhandled video type')
+        self.assertRegexpMatches(e.exception.message,
+                                 r'(?i)Unhandled video type')
 
     @patch('video_processor.client.model.generate_model')
     @tornado.testing.gen_test
@@ -688,10 +680,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         # ensure the job timeout was set correctly 
         processing_strategy = yield neondata.ProcessingStrategy.get(
             self.api_key, async=True)
-        job_time = int(
-            processing_strategy.processing_time_ratio * 
-            vprocessor.video_metadata.duration)
-        cargs, kwargs = self.job_hide_mock.call_args
+        cargs, _ = self.job_hide_mock.call_args
         self.assertGreater(cargs[1], 75.0)
         self.assertLess(cargs[1], 160.0)
 
@@ -720,9 +709,11 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                  x[0].type == neondata.ThumbnailType.NEON]))
         self.assertEqual(1, len([x for x in vprocessor.thumbnails if
                                  x[0].type == neondata.ThumbnailType.RANDOM]))
-        self.assertEqual(1, len([x for x in vprocessor.thumbnails if
-                                 x[0].type == neondata.ThumbnailType.CENTERFRAME]))
-        self.assertNotIn(float('-inf'), [x[0].model_score for x in vprocessor.thumbnails])
+        self.assertEqual(
+            1, len([x for x in vprocessor.thumbnails if
+                    x[0].type == neondata.ThumbnailType.CENTERFRAME]))
+        self.assertNotIn(float('-inf'),
+                         [x[0].model_score for x in vprocessor.thumbnails])
         self.assertTrue(all([x[0].video_id == vprocessor.video_metadata.key 
                              for x in vprocessor.thumbnails]))
         self.assertTrue(all([x[0].video_id == vprocessor.video_metadata.key 
@@ -730,12 +721,14 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
 
         # Assert scores are reasonable: sorted by score.
-        self.assertTrue(all(a[0].model_score > b[0].model_score) for a, b in zip(
-            vprocessor.thumbnails,
-            vprocessor.thumbnails[1:]))
-        self.assertTrue(all(a[0].model_score < b[0].model_score) for a, b in zip(
-            vprocessor.bad_thumbnails,
-            vprocessor.bad_thumbnails[1:]))
+        self.assertTrue(all(a[0].model_score > b[0].model_score) 
+                        for a, b in zip(
+                                vprocessor.thumbnails,
+                                vprocessor.thumbnails[1:]))
+        self.assertTrue(all(a[0].model_score < b[0].model_score)
+                        for a, b in zip(
+                                vprocessor.bad_thumbnails,
+                                vprocessor.bad_thumbnails[1:]))
         
         # The best bad is worse than the worst good.
         self.assertLess(
@@ -785,7 +778,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             max_video_size=2.0)
         yield al.save(async=True) 
         yield vprocessor.video_metadata.save(async=True)
-        with self.assertRaises(video_processor.client.BadVideoError) as e:
+        with self.assertRaises(video_processor.client.BadVideoError):
             yield vprocessor.process_video(self.test_video_file)
 
         api_request = yield neondata.NeonApiRequest.get(
@@ -911,7 +904,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_dequeue_job_with_empty_server(self):
         self.job_read_mock.side_effect = [None]
-        with self.assertRaises(Queue.Empty) as cm:
+        with self.assertRaises(Queue.Empty):
             yield self.video_client.dequeue_job()
 
     @tornado.testing.gen_test
@@ -925,10 +918,11 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             request.response = cb.to_dict() 
             request.state = neondata.RequestState.PROCESSING
                       
-        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
-                                             _change_job_state)
-        m = 'too many times. Last Failure Message: failed because of cows mooo'
-        with self.assertLogExists(logging.ERROR, m):  
+        neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                       _change_job_state)
+        with self.assertLogExists(logging.ERROR,
+                                  ('too many times. Last Failure Message: '
+                                   'failed because of cows mooo'):  
             yield self.video_client.do_work(async=True)
 
         # Make sure the job was deleted
@@ -942,8 +936,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             request.fail_count = 1
             request.state = neondata.RequestState.PROCESSING
                       
-        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
-                                             _change_job_state)
+        neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                       _change_job_state)
         with self.assertLogExists(logging.ERROR, 'has failed too many times'):
             yield self.video_client.do_work(async=True)
 
@@ -956,7 +950,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.ERROR, 'Could not get job'):
             with self.assertRaises(video_processor.client.DequeueError):
-                job = yield self.video_client.dequeue_job()
+                yield self.video_client.dequeue_job()
 
     @tornado.testing.gen_test
     def test_dequeue_invalid_job(self):
@@ -985,8 +979,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         def _change_job_state(request):
             request.state = neondata.RequestState.FINISHED
                       
-        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
-                                             _change_job_state)
+        neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                       _change_job_state)
         with self.assertLogExists(logging.INFO, 'Dequeued a job that'):
             yield self.video_client.do_work(async=True)
 
@@ -999,8 +993,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         def _change_job_state(request):
             request.state = neondata.RequestState.SERVING
                       
-        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
-                                             _change_job_state)
+        neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                       _change_job_state)
         with self.assertLogExists(logging.INFO, 'Dequeued a job that'):
             yield self.video_client.do_work(async=True)
 
@@ -1013,8 +1007,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         def _change_job_state(request):
             request.state = neondata.RequestState.FINALIZING
                       
-        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
-                                             _change_job_state)
+        neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                       _change_job_state)
 
         with self.assertLogExists(logging.DEBUG, "Dequeue Successful"):
             job = yield self.video_client.dequeue_job()
@@ -1062,7 +1056,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield vprocessor.process_video(self.test_video_file)
 
         self.model.find_clips.assert_called()
-        cargs, kwargs = self.model.find_clips.call_args
+        _, kwargs = self.model.find_clips.call_args
         self.assertEquals(kwargs, {'n' : 2,
                                    'max_len' : 6.0,
                                    'min_len' : 6.0})
@@ -1144,7 +1138,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start(),
             require_async_kw=True)
-        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
+        self.random_image = imageutils.PILImageUtils.create_random_image(
+                480, 640)
         self.im_download_mock.return_value = self.random_image
 
         # Mock out the model
@@ -1154,7 +1149,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.predict_mock.return_value = (99, None, 'model1')
 
         # Mock out http callbacks
-        self.http_mocker = patch('video_processor.client.utils.http.send_request')
+        self.http_mocker = patch(
+                'video_processor.client.utils.http.send_request')
         self.http_mock = self._future_wrap_mock(self.http_mocker.start(),
                                                 require_async_kw=True)
         self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)

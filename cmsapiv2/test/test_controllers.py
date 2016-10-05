@@ -513,8 +513,10 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
         # Check their limits against the demo plan.
         limits = neondata.AccountLimits.get(account_id)
-        expect_plan = neondata.BillingPlans.get(neondata.BillingPlans.PLAN_DEMO)
-        self.assertEqual(expect_plan.max_video_posts, expect_plan.max_video_posts)
+        expect_plan = neondata.BillingPlans.get(
+            neondata.BillingPlans.PLAN_DEMO)
+        self.assertEqual(expect_plan.max_video_posts,
+                         expect_plan.max_video_posts)
 
         self.assertIsNotNone(neondata.ExperimentStrategy.get(account_id))
         account = neondata.NeonUserAccount.get(account_id)
@@ -550,7 +552,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
               '&admin_user_username=abcd1234'\
               '&admin_user_password=b1234567'
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            response = yield self.http_client.fetch(
+            yield self.http_client.fetch(
                 self.get_url(url),
                 method='POST',
                 allow_nonstandard_methods=True)
@@ -644,8 +646,8 @@ class TestAccountHandler(TestControllersBase):
     def test_get_acct_does_not_exist(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/124abc'
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    method="GET")
+            yield self.http_client.fetch(self.get_url(url),
+                                         method="GET")
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
@@ -656,10 +658,10 @@ class TestAccountHandler(TestControllersBase):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             header = { 'Content-Type':'application/json' }
             url = '/api/v2/124abc'
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='{"abc123":"1"}',
-                                                    method="POST",
-                                                    headers=header)
+            yield self.http_client.fetch(self.get_url(url),
+                                         body='{"abc123":"1"}',
+                                         method="POST",
+                                         headers=header)
         self.assertEquals(e.exception.code, 501)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
@@ -669,8 +671,8 @@ class TestAccountHandler(TestControllersBase):
     def test_delete_acct_not_implemented(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/124abc'
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    method='DELETE')
+            yield self.http_client.fetch(self.get_url(url),
+                                         method='DELETE')
         self.assertEquals(e.exception.code, 501)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
@@ -728,11 +730,11 @@ class TestAccountHandler(TestControllersBase):
     def test_update_acct_no_content_type(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/124abc'
-            response = yield self.http_client.fetch(
+            yield self.http_client.fetch(
                 self.get_url(url),
                 body='{"default_width":"1"}',
                 method="PUT")
-	    self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Content-Type must be JSON')
@@ -775,12 +777,12 @@ class TestAccountHandler(TestControllersBase):
 
     def test_get_acct_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.AccountHandler.get')
-	url = '/api/v2/%s' % '1234234'
+        url = '/api/v2/%s' % '1234234'
         self.get_exceptions(url, exception_mocker)
 
     def test_put_acct_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.AccountHandler.put')
-	url = '/api/v2/124234234?param=123'
+        url = '/api/v2/124234234?param=123'
         params = json.dumps({'rando': '123123abc'})
         self.put_exceptions(url, params, exception_mocker)
 
@@ -851,7 +853,6 @@ class TestAuthUserHandler(TestAuthenticationBase):
                                                 method='POST',
                                                 headers=headers)
         self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
         user = yield neondata.User.get(username, async=True)
         self.assertIsNone(user)
         verification = yield neondata.Verification.get(username, async=True)
@@ -859,7 +860,8 @@ class TestAuthUserHandler(TestAuthenticationBase):
         self.assertEqual([username], account['users'])
         user = json.loads(verification.extra_info['user'])
         self.assertEqual('867-5309', user['_data']['cell_phone_number'])
-        self.assertEqual('rocking@invalid.com', user['_data']['secondary_email'])
+        self.assertEqual('rocking@invalid.com',
+                         user['_data']['secondary_email'])
 
     @tornado.testing.gen_test
     def test_create_user_with_utf8(self):
@@ -882,6 +884,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
                                                 body=params,
                                                 method='POST',
                                                 headers=headers)
+        self.assertEquals(response.code, 200)
         verification = yield neondata.Verification.get(username, async=True)
         verif_user = json.loads(verification.extra_info['user'])
         self.assertEqual(first_name, verif_user['_data']['first_name'])
@@ -905,6 +908,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
                                                 body=params,
                                                 method='POST',
                                                 headers=headers)
+        self.assertEquals(response.code, 200)
         verification = yield neondata.Verification.get(username, async=True)
         verif_user = json.loads(verification.extra_info['user'])
         self.assertEqual(first_name, verif_user['_data']['first_name'])
@@ -913,7 +917,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
     def test_post_user_exceptions(self):
         exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')
         params = json.dumps({'username': '123123abc'})
-	url = '/api/v2/users'
+        url = '/api/v2/users'
         self.post_exceptions(url, params, exception_mocker)
 
     @tornado.testing.gen_test
@@ -925,12 +929,12 @@ class TestAuthUserHandler(TestAuthenticationBase):
              'reset_password_token': 'sdfasdfasdfasdfasdfasdf'})
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/users'
-            response = yield self.http_client.fetch(
+            yield self.http_client.fetch(
                 self.get_url(url),
                 body=params,
                 method="PUT",
                 headers=header)
-	    self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'User was not found')
@@ -957,12 +961,12 @@ class TestAuthUserHandler(TestAuthenticationBase):
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/users'
-            response = yield self.http_client.fetch(
+            yield self.http_client.fetch(
                 self.get_url(url),
                 body=params,
                 method="PUT",
                 headers=header)
-	    self.assertEquals(e.exception.code, 401)
+        self.assertEquals(e.exception.code, 401)
 
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
@@ -990,12 +994,12 @@ class TestAuthUserHandler(TestAuthenticationBase):
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/users'
-            response = yield self.http_client.fetch(
+            yield self.http_client.fetch(
                 self.get_url(url),
                 body=params,
                 method="PUT",
                 headers=header)
-	    self.assertEquals(e.exception.code, 401)
+        self.assertEquals(e.exception.code, 401)
 
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
@@ -1021,7 +1025,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
              'reset_password_token': user.reset_password_token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/users'
-        response = yield self.http_client.fetch(
+        yield self.http_client.fetch(
             self.get_url(url),
             body=params,
             method='PUT',
@@ -1200,8 +1204,8 @@ class TestUserHandler(TestControllersBase):
                    'testuser',
                    token)
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    method='GET')
+            yield self.http_client.fetch(self.get_url(url),
+                                         method='GET')
         self.assertEquals(e.exception.code, 401)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Cannot view')
@@ -1223,8 +1227,8 @@ class TestUserHandler(TestControllersBase):
                    'doesnotexist',
                    token)
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    method='GET')
+            yield self.http_client.fetch(self.get_url(url),
+                                         method='GET')
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'resource was not')
@@ -1286,10 +1290,10 @@ class TestUserHandler(TestControllersBase):
         header = { 'Content-Type':'application/json' }
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body=params,
-                                                    method='PUT',
-                                                    headers=header)
+            yield self.http_client.fetch(self.get_url(url),
+                                         body=params,
+                                         method='PUT',
+                                         headers=header)
         self.assertEquals(e.exception.code, 401)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Cannot set')
@@ -1323,10 +1327,10 @@ class TestUserHandler(TestControllersBase):
         # testuser2 should not be able to update testuser
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body=params,
-                                                    method='PUT',
-                                                    headers=header)
+            yield self.http_client.fetch(self.get_url(url),
+                                         body=params,
+                                         method='PUT',
+                                         headers=header)
 
         self.assertEquals(e.exception.code, 401)
         rjson = json.loads(e.exception.response.body)
