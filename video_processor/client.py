@@ -775,15 +775,15 @@ class VideoProcessor(object):
 
         Inputs:
         video_duration - If known and the video still needs to be processed
-        video_size - If known and the video still needs to be processed
+        video_size - If known and the video still needs to be processed. In bytes
         processing_strategy - The processing strategy if known
         cdn_metadata - The cdn metadata object for this video used to 
                        estimate the finalize time required
         '''
         time_remaining = 0.0
-        if not video_duration and size:
+        if not video_duration and video_size:
             # Estimate the video duration from the size of the video
-            video_duration = size * 8.0 / 1024 / 800
+            video_duration = video_size * 8.0 / 1024 / 800
             
         if video_duration:
             time_remaining += self._estimate_video_processing_time(
@@ -1357,7 +1357,7 @@ class ThumbnailProcessor(VideoProcessor):
         n_renditions = 16
         smart_crop = True
         if cdn_metadata:
-            n_renditions = sum([len(x.rendition_sizses) 
+            n_renditions = sum([len(x.rendition_sizes) 
                                 for x in cdn_metadata.cdns])
             smart_crop = any([x.crop_with_saliency or 
                               x.crop_with_text_detection or 
@@ -1594,6 +1594,7 @@ class VideoClient(multiprocessing.Process):
                         request.state = \
                             neondata.RequestState.PROCESSING
                         request.model_version = self.model_version
+                        request.time_remaining = None
 
                 api_request = neondata.NeonApiRequest.modify(
                     job_id, api_key, _change_job_state)
