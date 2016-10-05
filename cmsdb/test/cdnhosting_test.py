@@ -877,6 +877,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(480, 640)
+        random.seed()
         super(TestVideoUploading, self).setUp()
 
     def tearDown(self):
