@@ -1801,6 +1801,49 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
                 0)
 
     @tornado.testing.gen_test
+    def test_processing_after_requeue_missing_thumbnails(self):
+        # create basic videometadata object 
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = ['iammissing'],
+            duration=97.0,
+            model_version='old_model',
+            serving_enabled=False)
+        video_meta.save()
+
+        # Write the request to the db
+        api_request = neondata.NeonApiRequest(
+            'job1', self.api_key, 'vid1',
+            'some fun video',
+            'http://video.mp4',
+            http_callback='http://callback.com',
+            default_thumbnail='http://default_thumb.jpg')
+        
+        for state in [neondata.RequestState.INT_ERROR,
+                      neondata.RequestState.FAILED]:
+            api_request.state = state 
+            api_request.fail_count = 1
+            api_request.save()
+
+            yield self.vprocessor.finalize_response()
+
+            # Make sure that the api request is updated
+            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+            self.assertEquals(api_request.state, 
+                        neondata.RequestState.FINISHED)
+
+            # Check the video metadata in the database
+            video_data = neondata.VideoMetadata.get(self.video_id)
+            self.assertEquals(video_data.url, 'http://video.mp4')
+            self.assertEquals(video_data.integration_id, '0')
+            self.assertTrue(video_data.serving_enabled)
+            self.assertIsNone(video_data.serving_url)
+            
+            self.assertEqual(
+                statemon.state.get('video_processor.client.default_thumb_error'),
+                0)
+
+    @tornado.testing.gen_test
     def test_reprocess_with_previous_jobresult(self):
         # Add the results from the previous run to the database
         thumbs = [
