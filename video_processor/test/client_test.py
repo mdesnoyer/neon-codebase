@@ -922,7 +922,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                        _change_job_state)
         with self.assertLogExists(logging.ERROR,
                                   ('too many times. Last Failure Message: '
-                                   'failed because of cows mooo'):  
+                                   'failed because of cows mooo')):  
             yield self.video_client.do_work(async=True)
 
         # Make sure the job was deleted
