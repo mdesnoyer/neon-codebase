@@ -3260,7 +3260,8 @@ class TestVideoHandler(TestControllersBase):
         vm.save()
         request = neondata.NeonApiRequest('job1', self.account_id_api_key,
                                           title='Title',
-                                          publish_date='2015-06-10')
+                                          publish_date='2015-06-10',
+                                          time_remaining=10.0)
         request.state = neondata.RequestState.PROCESSING
         request.save()
         url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
@@ -3288,7 +3289,8 @@ class TestVideoHandler(TestControllersBase):
         vm.save()
         request = neondata.NeonApiRequest('job1', self.account_id_api_key,
                                           title='Title',
-                                          publish_date='2015-06-10')
+                                          publish_date='2015-06-10',
+                                          time_remaining=None)
         request.state = neondata.RequestState.PROCESSING
         request.save()
         url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
@@ -3300,7 +3302,7 @@ class TestVideoHandler(TestControllersBase):
         vid1 = rjson['videos'][0] 
  
         self.assertEquals(vid1['video_id'], 'vid1')
-        self.assertEquals(vid1['estimated_time_remaining'], 0.0)  
+        self.assertIsNone(vid1['estimated_time_remaining'])  
 
     @tornado.testing.gen_test
     def test_get_all_fields(self):

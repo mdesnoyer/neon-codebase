@@ -103,8 +103,8 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_source_and_smart_crop(self, mock_smartcrop):
         '''
-        Tests that the source cropping and smart cropping is only performed when
-        we're dealing with a NEON image.
+        Tests that the source cropping and smart cropping is only
+        performed when we're dealing with a NEON image.
         '''
         # # set the return value for resize_and_crop
         # mock_smartcrop.crop_and_resize.side_effect = \
@@ -142,7 +142,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                     async=True,
                     do_smart_crop=thumb_without_smart_crop.do_smart_crop,
                     do_source_crop=thumb_without_smart_crop.do_source_crop)
-        # ensure that smartcrop was called
+        # ensure that smartcrop was not called again
         self.assertEquals(mock_smartcrop.call_count, cur_call_count)
 
     @tornado.testing.gen_test
@@ -877,6 +877,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(480, 640)
+        random.seed()
         super(TestVideoUploading, self).setUp()
 
     def tearDown(self):

@@ -24,7 +24,7 @@ from cmsdb import neondata
 import cv2
 from cvutils.imageutils import PILImageUtils
 import integrations
-from itertools import chain
+from itertools import chain, repeat
 import json
 import logging
 from mock import MagicMock, patch, ANY
@@ -332,8 +332,14 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             download=True)
         self.assertIsNone(vprocessor.extracted_default_thumbnail)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1800.)
+        self.assertLess(cargs[1], 1950.)
+
+        api_request = neondata.NeonApiRequest.get(
+            self.api_request.job_id, self.api_request.api_key)
+        self.assertGreater(api_request.time_remaining, 1740.)
+        self.assertLess(api_request.time_remaining, 1890.)
 
     @tornado.testing.gen_test
     def test_default_thumb_found_in_video(self):
@@ -448,8 +454,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor.video_downloader.tempfile.seek(0) 
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1800.)
+        self.assertLess(cargs[1], 1950.)
 
     @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
@@ -469,8 +476,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor.video_downloader.tempfile.seek(0) 
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1800.)
+        self.assertLess(cargs[1], 1950.)
 
     @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
@@ -538,8 +546,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 15)
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*15)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 45.0)
+        self.assertLess(cargs[1], 180.0)
 
         vid_meta = neondata.VideoMetadata.get(vprocessor.video_metadata.key)
         self.assertEquals(vid_meta.duration, 15.0)
@@ -567,8 +576,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 600.0)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1860.0)
+        self.assertLess(cargs[1], 1950.0)
 
     @tornado.testing.gen_test
     def test_download_youtube_with_list_param(self):
@@ -647,6 +657,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.assertEquals(api_request.state,
                               neondata.RequestState.REQUEUED)
             self.assertEquals(api_request.fail_count, 1)
+            self.assertIsNone(api_request.time_remaining)
             self.job_hide_mock.assert_called_with(self.job_message, 5.0)
             self.job_hide_mock.reset_mock()
 
@@ -657,6 +668,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.assertEquals(api_request.state,
                               neondata.RequestState.CUSTOMER_ERROR)
             self.assertEquals(api_request.fail_count, 2)
+            self.assertIsNone(api_request.time_remaining)
             self.job_hide_mock.assert_not_called()
             self.job_delete_mock.assert_called_with(self.job_message)
             acct_limits = yield neondata.AccountLimits.get(
@@ -679,9 +691,14 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         job_time = int(
             processing_strategy.processing_time_ratio * 
             vprocessor.video_metadata.duration)
-        self.job_hide_mock.assert_called_with(
-            self.job_message,
-            job_time)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 75.0)
+        self.assertLess(cargs[1], 160.0)
+
+        api_request = neondata.NeonApiRequest.get(self.api_request.job_id,
+                                                  self.api_request.api_key)
+        self.assertGreater(api_request.time_remaining, 15.0)
+        self.assertLess(api_request.time_remaining, 100.0)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
@@ -1163,6 +1180,11 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 200)
 
+        # Mock out the job queue so that we can do a timeout
+        self.job_queue_mock = MagicMock()
+        self.job_hide_mock = self._future_wrap_mock(
+            self.job_queue_mock.hide_message)
+
         # Add some data
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
@@ -1224,7 +1246,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             self.model_mock,
             'test_version',
             multiprocessing.BoundedSemaphore(1),
-            MagicMock(),
+            self.job_queue_mock,
             MagicMock())
         self.vprocessor.video_metadata.duration = 130.0
         self.vprocessor.video_metadata.frame_size = (640, 480)
@@ -1383,6 +1405,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.PROCESSED_SENT)
         self.assertIsInstance(api_request, neondata.NeonApiRequest)
+        self.assertIsNone(api_request.time_remaining)
 
         # Check the video metadata in the database
         video_data = neondata.VideoMetadata.get(self.video_id)
@@ -1501,6 +1524,12 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         video_data = neondata.VideoMetadata.get(self.video_id)
         self.assertIsNone(video_data.serving_url)
 
+        # Check that the job was hidden for the time it takes to cut
+        # the thumbs.
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 60.0)
+        self.assertLess(cargs[1], 70.0)
+
     @tornado.testing.gen_test
     def test_tag_on_video(self):
         '''A video has a tag after finalize when it starts with one'''
@@ -1587,6 +1616,9 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
 
         with self.assertRaises(video_processor.client.DefaultThumbError):
             yield self.vprocessor.finalize_response()
+
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertGreater(api_request.time_remaining, 2.0)
 
 
         # Find the default thumb but it should not have a score
@@ -1685,6 +1717,7 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         self.assertEquals(api_request.state, neondata.RequestState.FINISHED)
         self.assertIsInstance(api_request, neondata.NeonApiRequest)
+        self.assertIsNone(api_request.time_remaining)
 
         # Check the video metadata in the database
         video_data = neondata.VideoMetadata.get(self.video_id)
@@ -1749,14 +1782,20 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
             'http://s3.amazonaws.com/host-thumbnails/%s/w640_h480.jpg' %
-            re.sub('_', '/', n_thumbs[0].key)])        
+            re.sub('_', '/', n_thumbs[0].key)])
+
+        # Check that the job was hidden for the time it takes to cut
+        # the videos.
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 50.0)
+        self.assertLess(cargs[1], 110.0)
 
     @tornado.testing.gen_test(timeout=10.0)
     def test_processing_after_requeue(self):
         '''
-        Test processing video after a failed first attempt due to either internal error or
-        failed 
-        error (failed to download default thumb)
+        Test processing video after a failed first attempt due to
+        either internal error or failed error (failed to download
+        default thumb)
         '''
         
         # create basic videometadata object 
@@ -1787,7 +1826,8 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
             # Make sure that the api request is updated
             api_request = neondata.NeonApiRequest.get('job1', self.api_key)
             self.assertEquals(api_request.state, 
-                        neondata.RequestState.FINISHED)
+                              neondata.RequestState.FINISHED)
+            self.assertIsNone(api_request.time_remaining)
 
             # Check the video metadata in the database
             video_data = neondata.VideoMetadata.get(self.video_id)
@@ -2393,7 +2433,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
             self.model_mock,
             'test_version',
             multiprocessing.BoundedSemaphore(1),
-            MagicMock(),
+            self.job_queue_mock,
             MagicMock())
         self.vprocessor.mov = test_utils.opencv.VideoCaptureMock(
             h=480, w=640, frame_count=2997)
@@ -2434,6 +2474,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertEquals(api_request.state, neondata.RequestState.FINISHED)
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.PROCESSED_SENT)
+        self.assertIsNone(api_request.time_remaining)
 
         # Check the video metadata in the database
         video_data = neondata.VideoMetadata.get(self.video_id)
@@ -2586,6 +2627,12 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
             api_request.response)
         self.assertItemsEqual(api_request.response['clip_ids'],
                               [x.get_id() for x in clips])
+
+        # Check that the job was hidden for the time it takes to cut
+        # the videos.
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 50.0)
+        self.assertLess(cargs[1], 110.0)
 
     @tornado.testing.gen_test
     def test_reprocess_new_model_already_thumbs(self):
@@ -2897,7 +2944,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.job_read_mock = self._future_wrap_mock(
             self.job_queue_mock.read_message)
         self.job_message = Message()
-        self.job_read_mock.side_effect = [self.job_message, None]
+        self.job_read_mock.side_effect = chain([self.job_message],
+                                               repeat(None))
 
         self.job_hide_mock = self._future_wrap_mock(
             self.job_queue_mock.hide_message)
@@ -3072,6 +3120,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEqual(
             api_request.state,
             neondata.RequestState.FINISHED)
+        self.assertIsNone(api_request.time_remaining)
 
         # Check the video data
         video_meta = neondata.VideoMetadata.get(self.video_id)
@@ -3151,6 +3200,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         self.assertEquals(api_request.state,
                           neondata.RequestState.FINISHED)
+        self.assertIsNone(api_request.time_remaining)
 
         # Check the video data
         video_meta = neondata.VideoMetadata.get(self.video_id)
@@ -3180,6 +3230,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                           neondata.RequestState.CUSTOMER_ERROR)
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.FAILED_SENT)
+        self.assertIsNone(api_request.time_remaining)
+        self.assertRegexpMatches(api_request.response['error'], 'Oops')
 
         # Check the state variables
         self.assertEquals(
@@ -3207,6 +3259,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         self.assertEquals(api_request.state, neondata.RequestState.INT_ERROR)
+        self.assertIsNone(api_request.time_remaining)
 
         # Check the state variables
         self.assertEquals(
@@ -3257,6 +3310,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                           neondata.RequestState.CUSTOMER_ERROR)
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.FAILED_SENT)
+        self.assertIsNone(api_request.time_remaining)
         response = api_request.response
         self.assertEquals(response['video_id'], 'vid1')
         self.assertEquals(response['job_id'], 'job1')
@@ -3309,6 +3363,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                           neondata.RequestState.INT_ERROR)
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.NOT_SENT)
+        self.assertIsNone(api_request.time_remaining)
 
     @tornado.testing.gen_test
     def test_clip_processing(self):
@@ -3328,6 +3383,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEqual(
             api_request.state,
             neondata.RequestState.FINISHED)
+        self.assertIsNone(api_request.time_remaining)
 
         # Check the video data
         video_meta = neondata.VideoMetadata.get(self.video_id)
