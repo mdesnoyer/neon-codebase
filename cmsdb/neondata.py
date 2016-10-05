@@ -4930,7 +4930,8 @@ class NeonApiRequest(NamespacedStoredObject):
             result_type=None, 
             n_clips=None,
             clip_length=None,
-            default_clip=None):
+            default_clip=None,
+            time_remaining=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -4989,6 +4990,9 @@ class NeonApiRequest(NamespacedStoredObject):
 
         # url of the default clip
         self.default_clip = default_clip
+
+        # The estimated time remaining in this job in seconds
+        self.time_remaining = time_remaining
         
 
     @classmethod

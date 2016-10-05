@@ -332,8 +332,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             download=True)
         self.assertIsNone(vprocessor.extracted_default_thumbnail)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1800.)
+        self.assertLess(cargs[1], 1950.)
 
     @tornado.testing.gen_test
     def test_default_thumb_found_in_video(self):
@@ -448,8 +449,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor.video_downloader.tempfile.seek(0) 
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1800.)
+        self.assertLess(cargs[1], 1950.)
 
     @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
@@ -469,8 +471,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor.video_downloader.tempfile.seek(0) 
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1800.)
+        self.assertLess(cargs[1], 1950.)
 
     @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
@@ -538,8 +541,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 15)
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*15)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 45.0)
+        self.assertLess(cargs[1], 180.0)
 
         vid_meta = neondata.VideoMetadata.get(vprocessor.video_metadata.key)
         self.assertEquals(vid_meta.duration, 15.0)
@@ -567,8 +571,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 600.0)
 
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*600.0)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 1860.0)
+        self.assertLess(cargs[1], 1950.0)
 
     @tornado.testing.gen_test
     def test_download_youtube_with_list_param(self):
@@ -679,9 +684,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         job_time = int(
             processing_strategy.processing_time_ratio * 
             vprocessor.video_metadata.duration)
-        self.job_hide_mock.assert_called_with(
-            self.job_message,
-            job_time)
+        cargs, kwargs = self.job_hide_mock.call_args
+        self.assertGreater(cargs[1], 15.0)
+        self.assertLess(cargs[1], 160.0)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
