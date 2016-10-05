@@ -806,7 +806,7 @@ class VideoProcessor(object):
             
 
     @tornado.gen.coroutine
-    def _set_job_timeout(self, time_buffer=60.0):
+    def _set_job_timeout(self, time_buffer=120.0):
         '''Set the job timeout so that this worker gets the job for this time.
 
         Inputs:
@@ -1530,7 +1530,7 @@ class ClipProcessor(VideoProcessor):
             n_renditions = sum([len(x.video_rendition_formats) 
                                 for x in cdn_metadata.cdns])
 
-        time_per_seconds_of_clip = 3.0
+        time_per_seconds_of_clip = 3.1
 
         return 5.0 + (n_renditions * n_clips * clip_lengths * 
                       time_per_seconds_of_clip)

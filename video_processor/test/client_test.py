@@ -2628,7 +2628,7 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         # the videos.
         cargs, kwargs = self.job_hide_mock.call_args
         self.assertGreater(cargs[1], 50.0)
-        self.assertLess(cargs[1], 110.0)
+        self.assertLess(cargs[1], 130.0)
 
     @tornado.testing.gen_test
     def test_reprocess_new_model_already_thumbs(self):

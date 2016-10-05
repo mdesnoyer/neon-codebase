@@ -2252,11 +2252,8 @@ class VideoHelper(object):
             elif field == 'tag_id':
                 new_video[field] = video.tag_id
             elif field == 'estimated_time_remaining':
-                if request.state == neondata.RequestState.PROCESSING:
-                    new_video[field] = VideoHelper.get_estimated_remaining(
-                        request)
-                else:
-                    new_video[field] = None
+                new_video[field] = VideoHelper.get_estimated_remaining(
+                    request)
             else:
                 raise BadRequestError('invalid field %s' % field)
 
