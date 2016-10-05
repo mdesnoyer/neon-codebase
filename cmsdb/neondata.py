@@ -4964,7 +4964,8 @@ class NeonApiRequest(NamespacedStoredObject):
         # API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = publish_date # ISO date format of when video is published
+        # ISO date format of when video is published
+        self.publish_date = publish_date 
        
         # field used to store error message on partial error, explict error or 
         # additional information about the request
@@ -4991,7 +4992,8 @@ class NeonApiRequest(NamespacedStoredObject):
         # url of the default clip
         self.default_clip = default_clip
 
-        # The estimated time remaining in this job in seconds
+        # The estimated time remaining in this job in seconds from
+        # when this object was updated.
         self.time_remaining = time_remaining
         
 
