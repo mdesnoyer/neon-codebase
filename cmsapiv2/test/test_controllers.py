@@ -934,7 +934,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
                 body=params,
                 method="PUT",
                 headers=header)
-        self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'User was not found')

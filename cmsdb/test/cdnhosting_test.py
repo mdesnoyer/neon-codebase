@@ -27,6 +27,7 @@ import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.opencv
 import test_utils.postgresql
+import time
 import tornado.testing
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
@@ -877,7 +878,7 @@ class TestVideoUploading(test_utils.neontest.AsyncTestCase):
         random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(480, 640)
-        random.seed()
+        random.seed(time.time())
         super(TestVideoUploading, self).setUp()
 
     def tearDown(self):
