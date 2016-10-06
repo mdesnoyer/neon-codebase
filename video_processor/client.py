@@ -175,6 +175,8 @@ class VideoProcessor(object):
         self.job_message = job_message
         self.video_url = self.job_params['video_url']
 
+        self.estimated_time_remaining = None
+
         # The default thumb url extracted from the video url
         self.extracted_default_thumbnail = None
 
@@ -302,6 +304,7 @@ class VideoProcessor(object):
                         request.state = neondata.RequestState.REQUEUED
                     else:
                         request.state = new_state
+                    request.time_remaining = None
 
                 api_request = yield neondata.NeonApiRequest.modify(
                     self.job_params['job_id'],
@@ -383,16 +386,6 @@ class VideoProcessor(object):
             do_throttle)
         try:
             video_info = yield self.video_downloader.get_video_info()
-            
-            # Update information about the video before we download it
-            self.extracted_default_thumbnail = video_info.get('thumbnail')
-            def _update_title(x):
-                if x.video_title is None:
-                    x.video_title = video_info.get('title', None)
-            yield neondata.NeonApiRequest.modify(
-                self.job_params['job_id'], self.job_params['api_key'] ,
-                _update_title,
-                async=True)
 
             # Update some of our metadata if there's better info
             # from the video
@@ -403,12 +396,24 @@ class VideoProcessor(object):
                   dateutil.parser.parse(video_info['upload_date']).isoformat()
             yield self.update_video_metadata_video_info()
 
-            # Update the timeout
-            yield self._set_job_timeout(
+            
+            # Estimate the processing time to go and update the timeout
+            yield self._estimate_processing_time_remaining(
                 self.video_metadata.duration,
                 video_info.get('filesize', 
                                video_info.get('filesize_approx')))
 
+            # Update information about the video before we download it
+            self.extracted_default_thumbnail = video_info.get('thumbnail')
+            def _mod_req(obj):
+                if obj.video_title is None:
+                    obj.video_title = video_info.get('title', None)
+                obj.time_remaining = self.estimated_time_remaining
+            yield neondata.NeonApiRequest.modify(
+                self.job_params['job_id'], self.job_params['api_key'] ,
+                _mod_req,
+                async=True)
+                
             # Do the real download
             video_info = yield self.video_downloader.download_video_file()
 
@@ -558,9 +563,15 @@ class VideoProcessor(object):
 
         # we have an updated duration at this point lets hide 
         # this job for this duration
-        yield self._set_job_timeout(
-            self.video_metadata.duration, 
-            time_factor=processing_strategy.processing_time_ratio)
+        yield self._estimate_processing_time_remaining(
+            self.video_metadata.duration,
+            processing_strategy=processing_strategy)
+        def _update_time_remaining(req):
+            req.time_remaining = self.estimated_time_remaining
+        yield neondata.NeonApiRequest.modify(self.job_params['job_id'],
+                                             self.job_params['api_key'],
+                                             _update_time_remaining,
+                                             async=True)
 
         try:
             yield self._process_video_impl(self.mov)
@@ -590,6 +601,21 @@ class VideoProcessor(object):
         api_key = self.job_params['api_key']  
         job_id  = self.job_params['job_id']
         video_id = self.job_params['video_id']
+
+        # Get the CDN Metadata
+        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
+            neondata.CDNHostingMetadataList.create_key(
+                api_key,
+                self.video_metadata.integration_id),
+            async=True)
+        if cdn_metadata is None:
+            _log.warn_n('No cdn metadata for account %s integration %s. '
+                        'Defaulting to Neon CDN'
+                        % (api_key, self.video_metadata.integration_id), 10)
+            cdn_metadata = [neondata.NeonCDNHostingMetadata()]
+
+        yield self._estimate_processing_time_remaining(
+            cdn_metadata=cdn_metadata)
         
         # get api request object
         somebody_else_finished = [False]
@@ -606,6 +632,7 @@ class VideoProcessor(object):
                 req.state = neondata.RequestState.FINALIZING
             else:
                 somebody_else_finished[0] = True
+            req.time_remaining = self.estimated_time_remaining
         try:
             api_request = yield neondata.NeonApiRequest.modify(
                 job_id,
@@ -624,18 +651,6 @@ class VideoProcessor(object):
         if somebody_else_finished[0]:
             raise OtherWorkerCompleted()
 
-        # Get the CDN Metadata
-        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
-            neondata.CDNHostingMetadataList.create_key(
-                api_key,
-                self.video_metadata.integration_id),
-            async=True)
-        if cdn_metadata is None:
-            _log.warn_n('No cdn metadata for account %s integration %s. '
-                        'Defaulting to Neon CDN'
-                        % (api_key, self.video_metadata.integration_id), 10)
-            cdn_metadata = [neondata.NeonCDNHostingMetadata()]
-
         yield self._finalize_response_impl(api_request, cdn_metadata)
 
         # Everything is fine at this point, so lets mark it finished
@@ -650,6 +665,7 @@ class VideoProcessor(object):
             request.publish_date = time.time() * 1000.0
             request.response = cb_response
             request.callback_state = neondata.CallbackState.NOT_SENT
+            request.time_remaining = None
         new_request = None
         try:
             new_request = yield neondata.NeonApiRequest.modify(
@@ -754,27 +770,60 @@ class VideoProcessor(object):
         raise NotImplementedError()
 
     @tornado.gen.coroutine
-    def _set_job_timeout(self, duration=None, size=None,
-                         time_factor=3.0):
+    def _estimate_processing_time_remaining(
+            self,
+            video_duration=None,
+            video_size=None,
+            cdn_metadata=None,
+            processing_strategy=None):
+        '''Calculate the estimated time remaining for this job.
+
+        Result will be stored in self.estimated_time_remaining
+        and the job queue will be notified
+
+        Inputs:
+        video_duration - If known and the video still needs to be processed
+        video_size - If known and the video still needs to be processed. In bytes
+        processing_strategy - The processing strategy if known
+        cdn_metadata - The cdn metadata object for this video used to 
+                       estimate the finalize time required
+        '''
+        time_remaining = 0.0
+        if not video_duration and video_size:
+            # Estimate the video duration from the size of the video
+            video_duration = video_size * 8.0 / 1024 / 800
+            
+        if video_duration:
+            time_remaining += self._estimate_video_processing_time(
+                video_duration, processing_strategy)
+
+        time_remaining += self._estimate_finalize_time(
+            cdn_metadata)
+
+        self.estimated_time_remaining = time_remaining
+        yield self._set_job_timeout()
+
+    def _estimate_finalize_time(self, cdn_metadata=None):
+        '''Estimate the time to finalize this video.'''
+        raise NotImplementedError()
+
+    def _estimate_video_processing_time(self, duration,
+                                        processing_strategy=None):
+        '''Estimate the time to just process the video.'''
+        raise NotImplementedError()
+            
+
+    @tornado.gen.coroutine
+    def _set_job_timeout(self, time_buffer=120.0):
         '''Set the job timeout so that this worker gets the job for this time.
 
         Inputs:
-        duration - Duration of the video in seconds
-        size - Size of the video file in bytes
-        time_factor - How long the job should run as a multiple of the video 
-                      length.
+        buffer - Buffer in seconds for the timeout
         '''
-        if not duration:
-            if not size:
-                # Do not set a timeout because we have no idea
-                return
-
-            # Approximate the length of the video
-            duration = size * 8.0 / 1024 / 800
-
         try:
-            yield self.job_queue.hide_message(self.job_message,
-                                              int(duration * time_factor))
+            yield self.job_queue.hide_message(
+                self.job_message,
+                self.estimated_time_remaining + time_buffer)
         except boto.exception.SQSError as e:
             _log.warn('Error extending job time: %s' % e)
 
@@ -839,6 +888,7 @@ class VideoProcessor(object):
                 old_thumb.frameno = new_thumb.frameno
                 old_thumb.filtered = new_thumb.filtered
                 old_thumb.features = new_thumb.features
+                old_thumb.dominant_color = new_thumb.dominant_color
         try:
             new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
                 [x.key for x in new_thumbs],
@@ -861,7 +911,7 @@ class VideoProcessor(object):
                 # Don't keep the random centerframe or neon thumbnails
                 thumbs = yield neondata.ThumbnailMetadata.get_many(
                     video_obj.thumbnail_ids, async=True)
-                keep_thumbs = [x.key for x in thumbs if x.type not in [
+                keep_thumbs = [x.key for x in thumbs if x and x.type not in [
                     neondata.ThumbnailType.NEON,
                     neondata.ThumbnailType.CENTERFRAME,
                     neondata.ThumbnailType.RANDOM]]
@@ -1117,6 +1167,7 @@ class ThumbnailProcessor(VideoProcessor):
 
             known_thumbs = yield neondata.ThumbnailMetadata.get_many(
                 known_tids, async=True)
+            known_thumbs = [ x for x in known_thumbs if x ] 
 
         # Attach the thumbnails to the video. This will upload the
         # thumbnails to the appropriate CDNs.
@@ -1304,6 +1355,36 @@ class ThumbnailProcessor(VideoProcessor):
             'subject' : 'Your Neon Images Are Here!', 
             'from_name' : 'Neon Video Results'}
             )
+
+    def _estimate_finalize_time(self, cdn_metadata=None):
+        '''Estimate the time to finalize this video.
+
+        Based on an assumption of the length of time to cut a rendition.
+        '''
+        thumb_count = self.n_thumbs + self.m_thumbs + 3
+
+        n_renditions = 16
+        smart_crop = True
+        if cdn_metadata:
+            n_renditions = sum([len(x.rendition_sizes) 
+                                for x in cdn_metadata.cdns])
+            smart_crop = any([x.crop_with_saliency or 
+                              x.crop_with_text_detection or 
+                              x.crop_with_face_detection
+                              for x in cdn_metadata])
+
+        time_per_image = 0.25 if smart_crop else 0.1
+
+        return thumb_count * n_renditions * time_per_image + 3.0
+
+    def _estimate_video_processing_time(self, duration,
+                                        processing_strategy=None):
+        '''Estimate the time to just process the video.'''
+        time_ratio = 3.0
+        if processing_strategy:
+            time_ratio = processing_strategy.processing_time_ratio * 1.1
+
+        return duration * time_ratio
         
 
 class ClipProcessor(VideoProcessor):
@@ -1444,6 +1525,33 @@ class ClipProcessor(VideoProcessor):
         '''Return a dictionary of parameters that will be sent to the email handler.'''
         raise DoNotEmail()
 
+    def _estimate_finalize_time(self, cdn_metadata=None):
+        '''Estimate the time to finalize this video.
+
+        Based on an assumption of the length of time to cut a rendition.
+        '''
+        clip_lengths = self.clip_length or 10.0
+        n_clips = len(self.clips) or self.n_clips
+        
+        n_renditions = 5
+        if cdn_metadata:
+            n_renditions = sum([len(x.video_rendition_formats) 
+                                for x in cdn_metadata.cdns])
+
+        time_per_seconds_of_clip = 3.1
+
+        return 5.0 + (n_renditions * n_clips * clip_lengths * 
+                      time_per_seconds_of_clip)
+
+    def _estimate_video_processing_time(self, duration,
+                                        processing_strategy=None):
+        '''Estimate the time to just process the video.'''
+        time_ratio = 2.0
+        if processing_strategy:
+            time_ratio = processing_strategy.clip_processing_time_ratio * 1.1
+
+        return duration * time_ratio
+
 class VideoClient(multiprocessing.Process):
    
     '''
@@ -1496,6 +1604,7 @@ class VideoClient(multiprocessing.Process):
                         request.state = \
                             neondata.RequestState.PROCESSING
                         request.model_version = self.model_version
+                        request.time_remaining = None
 
                 api_request = neondata.NeonApiRequest.modify(
                     job_id, api_key, _change_job_state)
@@ -1537,6 +1646,7 @@ class VideoClient(multiprocessing.Process):
                                                                 err=msg)
                             req.response = cb.to_dict()
                             req.state = neondata.RequestState.INT_ERROR
+                            req.time_remaining = None
                     yield neondata.NeonApiRequest.modify(job_id, api_key,
                                                          _write_failure,
                                                          async=True)

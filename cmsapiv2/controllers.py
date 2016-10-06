@@ -8,11 +8,9 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 from apiv2 import *
-from collections import OrderedDict
 from cvutils.imageutils import PILImageUtils
 import dateutil.parser
 import model.predictor
-import numpy as np
 import PIL.Image
 import PIL.ImageDraw
 import PIL.ImageFont
@@ -24,7 +22,6 @@ import utils.pycvutils
 import cmsapiv2.client
 from cmsdb.neondata import TagType
 import fractions
-import itertools
 import logging
 import model
 import utils.autoscale
@@ -32,7 +29,8 @@ import video_processor.video_processing_queue
 _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
-define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
+define("cmsapiv1_port", default=8083, help="what port apiv1 is running on",
+       type=int)
 
 # For scoring non-video thumbnails.
 define('model_server_port', default=9000, type=int,
@@ -103,7 +101,8 @@ class AccountHandler(APIV2Handler):
         if fields:
             fields = set(fields.split(','))
 
-        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id)
+        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                              account_id)
 
         if not user_account:
             raise NotFoundError()
@@ -143,7 +142,7 @@ class AccountHandler(APIV2Handler):
                 acct_internal.default_thumbnail_id)
 
         yield tornado.gen.Task(neondata.NeonUserAccount.modify,
-                                        acct_internal.key, _update_account)
+                               acct_internal.key, _update_account)
         statemon.state.increment('put_account_oks')
         self.success(acct_for_return)
 
@@ -192,7 +191,7 @@ class AccountHandler(APIV2Handler):
 '''*********************************************************************
 IntegrationHelper
 *********************************************************************'''
-class IntegrationHelper():
+class IntegrationHelper(object):
     """Class responsible for helping the integration handlers."""
 
     @staticmethod
@@ -215,7 +214,8 @@ class IntegrationHelper():
             integration.account_id = acct.neon_api_key
             integration.partner_code = args['publisher_id']
             integration.api_key = args.get('api_key', integration.api_key)
-            integration.api_secret = args.get('api_secret', integration.api_secret)
+            integration.api_secret = args.get('api_secret',
+                                              integration.api_secret)
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = neondata.BrightcoveIntegration()
@@ -293,15 +293,18 @@ class IntegrationHelper():
         integration_type - the type of integration to create
         """
         if integration_type == neondata.IntegrationType.OOYALA:
-            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
-                                                 integration_id)
+            integration = yield tornado.gen.Task(
+                neondata.OoyalaIntegration.get,
+                integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
-                                                 integration_id)
+            integration = yield tornado.gen.Task(
+                neondata.BrightcoveIntegration.get,
+                integration_id)
         if integration:
             raise tornado.gen.Return(integration)
         else:
-            raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
+            raise NotFoundError('%s %s' % ('unable to find the integration '
+                                           'for id:',integration_id))
 
     @staticmethod
     @tornado.gen.coroutine
@@ -322,18 +325,18 @@ class IntegrationHelper():
         rv = {}
         rv['integrations'] = []
         for i in integrations:
-           new_obj = None
-           if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
-               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
-               new_obj['type'] = 'brightcove'
-           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
-               new_obj = yield OoyalaIntegrationHandler.db2api(i)
-               new_obj['type'] = 'ooyala'
-           else:
-               continue
+            new_obj = None
+            if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
+                new_obj = yield BrightcoveIntegrationHandler.db2api(i)
+                new_obj['type'] = 'brightcove'
+            elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
+                new_obj = yield OoyalaIntegrationHandler.db2api(i)
+                new_obj['type'] = 'ooyala'
+            else:
+                continue
 
-           if new_obj:
-               rv['integrations'].append(new_obj)
+            if new_obj:
+                rv['integrations'].append(new_obj)
 
         raise tornado.gen.Return(rv)
 
@@ -1678,12 +1681,13 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno', 'tag_ids',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions']
+                'type', 'external_ref', 'created', 'updated', 'renditions',
+                'dominant_color']
 
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
-                'created', 'updated']
+                'created', 'updated', 'dominant_color']
 
     @classmethod
     @tornado.gen.coroutine
@@ -1718,6 +1722,28 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
+
+    def get_limits(self):
+        '''Limit the post of images'''
+
+        try:
+            increment = len(self.images)
+        except AttributeError:
+            increment = 1
+        post_list = [{ 'left_arg': 'image_posts',
+                       'right_arg': 'max_image_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_image_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_image_posts',
+                           'timer_resets': [ ('image_posts', 0) ]
+                       },
+                       'values_to_increase': [ ('image_posts', increment) ],
+                       'values_to_decrease': []
+        }]
+        return {
+                   HTTPVerbs.POST: post_list
+               }
 
     @classmethod
     def get_access_levels(self):
@@ -1929,7 +1955,9 @@ class VideoHelper(object):
                     async=True)
                 # bypassing save_objects to avoid the extra video save
                 # that comes later
-                yield tornado.gen.Task(thumb.save)
+                success = yield thumb.save(async=True) 
+                if not success: 
+                    raise IOError('unable to save default thumbnail')
 
             # create the api_request
             api_request = yield VideoHelper.create_api_request(
@@ -2109,17 +2137,16 @@ class VideoHelper(object):
         return next_page_url
 
     @staticmethod
-    def get_estimated_remaining(video, request):
-        if not video.duration or int(video.duration) <= 0: 
-            return 0.0  
+    def get_estimated_remaining(request):
+        if request.time_remaining is None:
+            return None
 
-        est_process_time = 2.8 * video.duration
         updated_ts = dateutil.parser.parse(
             request.updated)
         utc_now = datetime.utcnow()
         diff = (utc_now - updated_ts).total_seconds()
  
-        return max(float(est_process_time - diff), 0.0)
+        return max(float(request.time_remaining - diff), 0.0)
 
     @staticmethod
     @tornado.gen.coroutine
@@ -2191,15 +2218,8 @@ class VideoHelper(object):
                 # are handled in that section.
                 pass
             elif field == 'demographic_clip_ids':
-                new_video['demographic_clip_ids'] = []
-                for video_result in video.job_results: 
-                    cur_entry = { 
-                        'gender': video_result.gender, 
-                        'age': video_result.age, 
-                        'clip_ids': (video_result.clip_ids + 
-                                     video.non_job_clip_ids)
-                    }
-                    new_video['demographic_clip_ids'].append(cur_entry)  
+                new_video['demographic_clip_ids'] = \
+                    VideoHelper.get_demographic_clip_ids(video)
             elif field == 'state':
                 new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
             elif field == 'integration_id':
@@ -2232,11 +2252,8 @@ class VideoHelper(object):
             elif field == 'tag_id':
                 new_video[field] = video.tag_id
             elif field == 'estimated_time_remaining':
-                if request.state == neondata.RequestState.PROCESSING:
-                    new_video[field] = VideoHelper.get_estimated_remaining(
-                        video, request)
-                else:
-                    new_video[field] = None
+                new_video[field] = VideoHelper.get_estimated_remaining(
+                    request)
             else:
                 raise BadRequestError('invalid field %s' % field)
 
@@ -2246,6 +2263,22 @@ class VideoHelper(object):
                     new_video['error'] = err
 
         raise tornado.gen.Return(new_video)
+
+    @staticmethod
+    def get_demographic_clip_ids(video):
+        '''Given a VideoMetadata, get the demographic_clip_ids'''
+
+        result = []
+        for video_result in video.job_results: 
+            cur_entry = { 
+                'gender': video_result.gender, 
+                'age': video_result.age, 
+                'clip_ids': (video_result.clip_ids + 
+                             video.non_job_clip_ids)
+            }
+            result.append(cur_entry)  
+        return result
+
 
 '''*********************************************************************
 VideoHandler
@@ -3618,7 +3651,7 @@ class BatchHandler(APIV2Handler):
             skip_auth=True)
 
         requests = call_info.get('requests', None)
-        output = { 'results' : [] } 
+        output = { 'results' : [] }
         for req in requests: 
             # request will be information about 
             # the call we want to make 
@@ -3644,7 +3677,8 @@ class BatchHandler(APIV2Handler):
                             'code' : response.code 
                         } 
                     }
-                    result['response'] = error 
+                    result['response'] = error
+                    result['response_code'] = response.code 
                 else:  
                     result['relative_url'] = req['relative_url'] 
                     result['method'] = req['method'] 
@@ -3652,8 +3686,10 @@ class BatchHandler(APIV2Handler):
                     result['response_code'] = response.code
             except AttributeError:
                 result['response'] = 'Malformed Request'
+                result['response_code'] = ResponseCode.HTTP_BAD_REQUEST 
             except Exception as e: 
                 result['response'] = 'Unknown Error Occurred' 
+                result['response_code'] = ResponseCode.HTTP_INTERNAL_SERVER_ERROR
             finally: 
                 output['results'].append(result)
                  
@@ -3735,7 +3771,9 @@ class FeatureHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+            'key' : Any(CustomVoluptuousTypes.CommaSeparatedList(
+                at_least_x=1, 
+                min_length_for_elements=1)), 
             'model_name' : All(Coerce(str), Length(min=1, max=512)), 
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
@@ -3852,11 +3890,46 @@ class SocialImageHandler(ShareableContentHandler):
             elif pl_type == neondata.Tag.__name__:
                 tag = yield neondata.Tag.get(pl_id, async=True)
                 best_thumb = yield self._get_best_thumb_of_tag(tag)
+
+                # If the tag is of video and the video has a clip,
+                # use the best clip's score in place of the thumbnail's.
+                try:
+                    if tag.tag_type == neondata.TagType.VIDEO:
+                        video = yield neondata.VideoMetadata.get(
+                            tag.video_id,
+                            async=True)
+                        dems = VideoHelper.get_demographic_clip_ids(video)
+
+                        if dems:
+                            # Get the best clip of the null gender and age group.
+                            clips = (d for d in dems
+                                     if d['age'] is None and
+                                        d['gender'] is None).next()
+                            best_clip_id = clips['clip_ids'][0]
+
+                            clip = yield neondata.Clip.get(
+                                best_clip_id,
+                                async=True)
+                            clip_thumb = yield neondata.ThumbnailMetadata.get(
+                                clip.thumbnail_id,
+                                async=True)
+                            # Override the best thumb with this one, and the
+                            # clip's score.
+                            if clip_thumb:
+                                best_thumb = clip_thumb
+                                best_thumb.model_version = None
+                                best_thumb.model_score = clip.score
+                except Exception as e:
+                    _log.warn('Problem using clip thumb %s', e)
+                    # Fail back to using the best thumbnail.
+                    
+
             elif pl_type == neondata.Clip.__name__:
                 clip = yield neondata.Clip.get(pl_id, async=True)
                 best_thumb = yield neondata.ThumbnailMetadata.get(clip.thumbnail_id)
             else:
                 raise ForbiddenError('Invalid token')
+
 
             # Get the size needs based on the platform
             width, height, box_height, font_size = SocialImageHandler.PLATFORM_MAP[

@@ -38,7 +38,7 @@ load-plugins=
 # --enable=similarities". If you want to run only the classes checker, but have
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
-disable=trailing-whitespace,W1201
+disable=trailing-whitespace,W1201,C0326,W0141,R0904,E1123
 
 
 [REPORTS]
@@ -99,7 +99,7 @@ class-rgx=[A-Z_][a-zA-Z0-9]+$
 function-rgx=[a-z_][a-z0-9_]{2,30}$
 
 # Regular expression which should only match correct method names
-method-rgx=[a-z_][a-z0-9_]{2,30}$
+method-rgx=(([a-z_][a-z0-9_]{2,30})|(test_[a-z0-9_]+))$
 
 # Regular expression which should only match correct instance attribute names
 attr-rgx=[a-z_][a-z0-9_]{2,30}$
@@ -119,14 +119,14 @@ class-attribute-rgx=([A-Za-z_][A-Za-z0-9_]{2,30}|(__.*__))$
 inlinevar-rgx=[A-Za-z_][A-Za-z0-9_]*$
 
 # Good variable names which should always be accepted, separated by a comma
-good-names=i,e,f,j,k,ex,Run,_,_log
+good-names=i,e,f,j,k,ex,Run,_,_log,cb,rv,n
 
 # Bad variable names which should always be refused, separated by a comma
 bad-names=foo,bar,baz,toto,tutu,tata
 
 # Regular expression which should only match function or class names that do
 # not require a docstring.
-no-docstring-rgx=__.*__
+no-docstring-rgx=((.*[Tt]est.*)|(__.*__))
 
 # Minimum line length for functions/classes that require docstrings, shorter
 # ones are exempt.
@@ -202,7 +202,13 @@ zope=no
 # List of members which are set dynamically and missed by pylint inference
 # system, and so shouldn't trigger E0201 when accessed. Python regular
 # expressions are accepted.
-generated-members=REQUEST,acl_users,aq_parent
+generated-members=REQUEST,acl_users,aq_parent,numpy
+
+
+# List of decorators that produce context managers, such as 
+# contextlib.contextmanager. Add to this list to register other 
+# decorators that produce valid context managers.
+contextmanager-decorators=contextlib.contextmanager,utils.sync.optional_sync
 
 
 [DESIGN]

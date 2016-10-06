@@ -125,10 +125,10 @@ statemon.define('postgres_successful_pubsub_callbacks', int)
 statemon.define('postgres_pools', int) 
 statemon.define('postgres_pool_full', int)
 
-class ThumbDownloadError(IOError):pass
-class VideoDownloadError(IOError):pass
-class DBStateError(ValueError):pass
-class DBConnectionError(IOError):pass
+class ThumbDownloadError(IOError): pass
+class VideoDownloadError(IOError): pass
+class DBStateError(ValueError): pass
+class DBConnectionError(IOError): pass
 
 def _get_db_information(): 
     '''Function that returns the address to the database for an object.
@@ -193,18 +193,15 @@ class PostgresDB(tornado.web.RequestHandler):
                 psycopg2.BINARY.values, 
                 'np_array_type', 
                 typecast_numpy_array)
-            psycopg2.extensions.register_type(np_array_type) 
-        
-        def _set_current_host(self): 
-            self.old_host = self.host 
-            self.host = options.db_address
+            psycopg2.extensions.register_type(np_array_type)
  
         def _build_dsn(self): 
-            return 'dbname=%s user=%s host=%s port=%s password=%s' % (self.db_info['dbname'], 
-                        self.db_info['user'], 
-                        self.db_info['host'], 
-                        self.db_info['port'], 
-                        self.db_info['password'])
+            return 'dbname=%s user=%s host=%s port=%s password=%s' % (
+                self.db_info['dbname'], 
+                self.db_info['user'], 
+                self.db_info['host'], 
+                self.db_info['port'], 
+                self.db_info['password'])
 
         def _clean_up_io_dict(self):
             '''since we allow optional_sync on many of these calls 
@@ -229,9 +226,10 @@ class PostgresDB(tornado.web.RequestHandler):
 
         def _get_momoko_db(self): 
             current_io_loop = tornado.ioloop.IOLoop.current()
-            conn = momoko.Connection(dsn=self._build_dsn(),
-                                     ioloop=current_io_loop,
-                                     cursor_factory=psycopg2.extras.RealDictCursor)
+            conn = momoko.Connection(
+                dsn=self._build_dsn(),
+                ioloop=current_io_loop,
+                cursor_factory=psycopg2.extras.RealDictCursor)
             return conn
                         
         @tornado.gen.coroutine
@@ -257,9 +255,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 return conn
 
             if self.db_info is None: 
-                self.db_info = current_db_info = _get_db_information()
-            else:
-                current_db_info = _get_db_information()
+                self.db_info = _get_db_information()
   
             if dict_item is None: 
                 # this is the first time we've seen this io_loop just 
@@ -279,7 +275,7 @@ class PostgresDB(tornado.web.RequestHandler):
                                pool, 
                                True, 
                                dict_item)
-                except Exception as e: 
+                except Exception: 
                     pool.close() 
                     dict_item['pool'] = None 
                     raise
@@ -474,7 +470,8 @@ class PostgresDB(tornado.web.RequestHandler):
 class PostgresPubSub(object):
     class _PostgresPubSub: 
         def __init__(self): 
-            self.channels = {} 
+            self.channels = {}
+            self.db = None 
         
         @tornado.gen.coroutine    
         def _connect(self):
@@ -506,7 +503,7 @@ class PostgresPubSub(object):
                 connection = channel['connection'].connection 
                 connection.poll()
                 _log.info_n('Notifying listeners of db changes - %s' % 
-                    (connection.notifies),25)
+                    (connection.notifies), 25)
                 while connection.notifies:
                     notification = connection.notifies.pop() 
                     payload = notification.payload
@@ -520,7 +517,8 @@ class PostgresPubSub(object):
                     tornado.ioloop.IOLoop.current().add_future(future, func) 
             except Exception as e: 
                 statemon.state.increment('postgres_unknown_errors')
-                _log.exception('Error in pubsub trying to get notifications %s. ' % e) 
+                _log.exception('Error in pubsub trying to get notifications '
+                               '%s. ' % e) 
                 self._reconnect(channel_name) 
         
         def _reconnect(self, channel_name):
@@ -547,11 +545,13 @@ class PostgresPubSub(object):
         def listen(self, channel_name, func):
             '''publicly accessible function that starts listening on a channel 
                
-               handles the postgres connection as well, no need to connect before 
-               calling me 
+               handles the postgres connection as well, no need to
+               connect before calling me
   
-               channel - baseclassname of the object, will call PG LISTEN on this 
-               func - the function to callback to if we receive notifications 
+               channel - baseclassname of the object, will call PG
+               LISTEN on this 
+               func - the function to callback to if we
+               receive notifications
  
                simply is added to the io_loop via add_handler 
             ''' 
@@ -563,21 +563,25 @@ class PostgresPubSub(object):
                     yield momoko_conn.execute('LISTEN %s' % channel_name)
                     io_loop = tornado.ioloop.IOLoop.current()
                     self.channels[channel_name] = { 
-                                                    'connection' : momoko_conn, 
-                                                    'callback_functions' : [func] 
+                        'connection' : momoko_conn, 
+                        'callback_functions' : [func] 
                                                   }
-                    io_loop.add_handler(momoko_conn.connection.fileno(), 
-                                        lambda fd, events: self._receive_notification(fd, events, channel_name), 
+                    io_loop.add_handler(
+                        momoko_conn.connection.fileno(), 
+                        lambda fd, events: self._receive_notification(
+                            fd, events, channel_name), 
                                         io_loop.READ) 
                     _log.info(
-                        'Opening a new listener on postgres at %s for channel %s' %
+                        'Opening a new listener on postgres at %s for '
+                        'channel %s' %
                         (self.db.db_info['host'], channel_name))
                     statemon.state.increment('postgres_listeners')
                 except psycopg2.Error as e: 
-                    _log.exception('a psycopg error occurred when listening to %s on postgres %s' \
-                                   % (channel_name, e)) 
+                    _log.exception('a psycopg error occurred when listening '
+                                   'to %s on postgres %s' % (channel_name, e)) 
                 except Exception as e: 
-                    _log.exception('an unknown error occurred when listening to %s on postgres %s' \
+                    _log.exception('an unknown error occurred when listening '
+                                   'to %s on postgres %s' 
                                    % (channel_name, e)) 
                     statemon.state.increment('postgres_unknown_errors')
                     
@@ -601,11 +605,11 @@ class PostgresPubSub(object):
                     yield connection.execute('UNLISTEN %s' % channel_name)
                     connection.close()
                 except psycopg2.InterfaceError as e:
-                    # this means we already lost connection, and can not close a 
-                    # closed connection  
-                    _log.exception('psycopg error when unlistening to %s on postgres %s' \
+                    # this means we already lost connection, and can
+                    # not close a closed connection
+                    _log.exception('psycopg error when unlistening to %s on '
+                                   'postgres %s' 
                                    % (channel, e))
-                    pass  
                 self.channels.pop(channel_name, None)
                 statemon.state.decrement('postgres_listeners')
             except psycopg2.Error as e: 
@@ -3867,7 +3871,6 @@ class CDNHostingMetadata(UnsaveableStoredObject):
         # Default to hosting on the Neon CDN if we don't know about it
         raise tornado.gen.Return(cdn_metadata or [NeonCDNHostingMetadata()])
 
-
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter
@@ -4932,7 +4935,8 @@ class NeonApiRequest(NamespacedStoredObject):
             result_type=None, 
             n_clips=None,
             clip_length=None,
-            default_clip=None):
+            default_clip=None,
+            time_remaining=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -4965,7 +4969,8 @@ class NeonApiRequest(NamespacedStoredObject):
         # API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = publish_date # ISO date format of when video is published
+        # ISO date format of when video is published
+        self.publish_date = publish_date 
        
         # field used to store error message on partial error, explict error or 
         # additional information about the request
@@ -4991,6 +4996,10 @@ class NeonApiRequest(NamespacedStoredObject):
 
         # url of the default clip
         self.default_clip = default_clip
+
+        # The estimated time remaining in this job in seconds from
+        # when this object was updated.
+        self.time_remaining = time_remaining
         
 
     @classmethod
@@ -6012,7 +6021,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None, features=None):
+                 external_id=None, features=None, dominant_color=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -6051,6 +6060,9 @@ class ThumbnailMetadata(StoredObject):
          
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
+
+        # Dominant color of the image
+        self.dominant_color = dominant_color
 
     @classmethod
     def _baseclass_name(cls):
@@ -6144,7 +6156,6 @@ class ThumbnailMetadata(StoredObject):
         self.width = image.size[0]
         self.height = image.size[1]
         self.update_phash(image)
-
         # Save the image as jpeg, then generate the key from its hash.
         fmt = 'jpeg'
         filestream = StringIO()
@@ -6152,6 +6163,11 @@ class ThumbnailMetadata(StoredObject):
         filestream.seek(0)
         imgdata = filestream.read()
         self.key = ThumbnailID.generate(imgdata, self.video_id)
+
+        try:
+            self.dominant_color = self.generate_dominant_color(image)
+        except Exception as e:
+            _log.warn('Error generating dominant color key:%s %s', self.key, e)
 
         # Host the primary copy of the image
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
@@ -6179,6 +6195,26 @@ class ThumbnailMetadata(StoredObject):
         yield [x.upload(image, self.key, s3_url, async=True,
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
+
+    @staticmethod
+    def generate_dominant_color(image):
+        '''Extract a dominant color of the image
+
+        Inputs:
+            file: file handle or bufferio
+        Outbut:
+            color: list [R,G,B]'''
+
+        h = image.histogram()
+        r = h[0:256]
+        g = h[256:256*2]
+        b = h[256*2: 256*3]
+        return [
+            sum( i*w for i, w in enumerate(r) ) / sum(r),
+            sum( i*w for i, w in enumerate(g) ) / sum(g),
+            sum( i*w for i, w in enumerate(b) ) / sum(b)]
+                                                        
+
 
     @tornado.gen.coroutine
     def score_image(self, predictor, image=None, save_object=False):
@@ -6386,30 +6422,39 @@ class AccountLimits(StoredObject):
     def __init__(self, 
                  account_id, 
                  video_posts=0, 
-                 max_video_posts=10, 
+                 max_video_posts=10,
                  refresh_time_video_posts=datetime.datetime(2050,1,1), 
                  seconds_to_refresh_video_posts=2592000.0,
                  max_video_size=900.0,
                  email_posts=0,
                  max_email_posts=60, 
                  refresh_time_email_posts=datetime.datetime(2000,1,1), 
-                 seconds_to_refresh_email_posts=3600.0):
+                 seconds_to_refresh_email_posts=3600.0,
+                 image_posts=0,
+                 max_image_posts=1000,
+                 refresh_time_image_posts=datetime.datetime(2000,1,1),
+                 seconds_to_refresh_image_posts=2592000.0):
  
         super(AccountLimits, self).__init__(account_id)
         
-        # the number of video posts this account has made in the time window 
+        # the number of video/image posts this account has made in the time window 
         self.video_posts = video_posts 
+        self.image_posts = image_posts
          
-        # the maximum amount of video posts the account is allowed in a time 
+        # the maximum amount of video/image posts allowed in a time 
         # window 
         self.max_video_posts = max_video_posts 
+        self.max_image_posts = max_image_posts 
 
-        # when the video_posts counter will be reset 
+        # when the video/image_posts counter will be reset 
         self.refresh_time_video_posts = refresh_time_video_posts.strftime(
+            "%Y-%m-%d %H:%M:%S.%f") 
+        self.refresh_time_image_posts = refresh_time_image_posts.strftime(
             "%Y-%m-%d %H:%M:%S.%f") 
 
         # amount of seconds to add to now() when resetting the timer 
         self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+        self.seconds_to_refresh_image_posts = seconds_to_refresh_image_posts
 
         # maximum video length we will process in seconds 
         self.max_video_size = max_video_size
@@ -6433,13 +6478,20 @@ class AccountLimits(StoredObject):
          
         '''
         sref = bp.seconds_to_refresh_video_posts
+        img_sref = bp.seconds_to_refresh_image_posts
 
         self.max_video_posts = bp.max_video_posts
+        self.max_image_posts = bp.max_image_posts
         self.seconds_to_refresh_video_posts = sref
+        self.seconds_to_refresh_image_posts = img_sref
         self.max_video_size = bp.max_video_size 
         self.refresh_time_video_posts = \
             (datetime.datetime.utcnow() +\
              datetime.timedelta(seconds=sref)).strftime(
+                 "%Y-%m-%d %H:%M:%S.%f")
+        self.refresh_time_image_posts = \
+            (datetime.datetime.utcnow() +\
+             datetime.timedelta(seconds=img_sref)).strftime(
                  "%Y-%m-%d %H:%M:%S.%f")
  
     @classmethod
@@ -6468,16 +6520,20 @@ class BillingPlans(StoredObject):
                  plan_type, 
                  max_video_posts=None, 
                  seconds_to_refresh_video_posts=None,
-                 max_video_size=None):
+                 max_video_size=None,
+                 max_image_posts=None,
+                 seconds_to_refresh_image_posts=None):
  
         super(BillingPlans, self).__init__(plan_type)
-        
-        # the max number of video posts that are allowed  
+
+        # the max number of video and image posts that are allowed  
         self.max_video_posts = max_video_posts
+        self.max_image_posts = max_image_posts
          
         # this will take now() and add this to it, for when the next 
         # refresh will happen
         self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+        self.seconds_to_refresh_image_posts = seconds_to_refresh_image_posts
 
         # maximum video length we will process in seconds 
         self.max_video_size = max_video_size 

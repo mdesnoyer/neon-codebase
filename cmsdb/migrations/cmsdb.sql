@@ -424,10 +424,10 @@ COPY brightcoveplayer (_data, _type) FROM stdin;
 --
 
 COPY billingplans (_data, _type) FROM stdin;
-{"key": "demo", "plan_type": "demo", "max_video_posts": 25, "seconds_to_refresh_video_posts":86400, "max_video_size":900.0}	BillingPlans
-{"key": "pro_monthly", "plan_type": "pro_monthly", "max_video_posts": 500, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
-{"key": "pro_yearly", "plan_type": "pro_yearly", "max_video_posts": 500, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0}	BillingPlans
-{"key": "premeire", "plan_type": "premeire", "max_video_posts": 500000, "seconds_to_refresh_video_posts":1800, "max_video_size":500000.0}	BillingPlans
+{"key": "demo", "plan_type": "demo", "max_video_posts": 25, "seconds_to_refresh_video_posts":86400, "max_video_size":900.0, "max_image_posts": 1000, "seconds_to_refresh_image_posts":86400}	BillingPlans
+{"key": "pro_monthly", "plan_type": "pro_monthly", "max_video_posts": 500, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0, "max_image_posts": 1000, "seconds_to_refresh_image_posts":86400}	BillingPlans
+{"key": "pro_yearly", "plan_type": "pro_yearly", "max_video_posts": 500, "seconds_to_refresh_video_posts":2592000, "max_video_size":3600.0, "max_image_posts": 1000, "seconds_to_refresh_image_posts":86400}	BillingPlans
+{"key": "premeire", "plan_type": "premeire", "max_video_posts": 500000, "seconds_to_refresh_video_posts":1800, "max_video_size":500000.0, "max_image_posts": 1000, "seconds_to_refresh_image_posts":86400}	BillingPlans
 \.
 
 --

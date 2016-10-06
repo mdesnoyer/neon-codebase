@@ -50,15 +50,16 @@ class VideoDownloader(object):
             suffix=vsuffix, delete=True, dir=options.temp_dir)
 
         # S3 Specific fields
-        s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
+        s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws'
+                          '\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
         self.s3match = s3re.search(self.url)
         self.s3key = None
 
 
         # YouTube Dl object
-        def _handle_progress(x):
-            if x['status'] == 'finished':
-                shutil.move(x['filename'], self.tempfile.name)
+        def _handle_progress(state):
+            if state['status'] == 'finished':
+                shutil.move(state['filename'], self.tempfile.name)
         dl_params = {}
         dl_params['noplaylist'] = True
         dl_params['ratelimit'] = (options.max_bandwidth_per_core 
@@ -172,20 +173,20 @@ class VideoDownloader(object):
         _log.info('Downloading %s' % self.url)
 
         try:
-           if self.s3key is not None:
-               try:
-                   yield self.executor.submit(
-                       self.s3key.get_contents_to_file, self.tempfile)
-                   yield self.executor.submit(self.tempfile.flush)
-                   return
-               except boto.exception.S3ResponseError as e:
+            if self.s3key is not None:
+                try:
+                    yield self.executor.submit(
+                        self.s3key.get_contents_to_file, self.tempfile)
+                    yield self.executor.submit(self.tempfile.flush)
+                    return
+                except boto.exception.S3ResponseError as e:
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.url, e))
 
-           # Use Youtube DL. This can handle a ton of different video sources
-           self.video_info = yield self.executor.submit(
-               self.ydl.extract_info,
-               self.url, download=True)
+            # Use Youtube DL. This can handle a ton of different video sources
+            self.video_info = yield self.executor.submit(
+                self.ydl.extract_info,
+                self.url, download=True)
 
         except (youtube_dl.utils.DownloadError,
                 youtube_dl.utils.ExtractorError, 
