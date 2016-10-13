@@ -240,9 +240,10 @@ class ImpalaTable(object):
             self.drop_avro_table(execution_date, cc_table)
         else:
             table = self.build_avro_table_name(execution_date)
-            _log.info('Registering event {event} Avro table {table} with Hive'
-                  .format(event=self.event, table=table))
             self.drop_avro_table(execution_date)
+
+        _log.info('Registering event {event} Avro table {table} with Hive'
+                    .format(event=self.event, table=table))
 
         # Location of table in S3
         if cc_location:
@@ -265,7 +266,7 @@ class ImpalaTable(object):
             'avro.schema.url'='%s'
             )""" % (table, location_s3,
                     self._schema_path())
-            _log.info('CREATE Avro Table SQL: {sql}'.format(sql=sql))
+            _log.debug('CREATE Avro Table SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
         except:
@@ -470,7 +471,8 @@ class ImpalaTable(object):
                            table=table,dt=execution_date.strftime("%Y%m%d%H"),
                            cc_cleaned_previous=cc_cleaned_previous)
 
-            _log.info('merge event sequences input SQL: {sql}'.format(sql=sql))
+            _log.debug('merge event sequences input SQL: {sql}'.format(sql=sql))
+            _log.info('Creating input for merge processing')
             self.hive.execute(sql)
 
         except:
@@ -654,7 +656,7 @@ class ImpalaTable(object):
             dt=execution_date.strftime("%Y%m%d%H"))
 
         try:
-            _log.info('merge event sequences SQL: {sql}'.format(sql=sql))
+            _log.debug('merge event sequences SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
             _log.info('Done merge event sequences')
@@ -669,7 +671,7 @@ class ImpalaTable(object):
                        dt=execution_date.strftime("%Y%m%d%H"),
                        epoch_previous_day=calendar.timegm((execution_date.date() - timedelta(days=1)).timetuple()))
 
-            _log.info('Moving data to s3: {sql}'.format(sql=sql))
+            _log.debug('Moving data to s3: {sql}'.format(sql=sql))
 
             self.hive.execute(sql)
             _log.info('Done moving data to S3')
