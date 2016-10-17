@@ -324,8 +324,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(vprocessor.extracted_default_thumbnail)
 
         cargs, kwargs = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 1800.)
-        self.assertLess(cargs[1], 1950.)
+        self.assertGreater(cargs[1], 1950.)
+        self.assertLess(cargs[1], 2160)
 
         api_request = neondata.NeonApiRequest.get(
             self.api_request.job_id, self.api_request.api_key)
@@ -446,8 +446,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
         cargs, _ = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 1800.)
-        self.assertLess(cargs[1], 1950.)
+        self.assertGreater(cargs[1], 1950.)
+        self.assertLess(cargs[1], 2160.)
 
     @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
@@ -468,8 +468,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertEqual(vprocessor.video_downloader.tempfile.read(), vdata)
 
         cargs, _ = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 1800.)
-        self.assertLess(cargs[1], 1950.)
+        self.assertGreater(cargs[1], 1950.)
+        self.assertLess(cargs[1], 2160.)
 
     @patch('video_processor.client.utils.video_download.S3Connection')
     @tornado.testing.gen_test
@@ -538,8 +538,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 15)
         cargs, _ = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 45.0)
-        self.assertLess(cargs[1], 180.0)
+        self.assertGreater(cargs[1], 315.0)
+        self.assertLess(cargs[1], 410.0)
 
         vid_meta = neondata.VideoMetadata.get(vprocessor.video_metadata.key)
         self.assertEquals(vid_meta.duration, 15.0)
@@ -568,8 +568,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertEquals(vprocessor.video_metadata.duration, 600.0)
 
         cargs, _ = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 1860.0)
-        self.assertLess(cargs[1], 1950.0)
+        self.assertGreater(cargs[1], 2090.0)
+        self.assertLess(cargs[1], 2160.0)
 
     @tornado.testing.gen_test
     def test_download_youtube_with_list_param(self):
@@ -681,8 +681,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         processing_strategy = yield neondata.ProcessingStrategy.get(
             self.api_key, async=True)
         cargs, _ = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 75.0)
-        self.assertLess(cargs[1], 160.0)
+        self.assertGreater(cargs[1], 335.0)
+        self.assertLess(cargs[1], 390.0)
 
         api_request = neondata.NeonApiRequest.get(self.api_request.job_id,
                                                   self.api_request.api_key)
@@ -1523,8 +1523,8 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         # Check that the job was hidden for the time it takes to cut
         # the thumbs.
         cargs, kwargs = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 60.0)
-        self.assertLess(cargs[1], 70.0)
+        self.assertGreater(cargs[1], 300.)
+        self.assertLess(cargs[1], 310.)
 
     @tornado.testing.gen_test
     def test_tag_on_video(self):
@@ -1783,8 +1783,8 @@ class TestFinalizeThumbnailResponse(TestFinalizeResponse):
         # Check that the job was hidden for the time it takes to cut
         # the videos.
         cargs, kwargs = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 50.0)
-        self.assertLess(cargs[1], 110.0)
+        self.assertGreater(cargs[1], 305.)
+        self.assertLess(cargs[1], 330.)
 
     @tornado.testing.gen_test(timeout=10.0)
     def test_processing_after_requeue(self):
@@ -2627,8 +2627,8 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         # Check that the job was hidden for the time it takes to cut
         # the videos.
         cargs, kwargs = self.job_hide_mock.call_args
-        self.assertGreater(cargs[1], 50.0)
-        self.assertLess(cargs[1], 110.0)
+        self.assertGreater(cargs[1], 320.)
+        self.assertLess(cargs[1], 380.)
 
     @tornado.testing.gen_test
     def test_reprocess_new_model_already_thumbs(self):
