@@ -39,18 +39,11 @@ define('aq_groups', default='AquilaOnDemandTest,AquilaTestSpot',
 define('frame_step', default=10, 
        help='Number of frames to step between samples')
 
-class LocalConn(object):
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_ip(self, force_refresh=False):
-        raise tornado.gen.Return('localhost')
-
 @utils.sync.optional_sync
 @tornado.gen.coroutine
 def main(video_url, outfn):
     conn = utils.autoscale.MultipleAutoScaleGroups(
         options.aq_groups.split(','))
-    #conn = LocalConn()
     predictor = model.predictor.DeepnetPredictor(aquila_connection=conn)
     
     vid_downloader = utils.video_download.VideoDownloader(video_url)
