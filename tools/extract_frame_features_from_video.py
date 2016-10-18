@@ -66,7 +66,7 @@ def main(video_url, outfn):
         for frame in utils.pycvutils.iterate_video(vid,
                                                    step=options.frame_step):
             futs.append(predictor.predict(frame, async=True))
-            if len(futs) >= 4:
+            if len(futs) >= 10:
                 res = yield futs
                 for score, features, version in res:
                     data.append(pd.Series(features, name=(video_url, frameno)))
@@ -80,7 +80,7 @@ def main(video_url, outfn):
     finally:
         predictor.shutdown()
 
-    data = data.concat(data)
+    data = pd.concat(data)
     data.to_pickle(outfn)
     _log.info('Output file to %s' % outfn)
     
