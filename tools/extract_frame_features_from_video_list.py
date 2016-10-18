@@ -67,6 +67,9 @@ def process_video(video_url):
         tools.extract_frame_features_from_video.main(video_url, tfile.name)
 
         key.set_contents_from_filename(tfile.name)
+        _log.info('Uploaded results from video %s to s3://%s/%s' % 
+                  (video_url, bucket_name, key_name))
+                                                            
 
 def main():
     n_workers = multiprocessing.cpu_count()
