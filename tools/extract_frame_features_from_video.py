@@ -80,7 +80,7 @@ def main(video_url, outfn):
     finally:
         predictor.shutdown()
 
-    data = pd.concat(data)
+    data = pd.concat(data, axis=1)
     data.to_pickle(outfn)
     _log.info('Output file to %s' % outfn)
     
