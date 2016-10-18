@@ -120,7 +120,7 @@ def iterate_video(video, start=0, end=None, step=1):
     step - Number of frames to step for each frame
     '''
     num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-    end = min(end, num_frames)
+    end = max(end, num_frames)
     if start is None:
         start = 0
     for frameno in range(start, end, step):
