@@ -64,6 +64,7 @@ def main(video_url, outfn):
                 for score, features, version in res:
                     data.append(pd.Series(features, name=(video_url, frameno)))
                     frameno += options.frame_step
+                futs = []
 
         res = yield futs
         for score, features, version in res:
