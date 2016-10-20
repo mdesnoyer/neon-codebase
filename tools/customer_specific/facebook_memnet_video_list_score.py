@@ -129,7 +129,7 @@ def process_video(video_url):
                   (video_url, bucket_name, key_name))
 
 def main():
-    n_workers = 2
+    n_workers = 1
 
     if options.gpu:
         caffe.set_mode_gpu()
