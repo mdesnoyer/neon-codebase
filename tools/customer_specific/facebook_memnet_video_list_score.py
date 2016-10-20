@@ -29,6 +29,7 @@ import cv2
 import hashlib
 import logging
 import multiprocessing
+import numpy as np
 import random
 import re
 import pandas as pd
@@ -106,7 +107,7 @@ def process_video(video_url, predictor):
         try:
             for frame in utils.pycvutils.iterate_video(
                     vid, step=options.frame_step):
-                framebuf.append(frame)
+                framebuf.append(frame.astype(np.float32))
                 framenos.append(frameno)
                 frameno += options.frame_step
                 if len(framebuf) >= 10:
@@ -142,7 +143,7 @@ def main():
         print("CPU mode")
 
     mean = scipy.io.loadmat(options.mean)
-    mean = mean['image_mean'][:,:,::-1]
+    mean = mean['image_mean']#[:,:,::-1]
 
     # Load up the predictor
     image_dims = [int(s) for s in options.image_dims.split(',')]
