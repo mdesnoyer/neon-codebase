@@ -69,7 +69,7 @@ def download_video(video_url):
     yield vid_downloader.download_video_file()
     raise tornado.gen.Return(vid_downloader)
 
-def process_video(video_url):
+def process_video(video_url, predictor):
     '''Process a single video url.'''
     _log.info('Processing %s' % video_url)
     s3conn = boto.s3.connect_to_region('us-east-1')
@@ -88,11 +88,6 @@ def process_video(video_url):
         return
     
     key = bucket.new_key(key_name)
-
-    # Load up the predictor
-    image_dims = [int(s) for s in options.image_dims.split(',')]
-    predictor = caffe.Classifier(options.model_def, options.pretrained_model,
-            image_dims=image_dims, mean=None, raw_scale=None)
 
 
     # Process the actual video
@@ -129,7 +124,7 @@ def process_video(video_url):
                   (video_url, bucket_name, key_name))
 
 def main():
-    n_workers = 1
+    n_workers = 2
 
     if options.gpu:
         caffe.set_mode_gpu()
@@ -137,6 +132,11 @@ def main():
     else:
         caffe.set_mode_cpu()
         print("CPU mode")
+
+    # Load up the predictor
+    image_dims = [int(s) for s in options.image_dims.split(',')]
+    predictor = caffe.Classifier(options.model_def, options.pretrained_model,
+            image_dims=image_dims, mean=None, raw_scale=None)
     
     video_urls = [x.strip() for x in open(options.input) if x]
     random.shuffle(video_urls)
@@ -147,7 +147,7 @@ def main():
     fail_count = 0
     with concurrent.futures.ThreadPoolExecutor(n_workers) as executor:
         for fut in concurrent.futures.as_completed([
-                        executor.submit(process_video, url)
+                        executor.submit(process_video, url, predictor)
                         for url in video_urls]):
             try:
                 fut.result()
