@@ -33,6 +33,7 @@ import random
 import re
 import tornado.gen
 import tempfile
+import utils.neon
 import utils.sync
 from utils.options import options, define
 
