@@ -56,7 +56,7 @@ define('mean',
        help='The mean image file')
 define('gpu', type=int, default=1,
        help='1 if a GPU should be used')
-define('image_dims',  default='227,227',
+define('image_dims',  default='256,256',
        help='Cannonical image size')
 define('frame_step', default=10, 
        help='Number of frames to step between samples')
