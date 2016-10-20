@@ -102,6 +102,7 @@ def process_video(video_url):
 
         framebuf = []
         data = []
+        framenos = []
         frameno = 0
         for frame in utils.pycvutils.iterate_video(vid,
                                                    step=options.frame_step):
