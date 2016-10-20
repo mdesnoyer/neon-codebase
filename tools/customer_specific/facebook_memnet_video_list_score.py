@@ -92,7 +92,7 @@ def process_video(video_url):
     # Load up the predictor
     image_dims = [int(s) for s in options.image_dims.split(',')]
     predictor = caffe.Classifier(options.model_def, options.pretrained_model,
-            image_dims=image_dims, mean=None, raw_scale=255.0)
+            image_dims=image_dims, mean=None, raw_scale=None)
 
 
     # Process the actual video
