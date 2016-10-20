@@ -22,7 +22,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import boto.s3
+from boto.s3.connection import S3Connection
 import caffe
 import concurrent.futures
 import cv2
@@ -77,7 +77,7 @@ def download_video(video_url):
 def process_video(video_url, predictor):
     '''Process a single video url.'''
     _log.info('Processing %s' % video_url)
-    s3conn = boto.s3.connect_to_region('us-east-1')
+    s3conn = S3Connection()
     s3re = re.compile('s3://([a-zA-Z0-9\-]+)/(.*)/?')
     s3match = s3re.match(options.output)
     bucket_name, prefix = s3match.groups()
