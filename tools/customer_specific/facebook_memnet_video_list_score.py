@@ -159,7 +159,6 @@ def main():
 
     success_count = 0
     fail_count = 0
-    process_video(video_urls[0], predictor)
     with concurrent.futures.ThreadPoolExecutor(n_workers) as executor:
         for fut in concurrent.futures.as_completed([
                         executor.submit(process_video, url, predictor)
