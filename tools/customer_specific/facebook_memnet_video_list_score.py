@@ -32,6 +32,7 @@ import multiprocessing
 import random
 import re
 import pandas as pd
+import scipy.io
 import tornado.gen
 import tempfile
 import utils.neon
@@ -50,9 +51,12 @@ define('model_def', default='/home/ubuntu/caffe/models/memnet/deploy.prototxt',
 define('pretrained_model',
        default='/home/ubuntu/caffe/models/memnet/memnet.caffemodel',
        help='Trained model weights file')
+define('mean',
+       default='/home/ubuntu/caffe/models/memnet/mean.mat',
+       help='The mean image file')
 define('gpu', type=int, default=1,
        help='1 if a GPU should be used')
-define('image_dims',  default='256,256',
+define('image_dims',  default='227,227',
        help='Cannonical image size')
 define('frame_step', default=10, 
        help='Number of frames to step between samples')
@@ -137,10 +141,13 @@ def main():
         caffe.set_mode_cpu()
         print("CPU mode")
 
+    mean = scipy.io.loadmat(options.mean)
+    mean = mean['image_mean']
+
     # Load up the predictor
     image_dims = [int(s) for s in options.image_dims.split(',')]
     predictor = caffe.Classifier(options.model_def, options.pretrained_model,
-            image_dims=image_dims, mean=None, raw_scale=None)
+            image_dims=image_dims, mean=mean, raw_scale=1.0)
     
     video_urls = [x.strip() for x in open(options.input) if x]
     random.shuffle(video_urls)
