@@ -99,23 +99,27 @@ def process_video(video_url, predictor):
         data = []
         framenos = []
         frameno = 0
-        for frame in utils.pycvutils.iterate_video(vid,
-                                                   step=options.frame_step):
-            framebuf.append(frame)
-            framenos.append(frameno)
-            frameno += options.frame_step
-            if len(framebuf) >= 10:
+        try:
+            for frame in utils.pycvutils.iterate_video(
+                    vid, step=options.frame_step):
+                framebuf.append(frame)
+                framenos.append(frameno)
+                frameno += options.frame_step
+                if len(framebuf) >= 10:
+                    scores = predictor.predict(framebuf, False)
+                    data.append(pd.Series(dict(zip(framenos, scores[:,0])),
+                                          name=video_url))
+
+                    framebuf = []
+                    framenos = []
+
+            if len(framebuf) > 0:
                 scores = predictor.predict(framebuf, False)
                 data.append(pd.Series(dict(zip(framenos, scores[:,0])),
                                       name=video_url))
-
-                framebuf = []
-                framenos = []
-
-        if len(framebuf) > 0:
-            scores = predictor.predict(framebuf, False)
-            data.append(pd.Series(dict(zip(framenos, scores[:,0])),
-                                  name=video_url))
+        finally:
+            vid.release()
+            vid_downloader.close()
         data = pd.concat(data, axis=0)
         data.to_pickle(tfile.name)        
 
@@ -145,6 +149,7 @@ def main():
 
     success_count = 0
     fail_count = 0
+    process_video(video_urls[0], predictor)
     with concurrent.futures.ThreadPoolExecutor(n_workers) as executor:
         for fut in concurrent.futures.as_completed([
                         executor.submit(process_video, url, predictor)
