@@ -143,7 +143,7 @@ def main():
         print("CPU mode")
 
     mean = scipy.io.loadmat(options.mean)
-    mean = mean['image_mean']#[:,:,::-1]
+    mean = mean['image_mean'][:,:,::-1]
 
     # Load up the predictor
     image_dims = [int(s) for s in options.image_dims.split(',')]
