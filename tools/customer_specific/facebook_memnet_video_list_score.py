@@ -30,7 +30,6 @@ import logging
 import multiprocessing
 import random
 import re
-import tools.extract_frame_features_from_video
 import tempfile
 import utils.sync
 from utils.options import options, define
