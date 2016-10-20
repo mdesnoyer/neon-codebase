@@ -146,7 +146,7 @@ def main():
 
     # Load up the predictor
     image_dims = [int(s) for s in options.image_dims.split(',')]
-    mean = cv2.resize(mean, image_dims)
+    mean = cv2.resize(mean, tuple(image_dims))
     mean = mean.transpose((2,0,1))
     predictor = caffe.Classifier(options.model_def, options.pretrained_model,
             image_dims=image_dims, mean=mean, raw_scale=1.0)
