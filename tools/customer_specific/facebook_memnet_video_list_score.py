@@ -117,7 +117,7 @@ def process_video(video_url):
             framebuf = []
             framenos = []
 
-        if len(framebufs) > 0:
+        if len(framebuf) > 0:
             scores = predictor.predict(framebuf, False)
             data.append(pd.Series(dict(zip(framenos, scores)),
                                   name=video_url))
