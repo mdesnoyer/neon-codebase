@@ -119,9 +119,9 @@ def process_video(video_url):
 
         if len(framebuf) > 0:
             scores = predictor.predict(framebuf, False)
-            data.append(pd.Series(dict(zip(framenos, scores)),
+            data.append(pd.Series(dict(zip(framenos, scores[:,0])),
                                   name=video_url))
-        data = pd.concat(data, axis=1)
+        data = pd.concat(data, axis=0)
         data.to_pickle(tfile.name)        
 
         key.set_contents_from_filename(tfile.name)
