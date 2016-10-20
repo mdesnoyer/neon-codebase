@@ -56,7 +56,7 @@ define('mean',
        help='The mean image file')
 define('gpu', type=int, default=1,
        help='1 if a GPU should be used')
-define('image_dims',  default='256,256',
+define('image_dims',  default='227,227',
        help='Cannonical image size')
 define('frame_step', default=10, 
        help='Number of frames to step between samples')
@@ -142,10 +142,12 @@ def main():
         print("CPU mode")
 
     mean = scipy.io.loadmat(options.mean)
-    mean = mean['image_mean']
+    mean = mean['image_mean'][:,:,::-1]
 
     # Load up the predictor
     image_dims = [int(s) for s in options.image_dims.split(',')]
+    mean = cv2.resize(mean, image_dims)
+    mean = mean.transpose((2,0,1))
     predictor = caffe.Classifier(options.model_def, options.pretrained_model,
             image_dims=image_dims, mean=mean, raw_scale=1.0)
     
