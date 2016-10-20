@@ -25,11 +25,13 @@ if sys.path[0] != __base_path__:
 import boto.s3
 import caffe
 import concurrent.futures
+import cv2
 import hashlib
 import logging
 import multiprocessing
 import random
 import re
+import tornado.gen
 import tempfile
 import utils.sync
 from utils.options import options, define
