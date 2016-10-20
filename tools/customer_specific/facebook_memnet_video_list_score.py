@@ -145,7 +145,7 @@ def main():
 
     success_count = 0
     fail_count = 0
-    with concurrent.futures.ProcessPoolExecutor(n_workers) as executor:
+    with concurrent.futures.ThreadPoolExecutor(n_workers) as executor:
         for fut in concurrent.futures.as_completed([
                         executor.submit(process_video, url)
                         for url in video_urls]):
