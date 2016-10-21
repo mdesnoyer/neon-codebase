@@ -2336,9 +2336,25 @@ class MappingObject(object):
         except ValueError:
             raise tornado.gen.Return(0)
 
-        # Build and execute insert.
-        sql, bind = cls._get_insert_tuple(pairs)
-        cursor = yield cls._execute(sql, bind)
+        # Since insert has no transactionality, let's allow more than one try.
+        tries = 3
+        while tries > 0:
+            tries -= 1
+
+            # Build and execute insert.
+            sql, bind = cls._get_insert_tuple(pairs)
+
+            try:
+                cursor = yield cls._execute(sql, bind)
+            except IntegrityError:
+                # Someone also saved these associations and beat us.
+                # If our set includes something theirs didn't, we'll need to try
+                # again since the entire insert was rolled back.
+                continue
+
+            # Success.
+            break
+
         raise tornado.gen.Return(cursor.rowcount)
 
     @classmethod
