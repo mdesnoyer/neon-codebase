@@ -4144,9 +4144,11 @@ class AWSURLHandler(APIV2Handler):
     def get(self, account_id):
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('filename'): All(Coerce(str), Length(min=1, max=256)),
         })
+        args = schema(self.args)
         bucket = 'neon-user-video-upload'
-        key = '%s/' % account_id
+        key = '%s/%s' % (account_id, args['filename'])
         signed = AWSHosting.get_signed_url(bucket, key)
         self.success({
             'url': signed['url'],
