@@ -20,6 +20,7 @@ from cStringIO import StringIO
 import utils.pycvutils
 
 import cmsapiv2.client
+from cmsdb.cdnhosting import AWSHosting
 from cmsdb.neondata import TagType
 import fractions
 import logging
@@ -4146,7 +4147,7 @@ class AWSURLHandler(APIV2Handler):
         })
         bucket = 'neon-user-video-upload'
         key = '%s/' % account_id
-        url, expires_at = neondata.AWSHosting.get_signed_url(bucket, key)
+        url, expires_at = neondata.cdnhosting.AWSHosting.get_signed_url(bucket, key)
         self.success({
             'url': url,
             'expires_at': expires_at})
