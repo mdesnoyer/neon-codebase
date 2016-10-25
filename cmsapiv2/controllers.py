@@ -4148,7 +4148,7 @@ class AWSURLHandler(APIV2Handler):
         key = '%s/' % account_id
         url, expires_at = neondata.AWSHosting.get_signed_url(bucket, key)
         self.success({
-            'url': url
+            'url': url,
             'expires_at': expires_at})
 
     @classmethod
