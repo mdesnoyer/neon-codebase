@@ -51,6 +51,8 @@ define('cloudinary_api_key', default='433154993476843',
        help='Cloudinary api key')
 define('cloudinary_api_secret', default='n0E7427lrS1Fe_9HLbtykf9CdtA',
        help='Cloudinary secret api key')
+define('s3_generated_url_timeout', default=300,
+       help='Time in seconds before a url expires')
 
 # Monitoring
 statemon.define('upload_error', int)
@@ -463,6 +465,12 @@ class CDNHosting(object):
             raise ValueError("CDNHosting type %s not supported yet, please"
                              " implement" % cdn_metadata.__class__.__name__)
 
+    @staticmethod
+    def get_signed_url(bucket_name, key_name):
+        '''Get a signed url to let user upload to our s3.'''
+        raise NotImplementedError()
+
+
 class AWSHosting(CDNHosting):
 
     def __init__(self, cdn_metadata):
@@ -612,6 +620,22 @@ class AWSHosting(CDNHosting):
         except boto.exception.StorageResponseError as e:
             # key wasn't there, so that's ok
             pass
+
+    @staticmethod
+    def get_signed_url(bucket_name, key_name):
+        '''Get a signed url to let user upload to our s3.'''
+        s3 = boto.connect_s3()
+        timeout = options.s3_generated_url_timeout
+        expires_at = int(time.time()) + timeout
+        return {
+            'url': s3.generate_url(
+                expires_in=timeout,
+                method='PUT',
+                bucket=bucket_name,
+                headers={ 'Content-Type': 'multipart/form-data', },
+                key=key_name),
+            'expires_at': expires_at}
+
 
 class CloudinaryHosting(CDNHosting):
 

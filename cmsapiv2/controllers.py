@@ -4137,6 +4137,25 @@ class ClipHandler(ShareableContentHandler):
     def get_access_levels(self):
         return {HTTPVerbs.GET: neondata.AccessLevels.READ}
 
+class AWSURLHandler(APIV2Handler):
+    '''Let user get pre-signed CDN URL for direct upload.'''
+
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+        })
+        bucket = 'neon-user-video-upload'
+        key = '%s/' % account_id
+        url, expires_at = neondata.AWSHosting.get_signed_url(bucket, key)
+        self.success({
+            'url': url
+            'expires_at': expires_at})
+
+    @classmethod
+    def get_access_levels(cls):
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
+
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
@@ -4182,6 +4201,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', ShareHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/upload/?$', AWSURLHandler),
     (r'/healthcheck/?$', HealthCheckHandler)
 ], gzip=True)
 
