@@ -4147,10 +4147,10 @@ class AWSURLHandler(APIV2Handler):
         })
         bucket = 'neon-user-video-upload'
         key = '%s/' % account_id
-        url, expires_at = AWSHosting.get_signed_url(bucket, key)
+        signed = AWSHosting.get_signed_url(bucket, key)
         self.success({
-            'url': url,
-            'expires_at': expires_at})
+            'url': signed['url'],
+            'expires_at': signed['expires_at']})
 
     @classmethod
     def get_access_levels(cls):
