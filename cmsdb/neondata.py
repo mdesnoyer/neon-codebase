@@ -3893,7 +3893,11 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
                  make_tid_folders=False, rendition_sizes=None, policy=None,
                  source_crop=None, crop_with_saliency=True,
                  crop_with_face_detection=True,
-                 crop_with_text_detection=True, video_rendition_formats=None):
+                 crop_with_text_detection=True, 
+                 video_rendition_formats=None, 
+                 use_iam_role=False, 
+                 iam_role_account=None,
+                 iam_role_name=None):
         '''
         Create the object
         '''
@@ -3917,6 +3921,15 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
 
         # What aws policy should the images be uploaded with
         self.policy = policy
+
+        # should we use a role, instead of the keys and secrets
+        self.use_iam_role = use_iam_role 
+
+        # account of role on aws (ARN) 
+        self.iam_role_account = iam_role_account
+
+        # role session name
+        self.iam_role_name = iam_role_name
 
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''

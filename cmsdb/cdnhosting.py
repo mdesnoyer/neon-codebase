@@ -10,6 +10,7 @@ if sys.path[0] != __base_path__:
 
 import api.akamai_api
 import base64
+import boto3
 import boto.exception
 import cmsdb.neondata
 import cv2
@@ -487,15 +488,38 @@ class AWSHosting(CDNHosting):
             self.folder_prefix = None
         self.do_salt = cdn_metadata.do_salt
         self.make_tid_folders = cdn_metadata.make_tid_folders
+        self.use_iam_role = cdn_metadata.use_iam_role
+        self.iam_role_account = cdn_metadata.iam_role_account
+        self.iam_role_name = cdn_metadata.iam_role_name
+        
 
     @tornado.gen.coroutine
     def _get_bucket(self):
         '''Connects to the bucket if it's not already done'''
         if self.s3bucket is None:
             try:
-                self.s3bucket = yield utils.botoutils.run_async(
-                    self.s3conn.get_bucket,
-                    self.s3bucket_name)
+                if self.use_iam_role: 
+                    sts_client = boto3.client('sts') 
+                    executor = concurrent.futures.ThreadPoolExecutor(1) 
+                    aro = yield self.executor.submit(sts_client.assume_role, 
+                        RoleArn="arn:aws:iam::%s:role/%s" % (
+                          self.iam_role_account, 
+                          self.iam_role_name),
+                        RoleSessionName="AssumeRoleNeonSession"
+                    )
+                    
+                    creds = aro['Credentials'] 
+                    s3_res = boto3.resource(
+                        's3',
+                        aws_access_key_id = credentials['AccessKeyId'],
+                        aws_secret_access_key = credentials['SecretAccessKey'],
+                        aws_session_token = credentials['SessionToken']
+                    )
+                    self.s3bucket = s3_res.Bucket(self.s3bucket_name)                      
+                else: 
+                    self.s3bucket = yield utils.botoutils.run_async(
+                        self.s3conn.get_bucket,
+                        self.s3bucket_name)
             except S3ResponseError as e:
                 if e.status == 403:
                     # It's a permissions error so just get the bucket
