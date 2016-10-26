@@ -36,7 +36,7 @@ define('prefix', default=None, type=str,
 
 def get_features(filename):
     image = cv2.imread(filename)
-    image = cv2.resize(image, dsize=(0,0), fx=1./8, fy=1./8,
+    image = cv2.resize(image, dsize=(0,0), fx=1., fy=1.,
                        interpolation=cv2.INTER_AREA)
 
     features = model.colorname.ColorName(image).get_colorname_histogram()

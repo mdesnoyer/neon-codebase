@@ -47,6 +47,11 @@ def _get_features_impl(filename, predictor):
     _log.debug('Opening %s' % filename)
     image = cv2.imread(filename)
 
+    # TODO(mdesnoyer): Remove this. We are only grabbign the square at
+    # the top of the image for vertical ones for this epxeirment
+    #if image.shape[0] > image.shape[1]:
+    #    image = image[:image.shape[1],:,:]
+
     score, features, model = predictor.predict(image)
 
     name = filename

@@ -89,8 +89,9 @@ define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
 define("max_connection_retries", default=5, type=int, 
        help="maximum times we should try to connect to db")
-# this basically means how many open pubsubs we can have at once, most other pools will be relatively 
-# small, and not get to this size. see momoko pool for more info. 
+# this basically means how many open pubsubs we can have at once, most
+# other pools will be relatively small, and not get to this size. see
+# momoko pool for more info.
 define("max_pool_size", default=250, type=int, 
        help="maximum size the connection pools can be")
 define("max_io_loop_dict_size", default=500, type=int, 
@@ -125,10 +126,10 @@ statemon.define('postgres_successful_pubsub_callbacks', int)
 statemon.define('postgres_pools', int) 
 statemon.define('postgres_pool_full', int)
 
-class ThumbDownloadError(IOError):pass
-class VideoDownloadError(IOError):pass
-class DBStateError(ValueError):pass
-class DBConnectionError(IOError):pass
+class ThumbDownloadError(IOError): pass
+class VideoDownloadError(IOError): pass
+class DBStateError(ValueError): pass
+class DBConnectionError(IOError): pass
 
 def _get_db_information(): 
     '''Function that returns the address to the database for an object.
