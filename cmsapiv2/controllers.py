@@ -4204,7 +4204,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', ShareHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/upload/?$', AWSURLHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/upload_url/?$', AWSURLHandler),
     (r'/healthcheck/?$', HealthCheckHandler)
 ], gzip=True)
 

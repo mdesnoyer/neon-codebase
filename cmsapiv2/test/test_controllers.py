@@ -10151,7 +10151,7 @@ class TestAWSURLHandler(TestVerifiedControllersBase):
     def setUp(self):
         super(TestAWSURLHandler, self).setUp()
         self.url = self.get_url(
-            '/api/v2/%s/videos/upload/?' % self.account_id)
+            '/api/v2/%s/upload_url/?' % self.account_id)
 
     @tornado.testing.gen_test
     def test_with_filename(self):

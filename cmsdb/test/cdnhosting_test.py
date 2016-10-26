@@ -338,6 +338,23 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
                 yield cmsdb.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
 
+    def test_get_signed_url(self):
+        bucket = 'test_bucket'
+        key = 'test_key'
+        result = cmsdb.cdnhosting.AWSHosting.get_signed_url(bucket, key)
+        self.assertIn('url', result)
+        # Url should have https protocol and both inputs in it.
+        self.assertIn('https://', result['url'])
+        self.assertIn(bucket, result['url'])
+        self.assertIn(key, result['url'])
+        # Expires should be in the future but not too far.
+        self.assertIn('expires_at', result)
+        now = time.time()
+        an_hour = 3600
+        self.assertGreater(result['expires_at'], now)
+        self.assertGreater(now + an_hour, result['expires_at'])
+
+
 class TestCloudinaryHosting(test_utils.neontest.AsyncTestCase):
 
     def setUp(self):
