@@ -511,9 +511,9 @@ class AWSHosting(CDNHosting):
                     creds = aro['Credentials'] 
                     s3_res = boto3.resource(
                         's3',
-                        aws_access_key_id = credentials['AccessKeyId'],
-                        aws_secret_access_key = credentials['SecretAccessKey'],
-                        aws_session_token = credentials['SessionToken']
+                        aws_access_key_id = creds['AccessKeyId'],
+                        aws_secret_access_key = creds['SecretAccessKey'],
+                        aws_session_token = creds['SessionToken']
                     )
                     self.s3bucket = s3_res.Bucket(self.s3bucket_name)                      
                 else: 
@@ -568,7 +568,7 @@ class AWSHosting(CDNHosting):
         key_name = '/'.join(name_pieces)
 
         cdn_url = "%s/%s" % (cdn_prefix, key_name)
-
+        _log.error("BLAM TEST cdn_url %s" % cdn_url) 
         try:
             try:
                 key = s3bucket.get_key(key_name)
