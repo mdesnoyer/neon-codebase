@@ -502,12 +502,11 @@ class AWSHosting(CDNHosting):
                 if self.use_iam_role: 
                     sts_client = boto3.client('sts') 
                     executor = concurrent.futures.ThreadPoolExecutor(1) 
-                    aro = yield self.executor.submit(sts_client.assume_role, 
+                    aro = yield executor.submit(sts_client.assume_role, 
                         RoleArn="arn:aws:iam::%s:role/%s" % (
                           self.iam_role_account, 
                           self.iam_role_name),
-                        RoleSessionName="AssumeRoleNeonSession"
-                    )
+                        RoleSessionName="AssumeRoleNeonSession")
                     
                     creds = aro['Credentials'] 
                     _log.error("BLAM TEST creds %s" % creds) 
