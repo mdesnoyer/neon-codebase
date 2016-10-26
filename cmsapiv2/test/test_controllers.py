@@ -29,6 +29,7 @@ import utils.http
 import urllib
 import urlparse
 import test_utils.neontest
+import time
 import uuid
 import jwt
 from mock import patch, MagicMock
@@ -10144,7 +10145,33 @@ class TestBatchHandler(TestVerifiedControllersBase):
         self.assertEquals(
             res1['response']['error']['message'], 
             'Forbidden') 
+
+class TestAWSURLHandler(TestVerifiedControllersBase):
+    
+    def setUp(self):
+        super(TestAWSURLHandler, self).setUp()
+        self.url = self.get_url(
+            '/api/v2/%s/videos/upload/?' % self.account_id)
+
+    @tornado.testing.gen_test
+    def test_with_filename(self):
+        filename = 'AABBCC'
+        res = yield self.http_client.fetch(
+            self.url + 'filename=%s' % filename,
+            headers=self.headers)
+        self.assertEqual(res.code, 200)
+        rjson = json.loads(res.body)
+        self.assertIn(self.account_id, rjson['url'])
+        self.assertIn(filename, rjson['url'])
+        self.assertGreater(rjson['expires_at'], time.time())
+
+    @tornado.testing.gen_test
+    def test_missing_filename(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(self.url, headers=self.headers)
+        self.assertEqual(e.exception.code, 400)
             
+
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
     unittest.main(argv=(['%prog']+args))

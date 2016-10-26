@@ -814,7 +814,7 @@ class VideoProcessor(object):
             
 
     @tornado.gen.coroutine
-    def _set_job_timeout(self, time_buffer=120.0):
+    def _set_job_timeout(self, time_buffer=300.0):
         '''Set the job timeout so that this worker gets the job for this time.
 
         Inputs:

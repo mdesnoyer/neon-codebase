@@ -265,7 +265,7 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
         # Ignore the prefix itself that is returned by the list
         if prefix_exists:
             for key in bucket.list(prefix=tai_prefix):
-                match = re.search(".*avro", key.name)
+                match = re.search(".*avro.*", key.name)
                 if match:
                     input_files.append(match.group(0))
         else:

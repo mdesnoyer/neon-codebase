@@ -396,7 +396,7 @@ class Cluster():
         res = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = res.stepids[0].value
 
-        timeout_step = 80
+        timeout_step = 9000
         self.monitor_job_progress_emr(step_id, emrconn, timeout_step);
 
         ssh_conn = ClusterSSHConnection(self)
