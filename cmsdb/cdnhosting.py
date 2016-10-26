@@ -492,6 +492,7 @@ class AWSHosting(CDNHosting):
         self.use_iam_role = cdn_metadata.use_iam_role
         self.iam_role_account = cdn_metadata.iam_role_account
         self.iam_role_name = cdn_metadata.iam_role_name
+        self.iam_role_external_id = cdn_metadata.iam_role_external_id
         
 
     @tornado.gen.coroutine
@@ -506,7 +507,8 @@ class AWSHosting(CDNHosting):
                         RoleArn="arn:aws:iam::%s:role/%s" % (
                           self.iam_role_account, 
                           self.iam_role_name),
-                        RoleSessionName="AssumeRoleNeonSession")
+                        RoleSessionName="AssumeRoleNeonSession",
+                        ExternalId=self.iam_role_external_id)
                     
                     creds = aro['Credentials'] 
                     _log.error("BLAM TEST creds %s" % creds) 

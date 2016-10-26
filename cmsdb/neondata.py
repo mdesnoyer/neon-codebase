@@ -3897,7 +3897,8 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
                  video_rendition_formats=None, 
                  use_iam_role=False, 
                  iam_role_account=None,
-                 iam_role_name=None):
+                 iam_role_name=None,
+                 iam_role_external_id=None):
         '''
         Create the object
         '''
@@ -3930,6 +3931,9 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
 
         # role session name
         self.iam_role_name = iam_role_name
+
+        # role external id 
+        self.iam_role_external_id = iam_role_external_id 
 
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''
