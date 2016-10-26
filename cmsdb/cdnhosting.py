@@ -13,6 +13,7 @@ import base64
 import boto3
 import boto.exception
 import cmsdb.neondata
+import concurrent.futures
 import cv2
 import imageio
 import json
@@ -570,7 +571,6 @@ class AWSHosting(CDNHosting):
         key_name = '/'.join(name_pieces)
 
         cdn_url = "%s/%s" % (cdn_prefix, key_name)
-        _log.error("BLAM TEST cdn_url %s" % cdn_url) 
         try:
             try:
                 key = s3bucket.get_key(key_name)
@@ -618,6 +618,14 @@ class AWSHosting(CDNHosting):
             statemon.state.increment('s3_upload_error')
 
             raise IOError(str(e))
+
+        except Exception as e: 
+            _log.error_n(
+                'Unknown error when uploading file to s3://%s/%s : %s' %
+                    (self.s3bucket_name, key_name, e))
+            statemon.state.increment('s3_upload_error')
+
+            raise 
 
         raise tornado.gen.Return(cdn_url)
 
