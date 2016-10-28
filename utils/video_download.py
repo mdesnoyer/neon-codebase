@@ -21,6 +21,16 @@ import urlparse
 from utils.options import define, options
 import youtube_dl
 
+class FFmpegRotatorPP(youtube_dl.postprocessor.FFmpegPostProcessor):
+    def run(self, information):
+        path = information['filepath']
+        prefix, sep, ext = path.rpartition('.')
+        outpath = prefix + sep + '_out.mp4'
+        # ffmpeg without any option will auto-rotate.
+        self.run_ffmpeg(path, outpath, [])
+        information['filepath'] = outpath
+        return [path], information
+
 _log = logging.getLogger(__name__)
 
 define('max_bandwidth_per_core', default=15500000.0,
@@ -79,6 +89,9 @@ class VideoDownloader(object):
             'bestvideo')
         dl_params['logger'] = _log
         self.ydl = youtube_dl.YoutubeDL(dl_params)
+
+        # Set post processor to apply metadata rotation.
+        self._add_rotate_post_processor()
 
         self.executor = concurrent.futures.ThreadPoolExecutor(5)
 
@@ -218,3 +231,8 @@ class VideoDownloader(object):
             bucket = yield self.executor.submit(s3conn.get_bucket, bucket_name)
             self.s3key = yield self.executor.submit(bucket.get_key, key_name)
         raise tornado.gen.Return(self.s3key)
+
+    def _add_rotate_post_processor(self):
+        '''Add the post processor to apply/strip metadata rotation'''
+        rotate_processor = FFmpegRotatorPP(self.ydl)
+        self.ydl.add_post_processor(rotate_processor)
