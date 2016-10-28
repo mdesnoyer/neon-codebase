@@ -489,6 +489,7 @@ class AWSHosting(CDNHosting):
             self.folder_prefix = None
         self.do_salt = cdn_metadata.do_salt
         self.make_tid_folders = cdn_metadata.make_tid_folders
+        self.s3_res = None 
         self.use_iam_role = cdn_metadata.use_iam_role
         self.iam_role_account = cdn_metadata.iam_role_account
         self.iam_role_name = cdn_metadata.iam_role_name
@@ -512,13 +513,12 @@ class AWSHosting(CDNHosting):
                     
                     creds = aro['Credentials'] 
                     _log.error("BLAM TEST creds %s" % creds) 
-                    s3_res = boto3.resource(
+                    self.s3_res = boto3.resource(
                         's3',
                         aws_access_key_id = creds['AccessKeyId'],
                         aws_secret_access_key = creds['SecretAccessKey'],
-                        aws_session_token = creds['SessionToken']
-                    )
-                    self.s3bucket = s3_res.Bucket(self.s3bucket_name)                      
+                        aws_session_token = creds['SessionToken'])
+                    self.s3bucket = self.s3_res.Bucket(self.s3bucket_name)                      
                     _log.error("BLAM TEST bucket %s" % self.s3bucket) 
                 else: 
                     self.s3bucket = yield utils.botoutils.run_async(
