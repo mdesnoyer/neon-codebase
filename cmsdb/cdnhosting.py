@@ -682,6 +682,9 @@ class AWSHosting(CDNHosting):
             if obj['ContentLength'] and _file.len == obj['ContentLength']:
                 raise tornado.gen.Return(cdn_url)
 
+        if not self.policy: 
+            self.policy = '' 
+
         executor = concurrent.futures.ThreadPoolExecutor(1) 
         aro = yield executor.submit(self.s3bucket.put_object, 
             ACL=self.policy, 
