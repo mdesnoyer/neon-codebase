@@ -44,6 +44,9 @@ from cvutils import smartcrop
 import logging
 _log = logging.getLogger(__name__)
 
+logging.getLogger('boto3').setLevel(logging.CRITICAL)
+logging.getLogger('botocore').setLevel(logging.CRITICAL)
+
 from utils.options import define, options
 define('hosting_bucket', default='host-thumbnails',
        help='Bucket that will host images in S3')
