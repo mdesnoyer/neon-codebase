@@ -668,7 +668,9 @@ class AWSHosting(CDNHosting):
         except Exception as e: 
             obj = None 
             
-        if obj is not None and not overwrite:
+        if obj is None: 
+            pass 
+        elif not overwrite:
             # We're done because the object is already there
             raise tornado.gen.Return(cdn_url)
         else:
