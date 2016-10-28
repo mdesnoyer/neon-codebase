@@ -683,7 +683,7 @@ class AWSHosting(CDNHosting):
                 raise tornado.gen.Return(cdn_url)
 
         executor = concurrent.futures.ThreadPoolExecutor(1) 
-        aro = yield executor.submit(self.s3_res.put_object, 
+        aro = yield executor.submit(self.s3bucket.put_object, 
             ACL=self.policy, 
             Body=_file, 
             Key=key_name,
