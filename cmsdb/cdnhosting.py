@@ -478,11 +478,10 @@ class AWSHosting(CDNHosting):
                     cmsdb.neondata.PrimaryNeonHostingMetadata))
             if neon_bucket:
                 self.policy = 'public-read'
-        self.access_key = cdn_metadata.access_key
-        self.secret_key = cdn_metadata.secret_key
+        self.s3conn = S3Connection(cdn_metadata.access_key,
+                                   cdn_metadata.secret_key)
         self.s3bucket_name = cdn_metadata.bucket_name
         self.s3bucket = None
-        self.s3_res = None 
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
         if cdn_metadata.folder_prefix:
             self.folder_prefix = cdn_metadata.folder_prefix.strip('/')
@@ -494,6 +493,7 @@ class AWSHosting(CDNHosting):
         self.iam_role_account = cdn_metadata.iam_role_account
         self.iam_role_name = cdn_metadata.iam_role_name
         self.iam_role_external_id = cdn_metadata.iam_role_external_id
+        
 
     @tornado.gen.coroutine
     def _get_bucket(self):
@@ -511,22 +511,27 @@ class AWSHosting(CDNHosting):
                         ExternalId=self.iam_role_external_id)
                     
                     creds = aro['Credentials'] 
-                    self.s3_res = boto3.resource(
+                    _log.error("BLAM TEST creds %s" % creds) 
+                    s3_res = boto3.resource(
                         's3',
                         aws_access_key_id = creds['AccessKeyId'],
                         aws_secret_access_key = creds['SecretAccessKey'],
-                        aws_session_token = creds['SessionToken'])
+                        aws_session_token = creds['SessionToken']
+                    )
+                    self.s3bucket = s3_res.Bucket(self.s3bucket_name)                      
                     _log.error("BLAM TEST bucket %s" % self.s3bucket) 
                 else: 
-                    self.s3_res = boto3.resource(
-                        's3',
-                        aws_access_key_id = self.access_key,
-                        aws_secret_access_key = self.secret_key)
-
-                self.s3bucket = self.s3_res.Bucket(self.s3bucket_name)
+                    self.s3bucket = yield utils.botoutils.run_async(
+                        self.s3conn.get_bucket,
+                        self.s3bucket_name)
             except S3ResponseError as e:
-                raise
-
+                if e.status == 403:
+                    # It's a permissions error so just get the bucket
+                    # and don't validate it
+                    self.s3bucket = self.s3conn.get_bucket(
+                        self.s3bucket_name, validate=False)
+                else:
+                    raise
         raise tornado.gen.Return(self.s3bucket)
 
     @utils.sync.optional_sync
@@ -568,28 +573,16 @@ class AWSHosting(CDNHosting):
 
         cdn_url = "%s/%s" % (cdn_prefix, key_name)
         try:
-            '''
             try:
-                #key = s3bucket.get_key(key_name)
-                key = '123'
-                
+                key = s3bucket.get_key(key_name)
             except S3ResponseError as e:
                 if e.status == 403:
                     key = None
                 else:
                     raise
-            ''' 
-            try: 
-                obj = list(self.s3bucket.objects.filter(Prefix=self.s3bucket_name))[0]
-                #self.s3_res.head_object(
-                #    Bucket=self.s3bucket_name, 
-                #    Key=key_name)  
-            except Exception as e: 
-                obj = None 
-                
-            if obj is not None and not overwrite:
-                #key = s3bucket.new_key(key_name)
-            #elif not overwrite:
+            if key is None:
+                key = s3bucket.new_key(key_name)
+            elif not overwrite:
                 # We're done because the object is already there
                 raise tornado.gen.Return(cdn_url)
             else:
@@ -598,26 +591,19 @@ class AWSHosting(CDNHosting):
                 # it's probably the same image. Thank you lossy jpeg
                 # compression. I'd love to do an md5, but we don't get
                 # that from S3
-                if obj['ContentLength'] and _file.len == obj['ContentLength']:
+                if key.size and _file.len == key.size:
                     raise tornado.gen.Return(cdn_url)
 
             headers = {}
             if content_type:
                 headers['Content-Type'] = content_type
 
-            executor = concurrent.futures.ThreadPoolExecutor(1) 
-            aro = yield executor.submit(self.s3_res.put_object, 
-                ACL=self.policy, 
-                Body=_file, 
-                Key=key_name,
-                ContentType=content_type) 
-
-            #yield utils.botoutils.run_async(
-            #    key.set_contents_from_file,
-            #    _file,
-            #    headers,
-            #    policy=self.policy,
-            #    replace=overwrite)
+            yield utils.botoutils.run_async(
+                key.set_contents_from_file,
+                _file,
+                headers,
+                policy=self.policy,
+                replace=overwrite)
 
         except BotoServerError as e:
             _log.error_n(
