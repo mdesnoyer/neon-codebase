@@ -81,6 +81,7 @@ def main():
             result = get_features(image_file, text_classifier1,
                                   text_classifier2)
             success_count += 1
+            vecs.append(result)
             if success_count % 100 == 0:
                 _log.info('Processed %i successfully, %i failed' %
                         (success_count, fail_count))
