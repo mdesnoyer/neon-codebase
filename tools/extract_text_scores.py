@@ -53,7 +53,7 @@ def get_features(filename, text_classifier1, text_classifier2):
         name = re.sub(options.prefix, '', filename)
 
     return pd.Series(
-        {'text_frac': float(mask.sum().sum()) / (mask.shape[0]*mask.shape[1]),
+        {'text_frac': float((mask>0).sum()) / (mask.shape[0]*mask.shape[1]),
          'box_count': len(boxes)},
          name=name)
 
