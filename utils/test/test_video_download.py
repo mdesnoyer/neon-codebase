@@ -19,12 +19,21 @@ import utils.video_download as uvd
 
 class TestFFmpegRotatorPP(test_utils.neontest.AsyncTestCase):
 
+    def get_path(self, name):
+        path = subprocess.Popen(
+            ['/usr/bin/which', name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE).communicate()[0]
+        if path:
+            return path.rstrip().decode('utf-8')
+
     def test_removes_rotate_metadata(self):
         mov_path = '/utils/test/rotated.mov'
         in_file = u'' + __base_path__ + mov_path
         info = {'filepath': in_file}
         mock_ydl = MagicMock()
-        mock_ydl.params = {}
+        mock_ydl.params = {
+            'ffmpeg_location': self.get_path('ffmpeg')}
         processor = uvd.FFmpegRotatorPP(mock_ydl)
 
         try:
