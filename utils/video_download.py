@@ -22,17 +22,21 @@ import urlparse
 from utils.options import define, options
 import youtube_dl
 
+_log = logging.getLogger(__name__)
+
 class FFmpegRotatorPP(youtube_dl.postprocessor.FFmpegPostProcessor):
+
+    def __init__(self, ydl, output_path):
+        self.output_path = output_path
+	super(FFmpegRotatorPP, self).__init__(ydl)
+
     def run(self, information):
         path = information['filepath']
-        prefix, sep, ext = path.rpartition('.')
-        outpath = prefix + sep + '_out.mp4'
         # ffmpeg without any option will auto-rotate.
-        self.run_ffmpeg(path, outpath, [])
-        information['filepath'] = outpath
+        _log.warn(self.output_path)
+        self.run_ffmpeg(path, self.output_path, [])
+        information['filepath'] = self.output_path
         return [path], information
-
-_log = logging.getLogger(__name__)
 
 define('max_bandwidth_per_core', default=15500000.0,
        help='Max bandwidth in bytes/s')
@@ -45,12 +49,7 @@ class VideoDownloader(object):
 
     @staticmethod
     def get_ffmpeg_path():
-        path = subprocess.Popen(
-            ['/usr/bin/which', 'ffmpeg'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE).communicate()[0]
-        if path:
-            return path.rstrip().decode('utf-8')
+        return '/usr/local/bin/ffmpeg'
 
     def __init__(self, url, throttle=False):
         '''Intitalize the downloader for one download.
@@ -63,12 +62,9 @@ class VideoDownloader(object):
         
         self.video_info = {} # Dictionary of info in youtube_dl format
 
-        #get the video file extension
-        parsed = urlparse.urlparse(self.url)
-        vsuffix = os.path.splitext(parsed.path)[1]
         # Temporary file where the video is stored on disk
         self.tempfile = tempfile.NamedTemporaryFile(
-            suffix=vsuffix, delete=True, dir=options.temp_dir)
+            suffix='.mp4', delete=True, dir=options.temp_dir)
 
         # S3 Specific fields
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws'
@@ -76,17 +72,12 @@ class VideoDownloader(object):
         self.s3match = s3re.search(self.url)
         self.s3key = None
 
-
         # YouTube Dl object
-        def _handle_progress(state):
-            if state['status'] == 'finished':
-                shutil.move(state['filename'], self.tempfile.name)
         dl_params = {}
         dl_params['noplaylist'] = True
         dl_params['ratelimit'] = (options.max_bandwidth_per_core 
                                   if throttle else None)
         dl_params['restrictfilenames'] = True
-        dl_params['progress_hooks'] = [_handle_progress]
         dl_params['outtmpl'] = unicode(str(
             os.path.join(options.temp_dir or '/tmp',
                          '%(id)s.%(ext)s')))
@@ -246,5 +237,5 @@ class VideoDownloader(object):
 
     def _add_rotate_post_processor(self):
         '''Add the post processor to apply/strip metadata rotation'''
-        rotate_processor = FFmpegRotatorPP(self.ydl)
+        rotate_processor = FFmpegRotatorPP(self.ydl, self.tempfile.name)
         self.ydl.add_post_processor(rotate_processor)
