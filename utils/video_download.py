@@ -15,6 +15,7 @@ import logging
 import re
 import socket
 import shutil
+import subprocess
 import tempfile
 import tornado.gen
 import urlparse
@@ -41,6 +42,16 @@ define('temp_dir', default=None,
 class VideoDownloadError(IOError): pass
 
 class VideoDownloader(object):
+
+    @staticmethod
+    def get_ffmpeg_path():
+        path = subprocess.Popen(
+            ['/usr/bin/which', 'ffmpeg'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE).communicate()[0]
+        if path:
+            return path.rstrip().decode('utf-8')
+
     def __init__(self, url, throttle=False):
         '''Intitalize the downloader for one download.
 
@@ -88,6 +99,7 @@ class VideoDownloader(object):
             'best/'
             'bestvideo')
         dl_params['logger'] = _log
+        dl_params['ffmpeg_location'] = VideoDownloader.get_ffmpeg_path()
         self.ydl = youtube_dl.YoutubeDL(dl_params)
 
         # Set post processor to apply metadata rotation.
