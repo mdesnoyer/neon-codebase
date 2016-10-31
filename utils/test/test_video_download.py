@@ -24,8 +24,7 @@ class TestFFmpegRotatorPP(test_utils.neontest.AsyncTestCase):
         in_file = u'' + __base_path__ + mov_path
         info = {'filepath': in_file}
         mock_ydl = MagicMock()
-        mock_ydl.params = {
-            'ffmpeg_location': '/usr/bin/ffmpeg'}
+        mock_ydl.params = {}
         processor = uvd.FFmpegRotatorPP(mock_ydl)
 
         try:
