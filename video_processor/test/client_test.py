@@ -313,7 +313,6 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         args, _ = self.youtube_client_mock.call_args
         found_params = args[0]
         self.assertTrue(found_params['restrictfilenames'])
-        self.assertGreater(len(found_params['progress_hooks']), 0)
         # This test is to make sure you are deliberately changing the
         # format parameters
         self.assertEquals(found_params['format'],(
