@@ -511,7 +511,8 @@ class AWSHosting(CDNHosting):
                         RoleArn="arn:aws:iam::%s:role/%s" % (
                           self.iam_role_account, 
                           self.iam_role_name),
-                        RoleSessionName="AssumeRoleNeonSession",
+                        RoleSessionName="AssumeRoleNeonSession%d" % (
+                          random.randint(0,1342342)),
                         ExternalId=self.iam_role_external_id)
                     
                     creds = aro['Credentials'] 
