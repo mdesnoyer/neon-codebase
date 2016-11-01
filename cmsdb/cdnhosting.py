@@ -505,7 +505,7 @@ class AWSHosting(CDNHosting):
         if self.s3bucket is None:
             try:
                 if self.use_iam_role: 
-                    sts_client = boto3.client('sts') 
+                    sts_client = boto3.client('sts')
                     executor = concurrent.futures.ThreadPoolExecutor(1) 
                     aro = yield executor.submit(sts_client.assume_role, 
                         RoleArn="arn:aws:iam::%s:role/%s" % (
@@ -515,14 +515,12 @@ class AWSHosting(CDNHosting):
                         ExternalId=self.iam_role_external_id)
                     
                     creds = aro['Credentials'] 
-                    _log.error("BLAM TEST creds %s" % creds) 
                     self.s3_res = boto3.resource(
                         's3',
                         aws_access_key_id = creds['AccessKeyId'],
                         aws_secret_access_key = creds['SecretAccessKey'],
                         aws_session_token = creds['SessionToken'])
                     self.s3bucket = self.s3_res.Bucket(self.s3bucket_name)                      
-                    _log.error("BLAM TEST bucket %s" % self.s3bucket) 
                 else: 
                     self.s3bucket = yield utils.botoutils.run_async(
                         self.s3conn.get_bucket,
