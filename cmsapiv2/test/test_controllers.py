@@ -4610,6 +4610,35 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(start_thumb_ct + 2, len(video.thumbnail_ids))
 
     @tornado.testing.gen_test
+    def test_add_new_thumbnail_with_fields_with_video(self):
+
+        start_thumb_ct = len(self.video.thumbnail_ids)
+        s = '/api/v2/%s/thumbnails?video_id=%s&url=%s&fields=features' % (
+          self.account_id_api_key,
+          self.video_id,
+          'blah.jpg')
+        url = self.get_url(s) 
+        response = yield self.http_client.fetch(url, body='', method='POST')
+
+        self.assertEqual(response.code, 202)
+        jrv = json.loads(response.body)
+        self.assertTrue(jrv['thumbnails'][0]['features'] > 0)
+ 
+    @tornado.testing.gen_test
+    def test_add_new_thumbnail_with_fields_without_video(self):
+
+        start_thumb_ct = len(self.video.thumbnail_ids)
+        s = '/api/v2/%s/thumbnails?url=%s&fields=features' % (
+          self.account_id_api_key,
+          'blah.jpg')
+        url = self.get_url(s)
+        response = yield self.http_client.fetch(url, body='', method='POST')
+
+        self.assertEqual(response.code, 202)
+        jrv = json.loads(response.body)
+        self.assertTrue(jrv['thumbnails'][0]['features'] > 0) 
+
+    @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
         url = self.get_url('/api/v2/%s/thumbnails?thumbnail_id=%s&fields=%s' % (
             self.account_id_api_key,
