@@ -34,7 +34,12 @@ class FFmpegRotatorPP(youtube_dl.postprocessor.FFmpegPostProcessor):
         path = information['filepath']
         # ffmpeg without any option will auto-rotate.
         _log.warn(self.output_path)
-        self.run_ffmpeg(path, self.output_path, [])
+        try:
+            self.run_ffmpeg(path, self.output_path, [])
+        except Exception as e:
+            _log.warn('Failed in video autorotate %s' % e)
+            shutil.move(path, self.output_path)
+
         information['filepath'] = self.output_path
         return [path], information
 
