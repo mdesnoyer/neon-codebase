@@ -9,6 +9,7 @@ if sys.path[0] != __base_path__:
 
 from api import akamai_api
 import boto.exception
+import boto3
 from cStringIO import StringIO
 import cmsdb.cdnhosting
 from cmsdb import neondata
@@ -17,7 +18,7 @@ from cvutils.imageutils import PILImageUtils
 from cvutils import smartcrop
 import json
 import logging
-from mock import MagicMock, patch
+from mock import MagicMock, patch, ANY
 import numpy as np
 import PIL
 import random
@@ -337,6 +338,39 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(IOError):
                 yield cmsdb.cdnhosting.create_s3_redirect('dest.jpg', 'src.jpg',
                                                         async=True)
+
+    @patch('cmsdb.cdnhosting.boto3.client')
+    @patch('cmsdb.cdnhosting.boto3.resource') 
+    @tornado.testing.gen_test
+    def test_host_single_image_iam_role(self, assr_mocker, res_mocker):
+        assr_mocker.return_value.assume_role.side_effect = [{ 'Credentials' : { 
+            'AccessKeyId' : '123', 
+            'SecretAccessKey' : '12421', 
+            'SessionToken' : '342adsf'
+        }}] 
+        metadata = neondata.S3CDNHostingMetadata(None,
+            'access_key', 'secret_key',
+            'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+            'folder1', False, False, False, 
+            use_iam_role=True, 
+            iam_role_account='12345/adsf', 
+            iam_role_name='Neonaa', 
+            iam_role_external_id='12324234')
+
+        res_mocker.return_value.Bucket.return_value = MagicMock() 
+
+        hoster = cmsdb.cdnhosting.CDNHosting.create(metadata)
+        yield hoster.upload(self.image, 'acct1_vid1_tid1', async=True)
+
+        hoster.s3bucket.put_object.assert_called_with(
+            Body=ANY, 
+            ContentType='image/jpeg', 
+            Key='folder1/neontnacct1_vid1_tid1_w640_h480.jpg', 
+            ACL='') 
+
+        # Make sure that the serving urls weren't added
+        self.assertEquals(self.datamock.ThumbnailServingURLs.modify.call_count,
+                          0)
 
 class TestCloudinaryHosting(test_utils.neontest.AsyncTestCase):
 
