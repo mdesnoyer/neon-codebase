@@ -82,7 +82,7 @@ def main():
     success_count = 0
     fail_count = 0
     vecs = []
-    with concurrent.futures.ThreadPoolExecutor(options.n_workers) as executor:
+    with concurrent.futures.ProcessPoolExecutor(options.n_workers) as executor:
         for fut in concurrent.futures.as_completed(
                 [executor.submit(get_features, image_file, detector)
                  for image_file in image_file_iterator()]):
