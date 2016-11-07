@@ -23,6 +23,7 @@ import dlib
 import logging
 import hashlib
 import pandas as pd
+import skimage.io
 import re
 import utils.neon
 from utils.options import options, define
@@ -41,10 +42,8 @@ define('n_workers', default=4,
 
 def _get_features_impl(filename, detector):
     _log.debug('Opening %s' % filename)
-    image = cv2.imread(filename)
-
-    rgb_image = image[:,:,::-1]
-    dets, scores, idx = detector.run(rgb_image, 1)
+    image = skimage.io.imread(filename)
+    dets, scores, idx = detector.run(image, 1)
 
     name = filename
     if options.prefix:
