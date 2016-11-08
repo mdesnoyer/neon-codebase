@@ -84,7 +84,7 @@ def _get_features_impl(filename):
         'text_count': len(text_boxes)
         }, name=name)
 
-def get_features(filename, detector):
+def get_features(filename):
     cache_file = 'faces_%s.pkl' % hashlib.md5(filename).hexdigest()
     if options.cache_dir is not None:
         full_cache_fn = os.path.join(options.cache_dir, cache_file)
@@ -92,7 +92,7 @@ def get_features(filename, detector):
             data = pd.read_pickle(full_cache_fn)
             return data
 
-    data = _get_features_impl(filename, detector)
+    data = _get_features_impl(filename)
 
     if options.cache_dir is not None:
         full_cache_fn = os.path.join(options.cache_dir, cache_file)
