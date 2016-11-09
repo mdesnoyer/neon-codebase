@@ -153,6 +153,10 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             u'title': 'my_video',
             u'url': 'http://www.video.com/my_video.mp4'}
 
+        self.rotate_pp_mock = patch(
+            'utils.video_download.VideoDownloader._add_rotate_post_processor')
+        self.rotate_pp_mock.start()
+
         # Mock the video queue
         self.job_queue_patcher = patch(
             'video_processor.video_processing_queue.' \
@@ -203,6 +207,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
     def tearDown(self):
         self.job_queue_patcher.stop()
+        self.rotate_pp_mock.stop()
         self.aquila_conn_patcher.stop()
         self.youtube_patcher.stop()
         self.utils_patch.stop()
@@ -308,7 +313,6 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         args, _ = self.youtube_client_mock.call_args
         found_params = args[0]
         self.assertTrue(found_params['restrictfilenames'])
-        self.assertGreater(len(found_params['progress_hooks']), 0)
         # This test is to make sure you are deliberately changing the
         # format parameters
         self.assertEquals(found_params['format'],(
