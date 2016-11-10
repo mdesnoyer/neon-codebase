@@ -15,6 +15,7 @@ import logging
 import re
 import socket
 import shutil
+import subprocess
 import tempfile
 import tornado.gen
 import urlparse
@@ -22,6 +23,25 @@ from utils.options import define, options
 import youtube_dl
 
 _log = logging.getLogger(__name__)
+
+class FFmpegRotatorPP(youtube_dl.postprocessor.FFmpegPostProcessor):
+
+    def __init__(self, ydl, output_path):
+        self.output_path = output_path
+	super(FFmpegRotatorPP, self).__init__(ydl)
+
+    def run(self, information):
+        path = information['filepath']
+        # ffmpeg without any option will auto-rotate.
+        _log.warn(self.output_path)
+        try:
+            self.run_ffmpeg(path, self.output_path, [])
+        except Exception as e:
+            _log.warn('Failed in video autorotate %s' % e)
+            shutil.move(path, self.output_path)
+
+        information['filepath'] = self.output_path
+        return [path], information
 
 define('max_bandwidth_per_core', default=15500000.0,
        help='Max bandwidth in bytes/s')
@@ -31,6 +51,11 @@ define('temp_dir', default=None,
 class VideoDownloadError(IOError): pass
 
 class VideoDownloader(object):
+
+    @staticmethod
+    def get_ffmpeg_path():
+        return '/usr/local/bin/ffmpeg'
+
     def __init__(self, url, throttle=False):
         '''Intitalize the downloader for one download.
 
@@ -42,12 +67,9 @@ class VideoDownloader(object):
         
         self.video_info = {} # Dictionary of info in youtube_dl format
 
-        #get the video file extension
-        parsed = urlparse.urlparse(self.url)
-        vsuffix = os.path.splitext(parsed.path)[1]
         # Temporary file where the video is stored on disk
         self.tempfile = tempfile.NamedTemporaryFile(
-            suffix=vsuffix, delete=True, dir=options.temp_dir)
+            suffix='.mp4', delete=True, dir=options.temp_dir)
 
         # S3 Specific fields
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws'
@@ -55,17 +77,12 @@ class VideoDownloader(object):
         self.s3match = s3re.search(self.url)
         self.s3key = None
 
-
         # YouTube Dl object
-        def _handle_progress(state):
-            if state['status'] == 'finished':
-                shutil.move(state['filename'], self.tempfile.name)
         dl_params = {}
         dl_params['noplaylist'] = True
         dl_params['ratelimit'] = (options.max_bandwidth_per_core 
                                   if throttle else None)
         dl_params['restrictfilenames'] = True
-        dl_params['progress_hooks'] = [_handle_progress]
         dl_params['outtmpl'] = unicode(str(
             os.path.join(options.temp_dir or '/tmp',
                          '%(id)s.%(ext)s')))
@@ -78,7 +95,11 @@ class VideoDownloader(object):
             'best/'
             'bestvideo')
         dl_params['logger'] = _log
+        dl_params['ffmpeg_location'] = VideoDownloader.get_ffmpeg_path()
         self.ydl = youtube_dl.YoutubeDL(dl_params)
+
+        # Set post processor to apply metadata rotation.
+        self._add_rotate_post_processor()
 
         self.executor = concurrent.futures.ThreadPoolExecutor(5)
 
@@ -218,3 +239,8 @@ class VideoDownloader(object):
             bucket = yield self.executor.submit(s3conn.get_bucket, bucket_name)
             self.s3key = yield self.executor.submit(bucket.get_key, key_name)
         raise tornado.gen.Return(self.s3key)
+
+    def _add_rotate_post_processor(self):
+        '''Add the post processor to apply/strip metadata rotation'''
+        rotate_processor = FFmpegRotatorPP(self.ydl, self.tempfile.name)
+        self.ydl.add_post_processor(rotate_processor)

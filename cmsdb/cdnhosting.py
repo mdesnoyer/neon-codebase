@@ -10,8 +10,10 @@ if sys.path[0] != __base_path__:
 
 import api.akamai_api
 import base64
+import boto3
 import boto.exception
 import cmsdb.neondata
+import concurrent.futures
 import cv2
 import imageio
 import json
@@ -41,6 +43,9 @@ from cvutils import smartcrop
 
 import logging
 _log = logging.getLogger(__name__)
+
+logging.getLogger('boto3').setLevel(logging.CRITICAL)
+logging.getLogger('botocore').setLevel(logging.CRITICAL)
 
 from utils.options import define, options
 define('hosting_bucket', default='host-thumbnails',
@@ -495,15 +500,40 @@ class AWSHosting(CDNHosting):
             self.folder_prefix = None
         self.do_salt = cdn_metadata.do_salt
         self.make_tid_folders = cdn_metadata.make_tid_folders
+        self.s3_res = None 
+        self.use_iam_role = cdn_metadata.use_iam_role
+        self.iam_role_account = cdn_metadata.iam_role_account
+        self.iam_role_name = cdn_metadata.iam_role_name
+        self.iam_role_external_id = cdn_metadata.iam_role_external_id
+        
 
     @tornado.gen.coroutine
     def _get_bucket(self):
         '''Connects to the bucket if it's not already done'''
         if self.s3bucket is None:
             try:
-                self.s3bucket = yield utils.botoutils.run_async(
-                    self.s3conn.get_bucket,
-                    self.s3bucket_name)
+                if self.use_iam_role: 
+                    sts_client = boto3.client('sts')
+                    executor = concurrent.futures.ThreadPoolExecutor(1) 
+                    aro = yield executor.submit(sts_client.assume_role, 
+                        RoleArn="arn:aws:iam::%s:role/%s" % (
+                          self.iam_role_account, 
+                          self.iam_role_name),
+                        RoleSessionName="AssumeRoleNeonSession%d" % (
+                          random.randint(0,1342342)),
+                        ExternalId=self.iam_role_external_id)
+                    
+                    creds = aro['Credentials'] 
+                    self.s3_res = boto3.resource(
+                        's3',
+                        aws_access_key_id = creds['AccessKeyId'],
+                        aws_secret_access_key = creds['SecretAccessKey'],
+                        aws_session_token = creds['SessionToken'])
+                    self.s3bucket = self.s3_res.Bucket(self.s3bucket_name)                      
+                else: 
+                    self.s3bucket = yield utils.botoutils.run_async(
+                        self.s3conn.get_bucket,
+                        self.s3bucket_name)
             except S3ResponseError as e:
                 if e.status == 403:
                     # It's a permissions error so just get the bucket
@@ -554,37 +584,26 @@ class AWSHosting(CDNHosting):
         cdn_url = "%s/%s" % (cdn_prefix, key_name)
 
         try:
-            try:
-                key = s3bucket.get_key(key_name)
-            except S3ResponseError as e:
-                if e.status == 403:
-                    key = None
-                else:
-                    raise
-            if key is None:
-                key = s3bucket.new_key(key_name)
-            elif not overwrite:
-                # We're done because the object is already there
-                raise tornado.gen.Return(cdn_url)
-            else:
-                # We are overwriting, but check the size to see if it
-                # matches. If it does, don't bother uploading because
-                # it's probably the same image. Thank you lossy jpeg
-                # compression. I'd love to do an md5, but we don't get
-                # that from S3
-                if key.size and _file.len == key.size:
-                    raise tornado.gen.Return(cdn_url)
-
-            headers = {}
-            if content_type:
-                headers['Content-Type'] = content_type
-
-            yield utils.botoutils.run_async(
-                key.set_contents_from_file,
-                _file,
-                headers,
-                policy=self.policy,
-                replace=overwrite)
+            # TODO refactor this down to all use boto3 
+            # at the moment this involves rewriting a ton 
+            # of unit tests, it's not worth the extra 
+            # code churn 
+            if self.use_iam_role: 
+                yield self._upload_using_boto3(
+                    key_name, 
+                    cdn_url, 
+                    _file, 
+                    overwrite, 
+                    content_type,
+                    async=True)
+            else: 
+                yield self._upload_using_boto2(
+                    key_name, 
+                    cdn_url, 
+                    _file, 
+                    overwrite, 
+                    content_type,
+                    async=True)
 
         except BotoServerError as e:
             _log.error_n(
@@ -601,7 +620,87 @@ class AWSHosting(CDNHosting):
 
             raise IOError(str(e))
 
+        except Exception as e: 
+            _log.error_n(
+                'Unknown error when uploading file to s3://%s/%s : %s' %
+                    (self.s3bucket_name, key_name, e))
+            statemon.state.increment('s3_upload_error')
+
+            raise 
+
         raise tornado.gen.Return(cdn_url)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _upload_using_boto2(self, 
+      key_name, cdn_url, _file, 
+      overwrite=True, content_type=None):
+        try:
+            key = self.s3bucket.get_key(key_name)
+        except S3ResponseError as e:
+            if e.status == 403:
+                key = None
+            else:
+                raise
+        if key is None:
+            key = self.s3bucket.new_key(key_name)
+        elif not overwrite:
+            # We're done because the object is already there
+            raise tornado.gen.Return(cdn_url)
+        else:
+            # We are overwriting, but check the size to see if it
+            # matches. If it does, don't bother uploading because
+            # it's probably the same image. Thank you lossy jpeg
+            # compression. I'd love to do an md5, but we don't get
+            # that from S3
+            if key.size and _file.len == key.size:
+                raise tornado.gen.Return(cdn_url)
+
+        headers = {}
+        if content_type:
+            headers['Content-Type'] = content_type
+
+        yield utils.botoutils.run_async(
+            key.set_contents_from_file,
+            _file,
+            headers,
+            policy=self.policy,
+            replace=overwrite)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _upload_using_boto3(self, 
+      key_name, cdn_url, _file, 
+      overwrite=True, content_type=None):
+        try: 
+            obj = list(self.s3bucket.objects.filter(
+                Prefix=self.s3bucket_name))[0]
+        except Exception as e: 
+            obj = None 
+            
+        if obj is None: 
+            pass 
+        elif not overwrite:
+            # We're done because the object is already there
+            raise tornado.gen.Return(cdn_url)
+        else:
+            # We are overwriting, but check the size to see if it
+            # matches. If it does, don't bother uploading because
+            # it's probably the same image. Thank you lossy jpeg
+            # compression. I'd love to do an md5, but we don't get
+            # that from S3
+            if obj['ContentLength'] and _file.len == obj['ContentLength']:
+                raise tornado.gen.Return(cdn_url)
+
+        if not self.policy: 
+            self.policy = '' 
+
+        executor = concurrent.futures.ThreadPoolExecutor(1) 
+        aro = yield executor.submit(self.s3bucket.put_object, 
+            ACL=self.policy, 
+            Body=_file, 
+            Key=key_name,
+            ContentType=content_type)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

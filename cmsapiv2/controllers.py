@@ -1411,15 +1411,26 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
             Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
             # Video id associates this image as thumbnail of a video.
             'video_id' : All(Coerce(str), Length(min=1, max=256)),
-            'url': All(CustomVoluptuousTypes.CommaSeparatedList(), Coerce(str), Length(min=1)),
+            'url': All(CustomVoluptuousTypes.CommaSeparatedList(), 
+              Coerce(str), 
+              Length(min=1)),
             # Tag id associates the image with collection(s).
-            'tag_id': All(CustomVoluptuousTypes.CommaSeparatedList(), Coerce(str), Length(min=1)),
+            'tag_id': All(CustomVoluptuousTypes.CommaSeparatedList(), 
+              Coerce(str), 
+              Length(min=1)),
             # This is a partner's id for the image.
-            'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
+            'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024)),
+            # fields wanted to be returned on this POST call, 
+            # here for features (which is huge) 
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         self.args = self.parse_args()
         self.args['account_id'] = account_id
         schema(self.args)
+
+        fields = self.args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
 
         # Ensure tags are valid and permitted.
         tag_ids = self.args.get('tag_id', '').split(',')
@@ -1434,12 +1445,12 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
 
         # Switch on whether a video is tied to this submission.
         if self.args.get('video_id'):
-            yield self._post_with_video()
+            yield self._post_with_video(fields)
             return
-        yield self._post_without_video()
+        yield self._post_without_video(fields)
 
     @tornado.gen.coroutine
-    def _post_with_video(self):
+    def _post_with_video(self, fields=None):
         """Set image and thumbnail data object with video association.
 
         Confirm video exists, then add the thumbnail to the video's
@@ -1466,16 +1477,16 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
         yield self._set_thumbs(rank)
 
         statemon.state.increment('post_thumbnail_oks')
-        yield self._respond_with_thumbs()
+        yield self._respond_with_thumbs(fields)
 
     @tornado.gen.coroutine
-    def _post_without_video(self):
+    def _post_without_video(self, fields=None):
         """Set images to CDN. Set the thumb data to database.
 
         Returns- the new thumbnail."""
         yield self._set_thumbs()
         statemon.state.increment('post_thumbnail_oks')
-        yield self._respond_with_thumbs()
+        yield self._respond_with_thumbs(fields)
 
     @tornado.gen.coroutine
     def _set_thumbs(self, rank=None):
@@ -1582,9 +1593,9 @@ class ThumbnailHandler(ThumbnailAuth, TagAuth, ShareableContentHandler):
             yield t.score_image(self.predictor, cv_image, True)
 
     @tornado.gen.coroutine
-    def _respond_with_thumbs(self):
+    def _respond_with_thumbs(self, fields=None):
         """Success. Reload the thumbnail and return it."""
-        rv = yield [self.db2api(t) for t in self.thumbs]
+        rv = yield [self.db2api(t, fields=fields) for t in self.thumbs]
         self.success({'thumbnails': rv}, code=ResponseCode.HTTP_ACCEPTED)
 
     @tornado.gen.coroutine

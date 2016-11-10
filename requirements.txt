@@ -55,3 +55,4 @@ xlwt==1.0.0
 youtube_dl>=2016.07.13
 # scikit-learn must follow scipy
 scikit-learn==0.17.1
+boto3==1.4.1
