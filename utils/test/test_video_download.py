@@ -36,11 +36,11 @@ class TestFFmpegRotatorPP(test_utils.neontest.AsyncTestCase):
         mock_ydl = MagicMock()
         mock_ydl.params = {
             'ffmpeg_location': TestFFmpegRotatorPP.get_ffmpeg_path()}
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as out_file:
+        with tempfile.NamedTemporaryFile(suffix='.mp4') as out_file:
 
             processor = uvd.FFmpegRotatorPP(mock_ydl, out_file.name)
             paths, info = processor.run(info)
-        
+
             # Assert output video's rotation metadata is removed.
             output = subprocess.check_output([
                     'ffprobe',
@@ -50,6 +50,10 @@ class TestFFmpegRotatorPP(test_utils.neontest.AsyncTestCase):
                     info['filepath']],
                 stderr=subprocess.STDOUT)
             self.assertEqual(-1, output.find('rotation'))
+
+        # Put the mov back.
+        if os.path.exists(out_file.name):
+            shutil.move(out_file.name, in_file)
 
 if __name__ == '__main__':
     unittest.main()
