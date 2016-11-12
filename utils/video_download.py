@@ -26,6 +26,10 @@ _log = logging.getLogger(__name__)
 
 class FFmpegRotatorPP(youtube_dl.postprocessor.FFmpegPostProcessor):
 
+    @staticmethod
+    def get_ffprobe_path():
+        return '/usr/local/bin/ffprobe'
+
     def __init__(self, ydl, output_path):
         self.output_path = output_path
 	super(FFmpegRotatorPP, self).__init__(ydl)
@@ -33,12 +37,21 @@ class FFmpegRotatorPP(youtube_dl.postprocessor.FFmpegPostProcessor):
     def run(self, information):
         path = information['filepath']
         # ffmpeg without any option will auto-rotate.
-        _log.warn(self.output_path)
-        try:
-            self.run_ffmpeg(path, self.output_path, [])
-        except Exception as e:
-            _log.warn('Failed in video autorotate %s' % e)
+
+        proc = subprocess.Popen(
+            [FFmpegRotatorPP.get_ffprobe_path(), path],
+            stderr=subprocess.PIPE)
+        _, probe = proc.communicate()
+
+        if probe and 'rotate' in probe.lower():
+            try:
+                self.run_ffmpeg(path, self.output_path, [])
+            except Exception as e:
+                _log.warn('Failed in video autorotate %s' % e)
+                shutil.move(path, self.output_path)
+        else:
             shutil.move(path, self.output_path)
+
 
         information['filepath'] = self.output_path
         return [path], information
