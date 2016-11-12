@@ -48,7 +48,8 @@ class FFmpegRotatorPP(youtube_dl.postprocessor.FFmpegPostProcessor):
                 self.run_ffmpeg(path, self.output_path, [])
             except Exception as e:
                 _log.warn('Failed in video autorotate %s' % e)
-                shutil.move(path, self.output_path)
+                if os.path.exists(path):
+                    shutil.move(path, self.output_path)
         else:
             shutil.move(path, self.output_path)
 
