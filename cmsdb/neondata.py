@@ -676,11 +676,6 @@ class VideoRenditionContainerType(object):
     MP4 = 'mp4'
     GIF = 'gif'
 
-class TagType(object):
-    '''All valid Tag types'''
-    VIDEO = 'video'
-    COLLECTION = 'col'
-
 class ExperimentState:
     '''A class that acts like an enum for the state of the experiment.'''
     UNKNOWN = 'unknown'
