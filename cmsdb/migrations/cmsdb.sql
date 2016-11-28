@@ -114,7 +114,7 @@ CREATE TABLE cdnhostingmetadatalist (
 ALTER TABLE cdnhostingmetadatalist OWNER TO pgadmin;
 
 --
--- Name: clipmetadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
+-- Name: clip; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace:
 --
 
 CREATE TABLE clip (
