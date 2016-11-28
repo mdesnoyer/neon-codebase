@@ -688,14 +688,6 @@ class VideoProcessor(object):
             # flow if there's an error
             pass
 
-        try:
-            if new_request:
-                yield new_request.send_callback(async=True)
-        except Exception as e:
-            # Logging already done and we do not want this to stop the
-            # flow if there's an error
-            pass
-
         # Send the notifications
         yield self.send_notification_email(api_request, self.video_metadata)
 

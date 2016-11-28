@@ -2879,7 +2879,6 @@ class TestFinalizeClipResponse(TestFinalizeResponse):
         self.assertItemsEqual(tag_clip_ids,
                               [x.get_id() for x in clips])
 
-
 class SmokeTest(test_utils.neontest.AsyncTestCase):
     '''Smoke test for the video processing client'''
     def setUp(self):
