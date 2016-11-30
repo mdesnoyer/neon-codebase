@@ -107,7 +107,7 @@ define("hash_size", default=64, type=int,
 # Other parameters
 define('send_callbacks', default=1, help='If 1, callbacks are sent')
 
-define('isp_host', default='isp-usw-388475351.us-west-2.elb.amazonaws.com',
+define('isp_host', default='isp-103281060.us-east-1.elb.amazonaws.com',
        help=('Host address to get to the ISP that is checked for if images '
              'are there'))
 
