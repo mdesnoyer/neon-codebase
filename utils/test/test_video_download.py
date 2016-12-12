@@ -30,30 +30,38 @@ class TestFFmpegRotatorPP(test_utils.neontest.AsyncTestCase):
             return path.rstrip().decode('utf-8')
 
     def test_removes_rotate_metadata(self):
+
         mov_path = '/utils/test/rotated.mov'
-        in_file = (__base_path__ + mov_path).decode('utf-8')
-        info = {'filepath': in_file}
-        mock_ydl = MagicMock()
-        mock_ydl.params = {
-            'ffmpeg_location': TestFFmpegRotatorPP.get_ffmpeg_path()}
-        with tempfile.NamedTemporaryFile(suffix='.mp4') as out_file:
+        orig_file = (__base_path__ + mov_path).decode('utf-8')
 
-            processor = uvd.FFmpegRotatorPP(mock_ydl, out_file.name)
-            paths, info = processor.run(info)
+        # Create a copy that to be altered in test, then removed.
+        with tempfile.NamedTemporaryFile(delete=False) as in_file:
 
-            # Assert output video's rotation metadata is removed.
-            output = subprocess.check_output([
-                    'ffprobe',
-                    '-v',
-                    'quiet',
-                    '-show_streams',
-                    info['filepath']],
-                stderr=subprocess.STDOUT)
-            self.assertEqual(-1, output.find('rotation'))
+            try:
+                shutil.copy(orig_path, in_file.name)
+                info = {'filepath': in_file.name}
+                mock_ydl = MagicMock()
+                mock_ydl.params = {
+                    'ffmpeg_location': TestFFmpegRotatorPP.get_ffmpeg_path()}
+                with tempfile.NamedTemporaryFile(suffix='.mp4') as out_file:
 
-        # Put the mov back.
-        if os.path.exists(out_file.name):
-            shutil.move(out_file.name, in_file)
+                    processor = uvd.FFmpegRotatorPP(mock_ydl, out_file.name)
+                    paths, info = processor.run(info)
+
+                    # Assert output video's rotation metadata is removed.
+                    output = subprocess.check_output([
+                            'ffprobe',
+                            '-v',
+                            'quiet',
+                            '-show_streams',
+                            info['filepath']],
+                        stderr=subprocess.STDOUT)
+                    self.assertEqual(-1, output.find('rotation'))
+            finally:
+                # Manually clean the input temp file if something went wrong.
+                if os.path.exists(in_file.name):
+                    os.unlink(in_file.name)
+
 
 if __name__ == '__main__':
     unittest.main()
