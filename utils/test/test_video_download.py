@@ -9,6 +9,7 @@ if sys.path[0] != __base_path__:
 
 from mock import MagicMock
 import logging
+import shutil
 import subprocess
 import tempfile
 import test_utils.neontest
@@ -32,14 +33,14 @@ class TestFFmpegRotatorPP(test_utils.neontest.AsyncTestCase):
     def test_removes_rotate_metadata(self):
 
         mov_path = '/utils/test/rotated.mov'
-        orig_path = (__base_path__ + mov_path).decode('utf-8')
+        orig_path = __base_path__ + mov_path
 
         # Create a copy that to be altered in test, then removed.
         with tempfile.NamedTemporaryFile(delete=False) as in_file:
 
             try:
                 shutil.copy(orig_path, in_file.name)
-                info = {'filepath': in_file.name}
+                info = {'filepath': in_file.name.decode('utf-8')}
                 mock_ydl = MagicMock()
                 mock_ydl.params = {
                     'ffmpeg_location': TestFFmpegRotatorPP.get_ffmpeg_path()}
