@@ -66,6 +66,9 @@ statemon.define('akamai_upload_error', int)
 statemon.define('invalid_cdn_url', int)
 statemon.define('video_upload_error', int)
 
+# Prevent imageio from installing its own ffmpeg binary; use system's.
+os.environ['IMAGEIO_NO_INTERNET'] = '1'
+
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
     return options.hosting_bucket
