@@ -38,6 +38,7 @@ import utils.botoutils
 from cvutils.imageutils import PILImageUtils
 from utils import pycvutils
 from utils import statemon
+from utils.neon import set_env
 import utils.sync
 from cvutils import smartcrop
 
@@ -65,9 +66,6 @@ statemon.define('s3_upload_error', int)
 statemon.define('akamai_upload_error', int)
 statemon.define('invalid_cdn_url', int)
 statemon.define('video_upload_error', int)
-
-# Prevent imageio from installing its own ffmpeg binary; use system's.
-os.environ['IMAGEIO_NO_INTERNET'] = '1'
 
 def get_s3_hosting_bucket():
     '''Returns the bucket that hosts the images.'''
@@ -321,7 +319,8 @@ class CDNHosting(object):
 
             # Get a writer with a named temporary file with the
             # right file extension.
-            with tempfile.NamedTemporaryFile(suffix=('.%s' % ext)) as target:
+            with tempfile.NamedTemporaryFile(suffix=('.%s' % ext)) as target, \
+                 set_env(IMAGEIO_NO_INTERNET='1'):
                 try:
                     with imageio.get_writer(target.name,
                                             **imageio_params) as writer:
