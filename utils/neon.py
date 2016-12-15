@@ -8,6 +8,7 @@ Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2013 Neon Labs
 '''
 
+import contextlib
 import logging
 import os
 import rpdb2
@@ -77,4 +78,20 @@ def EnableRunningDebugging():
                       'neon',
                       fAllowRemote = True))
 
+@contextlib.contextmanager
+def set_env(**environ):
+    '''
+    Temporarily set the process environment variables.
 
+    >>> with set_env(PLUGINS_DIR=u'test/plugins'):
+
+    :type environ: dict[str, unicode]
+    :param environ: Environment variables to set
+    '''
+    old_environ = dict(os.environ)
+    os.environ.update(environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_environ)
