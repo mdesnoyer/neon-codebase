@@ -955,6 +955,52 @@ class TestOAuth(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.auth_mock.call_count, 1)
         self.assertEquals(self.api._token, self.expect_token)
 
+class TestIngestAPILive(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        if not options.run_tests_on_test_account:
+            raise unittest.SkipTest('Should only be run manually because it '
+                                    'hits Brightcove')
+        
+        super(TestIngestAPILive, self).setUp()
+
+        self.publisher_id = '2294876105001'
+        self.client_id = '8b089370-ce31-4ecf-9c14-7ffc6ff492b9'
+        self.client_secret = 'zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg'
+        self.test_video_id = '4049585935001'
+        self.test_thumb_url = 'https://s3.amazonaws.com/neon-test/mikey.jpg'
+        self.thumb_size = (638, 480) 
+
+        self.cmsapi = api.brightcove_api.CMSAPI(self.publisher_id,
+                                                self.client_id,
+                                                self.client_secret)
+        self.ingestapi = api.brightcove_api.IngestAPI(self.publisher_id,
+                                                      self.client_id,
+                                                      self.client_secret)
+        
+
+    def tearDown(self):
+        super(TestIngestAPILive, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_ingest_thumb(self):
+        video_images = yield self.cmsapi.get_video_images(self.test_video_id)
+
+        #self.assertIn('thumbnail', video_images)
+        #yield self.cmsapi.delete_thumbnail(
+        #    self.test_video_id,
+        #    video_images['thumbnail']['asset_id'])
+
+        tresponse = yield self.ingestapi.ingest_image(
+            self.test_video_id,
+            thumb_url=self.test_thumb_url,
+            thumb_size=self.thumb_size)
+
+        self.assertIsNotNone(tresponse)
+
+        video_images = yield self.api.get_video_images(self.test_video_id)
+        self.assertIn('thumbnail', video_images)
+        
+        
 
 if __name__ == '__main__':
     args = utils.neon.InitNeon()
