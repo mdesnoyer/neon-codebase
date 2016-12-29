@@ -985,10 +985,10 @@ class TestIngestAPILive(test_utils.neontest.AsyncTestCase):
     def test_ingest_thumb(self):
         video_images = yield self.cmsapi.get_video_images(self.test_video_id)
 
-        #self.assertIn('thumbnail', video_images)
-        #yield self.cmsapi.delete_thumbnail(
-        #    self.test_video_id,
-        #    video_images['thumbnail']['asset_id'])
+        self.assertIn('thumbnail', video_images)
+        yield self.cmsapi.delete_thumbnail(
+            self.test_video_id,
+            video_images['thumbnail']['asset_id'])
 
         tresponse = yield self.ingestapi.ingest_image(
             self.test_video_id,
@@ -997,8 +997,37 @@ class TestIngestAPILive(test_utils.neontest.AsyncTestCase):
 
         self.assertIsNotNone(tresponse)
 
-        video_images = yield self.api.get_video_images(self.test_video_id)
-        self.assertIn('thumbnail', video_images)
+        @tornado.gen.coroutine
+        def thumb_avail():
+            video_images = yield self.cmsapi.get_video_images(
+                self.test_video_id)
+            raise tornado.gen.Return('thumbnail' in video_images and not
+                                     video_images['thumbnail']['remote'])
+        self.assertWaitForEquals(thumb_avail, True)
+
+    @tornado.testing.gen_test
+    def test_ingest_poster(self):
+        video_images = yield self.cmsapi.get_video_images(self.test_video_id)
+
+        self.assertIn('poster', video_images)
+        yield self.cmsapi.delete_thumbnail(
+            self.test_video_id,
+            video_images['poster']['asset_id'])
+
+        tresponse = yield self.ingestapi.ingest_image(
+            self.test_video_id,
+            poster_url=self.test_thumb_url,
+            poster_size=self.thumb_size)
+
+        self.assertIsNotNone(tresponse)
+
+        @tornado.gen.coroutine
+        def poster_avail():
+            video_images = yield self.cmsapi.get_video_images(
+                self.test_video_id)
+            raise tornado.gen.Return('poster' in video_images and not
+                                     video_images['poster']['remote'])
+        self.assertWaitForEquals(poster_avail, True)
         
         
 
