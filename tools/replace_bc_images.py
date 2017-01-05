@@ -64,7 +64,7 @@ def replace_one_image(ingestapi, cmsapi, bc_vid,
 
     if cur_image.get('width') == width and cur_image.get('height') == height:
         # Already did this image
-        continue
+        return
 
     try:
         src_url = thumb_urls.get_serving_url(width, height)
