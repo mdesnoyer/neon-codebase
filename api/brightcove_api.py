@@ -783,8 +783,9 @@ class BrightcoveOAuth2Session(object):
                 # Treat all 401 responses as token expiration.
                 # Try resetting the request token and re-sending
                 self._token = None
-                yield self._send_request(
+                response = yield self._send_request(
                     request, cur_try=cur_try + 1, **send_kwargs)
+                raise tornado.gen.Return(response)
             # Abort and raise authorization error
             else:
                 raise BrightcoveApiNotAuthorizedError(*error)
@@ -1212,24 +1213,24 @@ class IngestAPI(BrightcoveOAuth2Session):
         self.publisher_id = publisher_id
 
     @tornado.gen.coroutine
-    def ingest_image(self, video_id, thumb_url=None, thumb_size=None,
+    def ingest_image(self, video_id, thumbnail_url=None, thumbnail_size=None,
                      poster_url=None, poster_size=None):
         '''Upload images for a given video.
 
         Inputs:
         video_id - The Brightcove video id
-        thumb_url - URL of the thumbnail image
-        thumb_size - (w,h) of the thumbnail image
+        thumbnail_url - URL of the thumbnail image
+        thumbnail_size - (w,h) of the thumbnail image
         poster_url - URL of the poster image
         poster_size - (w,h) of the poster image
         '''
         request_data = {'capture-images' : False}
-        if thumb_url is not None:
-            thumb_data = {'url' : thumb_url}
-            if thumb_size is not None:
-                thumb_data['width'] = thumb_size[0]
-                thumb_data['height'] = thumb_size[1]
-            request_data['thumbnail'] = thumb_data
+        if thumbnail_url is not None:
+            thumbnail_data = {'url' : thumbnail_url}
+            if thumbnail_size is not None:
+                thumbnail_data['width'] = thumbnail_size[0]
+                thumbnail_data['height'] = thumbnail_size[1]
+            request_data['thumbnail'] = thumbnail_data
         if poster_url is not None:
             poster_data = {'url' : poster_url}
             if poster_size is not None:
