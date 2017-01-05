@@ -50,9 +50,13 @@ def replace_one_image(ingestapi, cmsapi, bc_vid,
                       image_info, image_type, thumb_meta,
                       thumb_urls):
     cur_image = image_info.get(image_type, {})
-    if not is_neon_url(cur_image):
-        return
-    width, height = yield find_image_size(cur_image)
+    #if not is_neon_url(cur_image):
+    #    return
+    #width, height = yield find_image_size(cur_image)
+    if image_type == 'poster':
+        width, height = (960,540)
+    elif image_type == 'thumbnail':
+        width, height = (640, 360)
     if width is None or height is None:
         _log.warn('Could not determine size for video %s from url %s' %
                   (thumb_meta.video_id, cur_image.get('src')))
@@ -220,9 +224,9 @@ def main():
                           video.key)
                 continue
             raise
-        if not (is_neon_url(image_info.get('thumbnail')) or 
-                is_neon_url(image_info.get('poster'))):
-            continue
+        #if not (is_neon_url(image_info.get('thumbnail')) or 
+        #        is_neon_url(image_info.get('poster'))):
+        #    continue
 
         tmeta, turls = yield choose_replacement_thumb(video)
 
