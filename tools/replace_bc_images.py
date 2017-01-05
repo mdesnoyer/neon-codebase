@@ -237,12 +237,12 @@ def main():
 
         _log.info('Replacing the images for video %s' % bc_vid)
 
-        yield replace_one_image(ingestapi, cmsapi, bc_vid,
-                                image_info, 'thumbnail',
-                                tmeta, turls)
-        yield replace_one_image(ingestapi, cmsapi, bc_vid, 
-                                image_info, 'poster',
-                                tmeta, turls)
+        yield [replace_one_image(ingestapi, cmsapi, bc_vid,
+                                 image_info, 'thumbnail',
+                                 tmeta, turls),
+               replace_one_image(ingestapi, cmsapi, bc_vid, 
+                                 image_info, 'poster',
+                                 tmeta, turls)]
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
