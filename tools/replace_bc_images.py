@@ -54,13 +54,17 @@ def replace_one_image(ingestapi, cmsapi, bc_vid,
     #    return
     #width, height = yield find_image_size(cur_image)
     if image_type == 'poster':
-        width, height = (960,540)
+        width, height = (1280,720)
     elif image_type == 'thumbnail':
         width, height = (640, 360)
     if width is None or height is None:
         _log.warn('Could not determine size for video %s from url %s' %
                   (thumb_meta.video_id, cur_image.get('src')))
         return
+
+    if cur_image.get('width') == width and cur_image.get('height') == height:
+        # Already did this image
+        continue
 
     try:
         src_url = thumb_urls.get_serving_url(width, height)
