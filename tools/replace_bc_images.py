@@ -111,7 +111,7 @@ def choose_replacement_thumb(video):
 
     best_thumb = None
     if best_tid is not None:
-        best_thumb = yield ThumbnailMetadata.get(best_tid, async=True)
+        best_thumb = yield neondata.ThumbnailMetadata.get(best_tid, async=True)
     else:
         # Take the highest ranked thumbnail
         thumbs = yield neondata.ThumbnailMetadata.get_many(video.thumbnail_ids,
