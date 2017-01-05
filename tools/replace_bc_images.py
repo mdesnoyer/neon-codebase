@@ -62,8 +62,8 @@ def replace_one_image(ingestapi, cmsapi, bc_vid,
                   (thumb_meta.video_id, cur_image.get('src')))
         return
 
-    if (cur_image.get('sources',{}).get('width') == width and 
-        cur_image.get('sources',{}).get('height') == height):
+    if (cur_image.get('sources',[{}])[0].get('width') == width and 
+        cur_image.get('sources',[{}])[0].get('height') == height):
         # Already did this image
         return
 
