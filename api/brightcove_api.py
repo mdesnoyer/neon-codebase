@@ -783,8 +783,9 @@ class BrightcoveOAuth2Session(object):
                 # Treat all 401 responses as token expiration.
                 # Try resetting the request token and re-sending
                 self._token = None
-                yield self._send_request(
+                response = yield self._send_request(
                     request, cur_try=cur_try + 1, **send_kwargs)
+                raise tornado.gen.Return(response)
             # Abort and raise authorization error
             else:
                 raise BrightcoveApiNotAuthorizedError(*error)
@@ -1189,4 +1190,65 @@ class PlayerAPI(BrightcoveOAuth2Session):
             pub_id=self.publisher_id,
             player_ref=player_ref))
         response = yield self._send_request(request)
+        raise tornado.gen.Return(response)
+
+class IngestAPI(BrightcoveOAuth2Session):
+    '''Wrapper for the Brightcove Dynamic Ingest API.
+
+    See http://docs.brightcove.com/en/video-cloud/di-api/reference/versions/v1/index.html
+
+    All return values are the JSON from the API.
+    '''
+    BASE_URL = 'https://ingest.api.brightcove.com/v1'
+
+    def __init__(self, publisher_id, client_id, client_secret):
+        '''Build the API wrapper.
+
+        Inputs:
+        publisher_id - The Brightcove publisher id
+        client_id - The client id to use
+        client_secret - The client secret to use
+        '''
+        super(IngestAPI, self).__init__(client_id, client_secret)
+        self.publisher_id = publisher_id
+
+    @tornado.gen.coroutine
+    def ingest_image(self, video_id, thumbnail_url=None, thumbnail_size=None,
+                     poster_url=None, poster_size=None):
+        '''Upload images for a given video.
+
+        Inputs:
+        video_id - The Brightcove video id
+        thumbnail_url - URL of the thumbnail image
+        thumbnail_size - (w,h) of the thumbnail image
+        poster_url - URL of the poster image
+        poster_size - (w,h) of the poster image
+        '''
+        request_data = {'capture-images' : False}
+        if thumbnail_url is not None:
+            thumbnail_data = {'url' : thumbnail_url}
+            if thumbnail_size is not None:
+                thumbnail_data['width'] = thumbnail_size[0]
+                thumbnail_data['height'] = thumbnail_size[1]
+            request_data['thumbnail'] = thumbnail_data
+        if poster_url is not None:
+            poster_data = {'url' : poster_url}
+            if poster_size is not None:
+                poster_data['width'] = poster_size[0]
+                poster_data['height'] = poster_size[1]
+            request_data['poster'] = poster_data
+            
+        
+        request = tornado.httpclient.HTTPRequest(
+            ('{base_url}/accounts/{pub_id}/videos/{video_id}/'
+             'ingest-requests').format(
+                 base_url=IngestAPI.BASE_URL,
+                 pub_id=self.publisher_id,
+                 video_id=video_id),
+            method='POST',
+            headers={'Content-Type' : 'application/json'},
+            body=json.dumps(request_data))
+
+        response = yield self._send_request(request)
+
         raise tornado.gen.Return(response)

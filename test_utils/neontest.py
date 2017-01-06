@@ -115,7 +115,7 @@ class TestCase(unittest.TestCase):
         found = None
         while (time.time() - start_time) < timeout:
             try:
-                found = func()
+                found = yield tornado.gen.maybe_future(func())
                 if found == expected:
                     return
             except Exception as e:
