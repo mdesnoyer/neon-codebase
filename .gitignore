@@ -88,3 +88,6 @@ airflow/logs/*
 *.swo
 *.swn
 *.swp
+
+#### OSX folder info ###
+.DS_Store
